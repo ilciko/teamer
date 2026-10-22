@@ -1,0 +1,33 @@
+[project]
+name = "teamer"
+version = "0.29.1"
+description = "Tool di gestione team: organigramma, retribuzione, valutazioni, obiettivi"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "itsdangerous>=2.2",
+    "openpyxl>=3.1",
+    "sqlcipher3-binary>=0.5.4; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sqlcipher3>=0.5.4; sys_platform == 'darwin' or (sys_platform == 'linux' and platform_machine != 'x86_64')",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

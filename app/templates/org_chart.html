@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Linee di riporto{% if focus_names %} - {{ focus_names | join(', ') }}{% endif %} - {{ today() }}{% endblock %}
+{% block content_class %} wide{% endblock %}
+
+{% import "_oc_macros.html" as oc with context %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Linee di riporto</h1>
+    <div class="muted small">{{ focus_names | join(', ') if focus else 'Tutti i reparti' }} · al {{ today() | dt }}</div>
+  </div>
+  <div class="spacer"></div>
+  <form method="get" action="/org/chart" class="no-print">
+    {% if not show_pos %}<input type="hidden" name="pos" value="0">{% endif %}
+    <details class="ms">
+      <summary class="btn ghost sm">{% if focus %}Reparti ({{ focus | length }}){% else %}Tutti i reparti{% endif %} ▾</summary>
+      <div class="ms-panel">
+        {% for t in team_opts %}
+        <label style="padding-left: {{ 8 + t.depth * 14 }}px"><input type="checkbox" name="team_id" value="{{ t.id }}" {{ 'checked' if t.id in focus }}> {{ t.name }}</label>
+        {% endfor %}
+        <div class="actions"><a class="btn ghost sm" href="/org/chart{{ '' if show_pos else '?pos=0' }}">Tutti</a><button class="btn sm">Applica</button></div>
+      </div>
+    </details>
+  </form>
+  <a class="btn ghost sm no-print" href="{{ toggle_pos_url }}">{{ 'Nascondi posizioni aperte' if show_pos else 'Mostra posizioni aperte' }}</a>
+  <button class="btn ghost sm no-print" type="button" data-fit-toggle>Zoom 100%</button>
+  <button class="btn sm no-print" type="button" onclick="window.print()">Esporta PDF</button>
+  <a class="btn ghost sm no-print" href="/org/sim">Simulazioni</a>
+  <a class="btn ghost sm no-print" href="/org/riporti?next=/org/chart">Verifica riporti</a>
+  <a class="btn ghost sm no-print" href="/org">← Organigramma</a>
+</div>
+
+{% if chart.warnings %}
+<p class="ctx-note no-print">Riporto da sistemare (<a href="/org/riporti?next=/org/chart">verifica riporti</a>):
+  {% for w in chart.warnings %}<a href="/people/{{ w.person.id }}">{{ w.person.full_name }}</a> <span class="muted">({{ problem_label[w.problem] }})</span>{{ ', ' if not loop.last }}{% endfor %}.</p>
+{% endif %}
+
+<div class="oc-legend">
+  {% for r in roles %}<span class="badge {{ role_badge.get(r.code, '') }}">{{ r.label }}</span>{% endfor %}
+  {% if show_pos %}<span class="oc-mini pos oc-legend-pos"><span class="av">+</span><span class="tx"><span class="nm">Posizione aperta</span></span></span>{% endif %}
+  <span class="muted3 small no-print">una riga per ruolo · il riporto si calcola da team e ruolo{% if focus %} · in chiaro i responsabili fuori reparto{% endif %}</span>
+</div>
+
+<div class="card oc-wrap" data-print data-fit>
+  {% if chart.roots %}
+  <div class="oc"><ul>{% for r in chart.roots %}{{ oc.item(r) }}{% endfor %}</ul></div>
+  {% else %}
+  <p class="muted">Nessuna persona attiva.</p>
+  {% endif %}
+</div>
+<script src="/static/js/oc-print.js?v={{ asset_v() }}" defer></script>
+<script src="/static/js/oc-fit.js?v={{ asset_v() }}" defer></script>
+{% endblock %}

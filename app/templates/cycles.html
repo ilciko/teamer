@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Cicli di valutazione{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Cicli &amp; obiettivi</h1></div>
+
+<div class="card">
+  <table class="tbl">
+    <thead><tr><th>Ciclo</th><th>Anno</th><th>Stato</th><th class="num">Con obiettivi</th><th class="num">Review avviate</th><th class="num">Finalizzate</th><th></th></tr></thead>
+    {% for c in cycles %}
+    <tr>
+      <td><strong>{{ c.name }}</strong></td>
+      <td>{{ c.year }}</td>
+      <td><span class="badge {{ 'green' if c.status == 'aperto' else '' }}">{{ c.status }}</span></td>
+      <td class="num">{{ c.with_goals }}</td>
+      <td class="num">{{ c.started }}</td>
+      <td class="num">{{ c.done }}</td>
+      <td><a class="btn sm ghost" href="/cycles/{{ c.id }}">Apri</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="muted">
+      Nessun ciclo. Il ciclo è la review annuale: al suo interno si <strong>valutano</strong> gli obiettivi
+      definiti nel ciclo precedente e si <strong>definiscono</strong> quelli dell'anno successivo.
+    </td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card" style="max-width:520px">
+  <div class="card-title">Nuovo ciclo</div>
+  <form method="post" action="/cycles">
+    <div class="frow">
+      <div><label class="fld">Nome</label><input type="text" name="name" placeholder="Review 2026" required></div>
+      <div><label class="fld">Anno</label><input type="number" name="year" value="{{ today()[:4] }}" required></div>
+    </div>
+    <div class="actions"><button class="btn">Crea →</button></div>
+  </form>
+</div>
+{% endblock %}

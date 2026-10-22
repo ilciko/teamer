@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Sostituzione · {{ p.full_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Pianifica la sostituzione</h1>
+</div>
+
+<div class="card" style="max-width:720px">
+  <div class="ctx-note" style="margin-top:0">
+    <strong>{{ p.full_name }}</strong> risulta cessato il {{ p.end_date | dt }}
+    {%- if assignment %} · {{ assignment.team_name }} · {{ lookup_label('role_type', assignment.role_type) }}{% endif %}
+    {%- if ral %} · RAL {{ ral | eur }}{% endif %}.
+    Qui puoi mettere subito la sostituzione nel piano assunzioni — nulla viene creato senza conferma.
+  </div>
+
+  <form method="post" action="/people/{{ p.id }}/replacement">
+    <label class="fld">Titolo posizione</label>
+    <input type="text" name="title" value="{{ title_suggestion }}" required>
+    <div class="frow">
+      <div><label class="fld">Team</label>
+        <select name="team_id">
+          <option value="">—</option>
+          {% for t in teams %}
+          <option value="{{ t.id }}" {{ 'selected' if assignment and t.id == assignment.team_id }}>{{ t.name }}</option>
+          {% endfor %}
+        </select></div>
+      <div><label class="fld">Ruolo</label>
+        <select name="role_type">
+          {% for l in lookups('role_type') %}
+          <option value="{{ l.code }}" {{ 'selected' if assignment and l.code == assignment.role_type }}>{{ l.label }}</option>
+          {% endfor %}
+        </select></div>
+    </div>
+    <div class="frow">
+      <div><label class="fld">RAL prevista €</label>
+        <input type="number" name="expected_ral" value="{{ ral or '' }}" step="0.01" required></div>
+      <div><label class="fld">Inizio previsto</label>
+        <input type="date" name="expected_start" value="{{ expected_start }}" required></div>
+    </div>
+
+    <label class="fld">Budget assunzioni di destinazione</label>
+    <select name="budget_id">
+      <option value="">— crea/usa automaticamente il budget dell'anno di inizio —</option>
+      {% for b in budgets %}
+      <option value="{{ b.id }}">{{ b.period }} ({{ b.year }}) — tetto {{ b.total_cap | eur }}</option>
+      {% endfor %}
+    </select>
+    <p class="muted3 small" style="margin-top:4px">
+      Con l'opzione automatica: se il budget dell'anno della data di inizio non esiste
+      (es. sostituzione che cade l'anno prossimo), viene creato come "Assunzioni {anno}".
+    </p>
+
+    <label style="display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13px">
+      <input type="checkbox" name="add_ral_to_cap" value="1" {{ 'checked' if ral }} {{ 'disabled' if not ral }}>
+      Aggiungi la RAL liberata ({{ ral | eur }}) al tetto del budget di destinazione
+    </label>
+
+    <label class="fld">Nota</label>
+    <input type="text" name="note" value="sostituzione di {{ p.full_name }}">
+
+    <div class="actions">
+      <button class="btn green">Crea posizione →</button>
+      <a class="btn ghost" href="/people/{{ p.id }}">Non sostituire</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,20 @@
+<div class="card fade-in">
+  <div class="card-title">Esito import</div>
+  <div class="grid3" style="margin-bottom:10px">
+    <div class="stat"><div class="v pos">{{ r.created | length }}</div><div class="k">Create</div></div>
+    <div class="stat"><div class="v">{{ r.skipped | length }}</div><div class="k">Già presenti</div></div>
+    <div class="stat"><div class="v {{ 'neg' if r.errors }}">{{ r.errors | length }}</div><div class="k">Errori</div></div>
+  </div>
+  {% if r.created %}
+  <div class="small" style="margin-bottom:8px"><strong>Create:</strong> {{ r.created | join(', ') }}</div>
+  {% endif %}
+  {% if r.skipped %}
+  <div class="small muted" style="margin-bottom:8px"><strong>Saltate (nome già presente):</strong> {{ r.skipped | join(', ') }}</div>
+  {% endif %}
+  {% for row, msg in r.errors %}
+  <div class="flash error">{% if row %}Riga {{ row }}: {% endif %}{{ msg }}</div>
+  {% endfor %}
+  {% if r.created %}
+  <div class="actions"><a class="btn sm" href="/people">Vai alle persone →</a></div>
+  {% endif %}
+</div>

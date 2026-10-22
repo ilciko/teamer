@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Report HR{% endblock %}
+{% block content %}
+<div class="page-head no-print">
+  <h1>Report per HR</h1>
+  <div class="spacer"></div>
+  <form method="get" action="/comp/plan/report" class="frow" style="align-items:center">
+    <input type="hidden" name="budget_id" value="{{ budget_id or '' }}">
+    <select name="status" onchange="this.form.submit()">
+      <option value="proposta" {{ 'selected' if status == 'proposta' }}>Solo inviate a HR</option>
+      <option value="approvata" {{ 'selected' if status == 'approvata' }}>Solo approvate</option>
+      <option value="tutte" {{ 'selected' if status == 'tutte' }}>Tutte le pendenti</option>
+    </select>
+    <button class="btn sm ghost" type="button" onclick="window.print()">🖨 Stampa / PDF</button>
+    <a class="btn sm" href="/comp/plan/report.xlsx?budget_id={{ budget_id or '' }}&status={{ status }}">↓ Excel</a>
+    <a class="btn sm ghost" href="/comp/plan{{ '?budget_id=' ~ budget_id if budget_id }}">← Piano</a>
+  </form>
+</div>
+
+<div class="card print-clean">
+  <h2 class="serif" style="font-size:1.3rem;margin-bottom:2px">
+    Proposte di aumento{% if budget %} — {{ budget.period }}{% endif %}
+  </h2>
+  <p class="muted small" style="margin-bottom:14px">
+    Generato il {{ today.strftime('%d/%m/%Y') }}
+    {% if status == 'proposta' %} · proposte inviate a HR, in attesa di conferma
+    {% elif status == 'approvata' %} · proposte approvate{% else %} · tutte le proposte pendenti{% endif %}
+  </p>
+
+  <table class="tbl">
+    <thead><tr>
+      <th>Dipendente</th><th>Team</th><th>Livello</th>
+      <th class="num">RAL attuale</th><th class="num">Aumento</th><th class="num">%</th>
+      <th class="num">Nuova RAL</th><th>Decorrenza</th><th>Nota</th>
+    </tr></thead>
+    {% for r in rows %}
+    <tr>
+      <td><strong>{{ r.full_name }}</strong></td>
+      <td>{{ r.team_name or '—' }}</td>
+      <td>
+        {{ lookup_label('livello', r.livello) if r.livello else '—' }}
+        {%- if r.new_livello %} → <strong>{{ lookup_label('livello', r.new_livello) }}</strong>{% endif %}
+      </td>
+      <td class="num">{{ r.ral | eur }}</td>
+      <td class="num"><strong>+{{ r.amount | eur }}</strong></td>
+      <td class="num">{{ '%.2f' | format(r.pct) }}%</td>
+      <td class="num">{{ r.new_ral | eur }}</td>
+      <td>{{ r.effective_date | dt }}</td>
+      <td class="muted small">{{ r.note or '' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="9" class="muted">Nessuna proposta in questo stato.</td></tr>
+    {% endfor %}
+    {% if rows %}
+    <tr>
+      <td colspan="4"><strong>Totale ({{ rows | length }} proposte)</strong></td>
+      <td class="num"><strong>+{{ total | eur }}</strong></td>
+      <td colspan="4"></td>
+    </tr>
+    {% endif %}
+  </table>
+
+  {% if summary %}
+  <p class="muted small" style="margin-top:12px">
+    Budget {{ budget.period }}: tetto {{ budget.total_cap | eur }} ·
+    già applicato {{ summary.applicato | eur }} ·
+    impegnato {{ summary.impegnato | eur }} ·
+    residuo {{ summary.residuo | eur }}
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

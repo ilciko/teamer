@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Note 1:1{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Note 1:1</h1>
+  <div class="spacer"></div>
+  <form method="get" action="/notes" class="frow" style="min-width:380px;align-items:center">
+    <input type="text" name="q" value="{{ q }}" placeholder="Cerca nelle note (full-text)…">
+    <select name="person_id" onchange="this.form.submit()">
+      <option value="">Tutte le persone</option>
+      {% for pp in people %}<option value="{{ pp.id }}" {{ 'selected' if person_id == pp.id }}>{{ pp.full_name }}</option>{% endfor %}
+    </select>
+    <label class="small" style="flex:0 0 auto;white-space:nowrap;cursor:pointer">
+      <input type="checkbox" name="archived" value="1" {{ 'checked' if archived }} onchange="this.form.submit()"> Mostra archiviate
+    </label>
+    <button class="btn sm" style="flex:0 0 auto">Cerca</button>
+    <a class="btn sm ghost" target="_blank" style="flex:0 0 auto;white-space:nowrap"
+       href="/notes/report?person_id={{ person_id or '' }}{{ '&archived=1' if archived }}">
+      🖨 {{ 'Report di ' ~ person_name if person_name else 'Report globale' }}</a>
+  </form>
+</div>
+
+{% if fts_error %}<div class="flash error">{{ fts_error }}</div>{% endif %}
+
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">{{ 'Risultati' if q else 'Ultime note' }} ({{ notes|length }})</div>
+    {# Form vuoto e statico: le caselle delle righe vi puntano con form="note-sel".
+       Così nessun form si annida col frammento di modifica e i bottoni non
+       stanno dentro righe che htmx rigenera (trappola nota, vedi CLAUDE.md). #}
+    {% if notes %}
+    <form id="note-sel" method="post" action="/notes/archivia"
+          style="display:flex;gap:8px;align-items:center;padding-bottom:6px;border-bottom:0.5px solid var(--border)">
+      <input type="hidden" name="f_q" value="{{ q }}">
+      <input type="hidden" name="f_person_id" value="{{ person_id or '' }}">
+      <input type="hidden" name="f_archived" value="{{ archived }}">
+      <label class="small muted" style="cursor:pointer">
+        <input type="checkbox" id="note-sel-all"> Seleziona tutte</label>
+      <div style="flex:1"></div>
+      <button class="btn sm ghost">Archivia selezionate</button>
+      {% if archived %}<button class="btn sm ghost" formaction="/notes/ripristina">Ripristina selezionate</button>{% endif %}
+    </form>
+    {% endif %}
+    {% for n in notes %}
+    {% with f_q = q, f_person_id = person_id, f_archived = archived %}{% include "_note_row.html" %}{% endwith %}
+    {% else %}<p class="muted small">Nessuna nota{{ ' per questa ricerca' if q }}.</p>{% endfor %}
+  </div>
+
+  <div class="card" style="align-self:start">
+    <div class="card-title">Nuova nota</div>
+    <form method="post" action="/notes">
+      <div class="frow">
+        <div><label class="fld">Persona</label>
+          <select name="person_id" required>
+            {% for pp in people %}<option value="{{ pp.id }}" {{ 'selected' if person_id == pp.id }}>{{ pp.full_name }}</option>{% endfor %}
+          </select></div>
+        <div><label class="fld">Data</label><input type="date" name="note_date" value="{{ today() }}" required></div>
+        <div><label class="fld">Tipo</label>
+          <select name="type">{% for l in lookups('meeting_type') %}<option value="{{ l.code }}">{{ l.label }}</option>{% endfor %}</select></div>
+      </div>
+      <label class="fld">Titolo</label><input type="text" name="title">
+      <label class="fld">Testo</label><textarea name="body" style="min-height:120px"></textarea>
+      <details style="margin-top:8px">
+        <summary class="muted small" style="cursor:pointer">+ azione collegata</summary>
+        <div class="frow">
+          <div><label class="fld">Impegno</label><input type="text" name="action_desc"></div>
+          <div><label class="fld">Scadenza</label><input type="date" name="action_due"></div>
+        </div>
+      </details>
+      <div class="actions"><button class="btn">Salva nota →</button></div>
+    </form>
+  </div>
+</div>
+<script>
+document.getElementById('note-sel-all')?.addEventListener('change', e => {
+  document.querySelectorAll('input[name="ids"][form="note-sel"]')
+    .forEach(c => { c.checked = e.target.checked; });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,71 @@
+{# Macro del grafico linee di riporto, usate da /org/chart, dalle simulazioni e dal confronto.
+   Si importano "with context": servono role_label, role_badge, initials, problem_label.
+   `mk` (facoltativo) = {person_id: "team" | "role" | "manager"} per evidenziare le differenze;
+   si passa a item() e scende nell'albero, così due grafici nella stessa pagina hanno i loro. #}
+
+{% macro mark(e, mk) %}{% set k = (mk or {}).get(e.id) %}{{ ' mk-' ~ k if k }}{% endmacro %}
+
+{% macro card(e, mk=None) %}
+<a class="oc-node{{ ' ctx' if e.ctx }}{{ ' bad' if e.problem }}{{ mark(e, mk) }}" data-role="{{ e.role or '' }}" href="/people/{{ e.id }}"
+   {% if e.problem %}title="{{ problem_label[e.problem] }}"{% endif %}>
+  <span class="av">{{ initials(e.name) }}</span>
+  <span class="nm">{{ e.name }}</span>
+  <span class="badge {{ role_badge.get(e.role, '') }}">{{ role_label.get(e.role, '—') }}</span>
+</a>
+{% endmacro %}
+
+{% macro mini(e, mk=None) %}
+{% if e.kind == 'pos' %}
+{% if e.pos.hypothetical and e.pos.internal %}
+{# figura interna migrata: è una persona che cambia team #}
+<span class="oc-mini internal mk-team" data-role="{{ e.role or '' }}" title="{{ e.name }}: figura interna da un altro team (ipotesi)">
+  <span class="av">{{ initials(e.name) }}</span>
+  <span class="tx"><span class="nm">{{ e.name }}</span><span class="muted3">{{ role_label.get(e.role, '—') }} · interna</span></span>
+</span>
+{% elif e.pos.hypothetical %}
+{# assunzione ipotetica: come una posizione in budget, senza evidenziazioni #}
+<span class="oc-mini pos" data-role="{{ e.role or '' }}" title="Posizione ipotetica da assumere (solo in simulazione)">
+  <span class="av">+</span>
+  <span class="tx"><span class="nm">{{ e.name }}</span><span class="muted3">{{ role_label.get(e.role, '—') }} · da assumere</span></span>
+</span>
+{% else %}
+{% set pk = (mk or {}).get('pos' ~ e.pos.id) %}
+<a class="oc-mini pos{{ ' mk-' ~ pk if pk }}" data-role="{{ e.role or '' }}" href="/comp/hiring"
+   title="Posizione aperta · {{ lookup_label('position_status', e.pos.status) }}{% if e.pos.expected_start %} · inizio {{ e.pos.expected_start | dt }}{% endif %}">
+  <span class="av">+</span>
+  <span class="tx"><span class="nm">{{ e.name }}</span><span class="muted3">{{ role_label.get(e.role, '—') }} · aperta</span></span>
+</a>
+{% endif %}
+{% else %}
+<a class="oc-mini{{ ' ctx' if e.ctx }}{{ ' bad' if e.problem }}{{ mark(e, mk) }}" data-role="{{ e.role or '' }}" href="/people/{{ e.id }}"
+   title="{{ e.name }}{% if e.problem %} · {{ problem_label[e.problem] }}{% endif %}">
+  <span class="av">{{ initials(e.name) }}</span>
+  <span class="tx"><span class="nm">{{ e.name }}</span><span class="muted3">{{ role_label.get(e.role, '—') }}</span></span>
+</a>
+{% endif %}
+{% endmacro %}
+
+{% macro item(it, mk=None) %}
+{% if it.kind == 'group' %}
+<li>
+  {% for _ in range(it.skip) %}<div class="oc-skip"></div>{% endfor %}
+  <div class="oc-slot"></div>
+  <div class="oc-ghost" title="{{ it.label }}: raggruppamento senza responsabile proprio">
+    <span class="oc-team{{ ' new' if (it.team_id or 0) < 0 }}">{{ it.label }}</span>
+    {% if it.coordinator %}<span class="oc-coord">coordinatore: {{ it.coordinator }}</span>{% endif %}
+  </div>
+  <ul>{% for c in it.children %}{{ item(c, mk) }}{% endfor %}</ul>
+</li>
+{% else %}
+<li>
+  {% for _ in range(it.skip) %}<div class="oc-skip"></div>{% endfor %}
+  <div class="oc-slot">{% if it.label %}<span class="oc-team{{ ' new' if (it.team_id or 0) < 0 }}" title="{{ it.label }}{{ ' (team nuovo)' if (it.team_id or 0) < 0 }}">{{ it.label }}</span>{% endif %}</div>
+  {% if it.kind == 'node' %}
+  {{ card(it.entry, mk) }}
+  {% if it.children %}<ul>{% for c in it.children %}{{ item(c, mk) }}{% endfor %}</ul>{% endif %}
+  {% else %}
+  <div class="oc-col">{% for e in it.members %}{{ mini(e, mk) }}{% endfor %}</div>
+  {% endif %}
+</li>
+{% endif %}
+{% endmacro %}

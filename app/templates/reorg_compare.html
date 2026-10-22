@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Confronto · {{ name_a }} vs {{ name_b }}{% endblock %}
+{% block content_class %} wide{% endblock %}
+{% import "_oc_macros.html" as oc with context %}
+{% block content %}
+{% set change_label = {'team': 'team', 'role': 'ruolo', 'manager': 'riporto', 'exit': 'esce'} %}
+<div class="page-head">
+  <div>
+    <h1>Confronto</h1>
+    <div class="muted small">{{ diff | length }} person{{ 'a' if diff | length == 1 else 'e' }} con team, ruolo o riporto diversi</div>
+  </div>
+  <div class="spacer"></div>
+  <form method="get" action="/org/sim/compare" class="sim-bar">
+    <select name="a" onchange="this.form.submit()"><option value="0">Organigramma attuale</option>
+      {% for s in scenarios %}<option value="{{ s.id }}" {{ 'selected' if s.id == a }}>{{ s.name }}</option>{% endfor %}</select>
+    <span class="muted">vs</span>
+    <select name="b" onchange="this.form.submit()"><option value="0">Organigramma attuale</option>
+      {% for s in scenarios %}<option value="{{ s.id }}" {{ 'selected' if s.id == b }}>{{ s.name }}</option>{% endfor %}</select>
+  </form>
+  <button class="btn ghost sm" type="button" data-fit-toggle>Zoom 100%</button>
+  <a class="btn ghost sm" href="/org/sim">← Simulazioni</a>
+</div>
+
+<div class="oc-legend">
+  <span class="oc-legend-mk mk-team">cambia team</span><span class="oc-legend-mk mk-role">cambia ruolo</span><span class="oc-legend-mk mk-manager">cambia riporto</span><span class="oc-legend-mk mk-exit">esce</span>
+  <span class="oc-team new">team nuovo</span>
+  <span class="oc-mini pos oc-legend-pos"><span class="av">+</span><span class="tx"><span class="nm">Posizione aperta o da assumere</span></span></span>
+</div>
+
+<div class="cmp-grid">
+  <div class="card oc-wrap cmp" data-fit>
+    <div class="card-title">A · {% if a %}<a href="/org/sim/{{ a }}">{{ name_a }}</a>{% else %}{{ name_a }}{% endif %}</div>
+    {% if chart_a.roots %}<div class="oc"><ul>{% for r in chart_a.roots %}{{ oc.item(r, mk_a) }}{% endfor %}</ul></div>{% endif %}
+  </div>
+  <div class="card oc-wrap cmp" data-fit>
+    <div class="card-title">B · {% if b %}<a href="/org/sim/{{ b }}">{{ name_b }}</a>{% else %}{{ name_b }}{% endif %}</div>
+    {% if chart_b.roots %}<div class="oc"><ul>{% for r in chart_b.roots %}{{ oc.item(r, mk_b) }}{% endfor %}</ul></div>{% endif %}
+  </div>
+</div>
+
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Differenze persona per persona</div>
+    {% if diff %}
+    <table class="tbl small">
+      <thead><tr><th>Persona</th><th>Cambia</th><th>A</th><th>B</th></tr></thead>
+      <tbody>
+      {% for d in diff %}
+      <tr>
+        <td><a href="/people/{{ d.person.id }}">{{ d.person.full_name }}</a></td>
+        <td>{% for c in ['team', 'role', 'manager', 'exit'] if c in d.changes %}<span class="oc-legend-mk mk-{{ c }}">{{ change_label[c] }}</span>{% endfor %}</td>
+        <td class="muted">{% if d.a %}{{ d.a.team or '—' }} · {{ role_label.get(d.a.role, '—') }}<br>riporto: {{ d.a.manager or '—' }}{% else %}<span class="badge red">esce</span>{% endif %}</td>
+        <td>{% if d.b %}{{ d.b.team or '—' }} · {{ role_label.get(d.b.role, '—') }}<br><span class="muted">riporto:</span> {{ d.b.manager or '—' }}{% else %}<span class="badge red">esce</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">Nessuna differenza: A e B hanno le stesse persone negli stessi team, con gli stessi ruoli e riporti.</p>{% endif %}
+  </div>
+
+  <div>
+  <div class="card">
+    <div class="card-title">Organico per team</div>
+    {% macro dlt(v) %}{% if v > 0 %}<span class="pos-delta">+{{ v }}</span>{% elif v < 0 %}<span class="neg-delta">{{ v }}</span>{% else %}<span class="muted">0</span>{% endif %}{% endmacro %}
+    {% macro n(v) %}{{ v if v is not none else '—' }}{% endmacro %}
+    <table class="tbl small">
+      <thead><tr><th>Team</th>
+        <th class="num" title="Persone in A">A ({{ hc_tot.a }})</th>
+        <th class="num" title="Variazione del totale di A con le sue posizioni aperte">+A ({{ dlt(hc_tot.plus_a) }})</th>
+        <th class="num" title="Persone in B">B ({{ hc_tot.b }})</th>
+        <th class="num" title="Totale di B con le posizioni aperte, rispetto alle persone di A">+B ({{ dlt(hc_tot.plus_b) }})</th></tr></thead>
+      <tbody>
+      {% for h in headcount %}
+      <tr>
+        <td>{{ h.name }}{% if h.only == 'a' %} <span class="badge red">solo in A</span>{% elif h.only == 'b' %} <span class="badge green">solo in B</span>{% endif %}</td>
+        <td class="num">{{ n(h.a) }}</td>
+        <td class="num">{{ dlt(h.plus_a) }}</td>
+        <td class="num">{{ n(h.b) }}</td>
+        <td class="num">{{ dlt(h.plus_b) }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted3 small">Persone assegnate direttamente al team (senza sotto-team). +A = quanto cambia il totale di A con le sue posizioni aperte (del budget e ipotetiche); +B = totale di B con le posizioni aperte rispetto alle persone di A. Tra parentesi il totale della colonna.</p>
+  </div>
+  {% if pos_diff %}
+  <div class="card">
+    <div class="card-title">Posizioni spostate o nascoste</div>
+    <table class="tbl small">
+      <thead><tr><th>Posizione</th><th>A</th><th>B</th></tr></thead>
+      <tbody>
+      {% for d in pos_diff %}
+      <tr><td>{{ d.position.title }}</td>
+          <td class="muted">{% if d.a %}{{ d.a.team or '—' }} · {{ role_label.get(d.a.role, '—') }}{% else %}<span class="badge">nascosta</span>{% endif %}</td>
+          <td>{% if d.b %}{{ d.b.team or '—' }} · {{ role_label.get(d.b.role, '—') }}{% else %}<span class="badge">nascosta</span>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  </div>
+</div>
+<script src="/static/js/oc-fit.js?v={{ asset_v() }}" defer></script>
+{% endblock %}

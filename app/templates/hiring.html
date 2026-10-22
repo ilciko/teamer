@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+{% block title %}Assunzioni{% endblock %}
+
+{% macro hiring_card(b, compact=false) %}
+<div class="card {{ 'muted3' if compact }}">
+  <div class="page-head" style="margin-bottom:8px">
+    <strong>{{ b.period }}</strong>
+    {% if b.year %}<span class="badge">{{ b.year }}</span>{% endif %}
+    {% if b.note %}<span class="muted small">{{ b.note }}</span>{% endif %}
+    <div class="spacer"></div>
+    <span class="badge">tetto {{ b.cap | eur }}</span>
+    {% if b.riporto %}<span class="badge blue" title="Trasferito da un budget precedente: è dentro il tetto, ma non è denaro di quest'anno">riporto AP {{ b.riporto | eur }}</span>{% endif %}
+    <span class="badge green">applicato {{ b.applicato | eur }}</span>
+    <span class="badge amber">impegnato {{ b.impegnato | eur }}</span>
+    <span class="badge {{ 'red' if b.residuo < 0 else 'blue' }}">residuo {{ b.residuo | eur }}</span>
+    {% if compact %}
+    <form method="post" action="/comp/hiring/{{ b.id }}/reopen">
+      <button class="btn sm ghost">Riapri</button>
+    </form>
+    {% elif not b.aperte %}
+    <form method="post" action="/comp/hiring/{{ b.id }}/close"
+          onsubmit="return confirm('Chiudere il budget {{ b.period }}? Finisce nello storico, resta consultabile.')">
+      <button class="btn sm ghost">Chiudi</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% for t in b.transfers_in %}
+  <p class="ctx-note">Riporto AP da <strong>{{ t.from_period }}</strong>: {{ t.amount | eur }}{% if t.n_positions %}, {{ t.n_positions }} posizion{{ 'e' if t.n_positions == 1 else 'i' }} trasferit{{ 'a' if t.n_positions == 1 else 'e' }}{% endif %}{% if t.note %} — {{ t.note }}{% endif %}.</p>
+  {% endfor %}
+
+  {% for t in b.transfers_out %}
+  <p class="ctx-note {{ 'muted3' if t.voided }}">
+    {% if t.voided %}<s>{% endif %}
+    Trasferito su <strong>{{ t.to_period }}</strong>: {{ t.amount | eur }}{% if t.n_positions %}, {{ t.n_positions }} posizion{{ 'e' if t.n_positions == 1 else 'i' }}{% endif %} il {{ t.created_at | dt }}{% if t.note %} — {{ t.note }}{% endif %}.
+    {% if t.voided %}</s> <span class="badge red">annullato</span>{% elif not compact %}
+    <form method="post" style="display:inline" action="/comp/hiring/transfer/{{ t.id }}/void"
+          onsubmit="return confirm('Annullare il trasferimento? Il riporto torna indietro e con lui le posizioni ancora aperte; il budget di origine si riapre.')">
+      <button class="btn sm ghost">Annulla trasferimento</button>
+    </form>
+    {% endif %}
+  </p>
+  {% endfor %}
+
+  <table class="tbl">
+    <thead><tr><th>Posizione</th><th>Team</th><th class="num">RAL prevista</th><th>Inizio previsto</th><th>Stato</th><th style="width:260px">Azioni</th></tr></thead>
+    {% for p in b.positions %}
+    <tr class="{{ 'muted3' if p.status == 'annullata' }}">
+      <td><strong>{{ p.title }}</strong>
+        {% if p.replaces_name %}<div class="small"><span class="badge blue">sostituisce</span> <a href="/people/{{ p.replaces_person_id }}">{{ p.replaces_name }}</a></div>{% endif %}
+        {% if p.transfer_id %}<div class="small"><span class="badge blue">riporto AP</span></div>{% endif %}
+        {% if p.note %}<div class="muted3 small">{{ p.note }}</div>{% endif %}</td>
+      <td>{{ p.team_name or '—' }}</td>
+      <td class="num">{{ p.expected_ral | eur }}</td>
+      <td>{{ p.expected_start | dt }}</td>
+      <td>
+        <span class="badge {{ 'amber' if p.status == 'in_selezione' else 'green' if p.status == 'assunta' else 'red' if p.status == 'annullata' else '' }}">
+          {{ lookup_label('position_status', p.status) }}</span>
+        {% if p.hired_name %}<div class="small">→ <a href="/people/{{ p.person_id }}">{{ p.hired_name }}</a></div>{% endif %}
+      </td>
+      <td>
+        {% if compact %}<span class="muted3 small">—</span>
+        {% elif p.status in ('pianificata', 'in_selezione') %}
+        <div class="actions" style="margin:0;gap:4px;flex-wrap:wrap">
+          <form method="post" action="/comp/hiring/position/{{ p.id }}/status" style="display:flex;gap:4px;align-items:center">
+            {% if p.status == 'pianificata' %}
+            <button class="btn sm" name="status" value="in_selezione">Avvia selezione</button>
+            {% endif %}
+            <select name="person_id" style="width:130px" title="Persona censita da collegare">
+              <option value="">— persona —</option>
+              {% for rp in recent_people %}<option value="{{ rp.id }}">{{ rp.full_name }}</option>{% endfor %}
+            </select>
+            <button class="btn sm green" name="status" value="assunta"
+                    onclick="return this.form.person_id.value ? true : (alert('Seleziona la persona censita da collegare (prima censiscila in Persone).'), false)">Assunta</button>
+            <button class="btn sm danger" name="status" value="annullata"
+                    onclick="return confirm('Annullare la posizione?')">Annulla</button>
+          </form>
+        </div>
+        {% else %}
+        <form method="post" action="/comp/hiring/position/{{ p.id }}/void"
+              onsubmit="return confirm('Rimuovere la posizione dallo storico?')">
+          <button class="btn sm ghost" title="Rimuovi">✕</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% if not compact %}
+    <tr>
+      <td colspan="6" style="padding-top:0">
+        {% if not public() %}{# importi grezzi nei form: niente in modalità pubblica #}
+        <details>
+          <summary class="muted3 small" style="cursor:pointer">modifica «{{ p.title }}»</summary>
+          <form method="post" action="/comp/hiring/position/{{ p.id }}/update" style="margin-top:6px">
+            <div class="frow">
+              <div><label class="fld">Posizione</label>
+                <input type="text" name="title" value="{{ p.title }}" required></div>
+              <div><label class="fld">Team</label>
+                <select name="team_id"><option value="">—</option>
+                  {% for t in teams %}<option value="{{ t.id }}" {{ 'selected' if t.id == p.team_id }}>{{ t.name }}</option>{% endfor %}
+                </select></div>
+              <div><label class="fld">Ruolo</label>
+                <select name="role_type">
+                  {% for l in lookups('role_type') %}<option value="{{ l.code }}" {{ 'selected' if l.code == p.role_type }}>{{ l.label }}</option>{% endfor %}
+                </select></div>
+            </div>
+            <div class="frow">
+              <div><label class="fld">Budget</label>
+                <select name="budget_id">
+                  {% for ab in all_budgets %}<option value="{{ ab.id }}" {{ 'selected' if ab.id == p.budget_id }}>{{ ab.period }}</option>{% endfor %}
+                </select></div>
+              <div><label class="fld">RAL prevista €</label>
+                <input type="number" name="expected_ral" value="{{ p.expected_ral }}" step="0.01" required></div>
+              <div><label class="fld">Inizio previsto</label>
+                <input type="date" name="expected_start" value="{{ p.expected_start or '' }}"></div>
+              <div><label class="fld">Nota</label>
+                <input type="text" name="note" value="{{ p.note or '' }}"></div>
+            </div>
+            <div class="actions">
+              <button class="btn sm">Correggi</button>
+              {% if p.status == 'assunta' %}
+              <span class="muted3 small">Posizione già assunta: il budget segue la RAL reale di
+                {{ p.hired_name or 'chi è stato assunto' }}, la RAL prevista qui non muove il residuo.</span>
+              {% endif %}
+            </div>
+          </form>
+        </details>
+        {% endif %}
+      </td>
+    </tr>
+    {% endif %}
+    {% else %}<tr><td colspan="6" class="muted">Nessuna posizione su questo budget.</td></tr>{% endfor %}
+  </table>
+
+  {% if not compact %}
+  {% if not public() %}{# importi grezzi nei form: niente in modalità pubblica #}
+  <details style="margin-top:8px">
+    <summary class="muted small" style="cursor:pointer">Chiudi e riporta →</summary>
+    <form method="post" action="/comp/hiring/{{ b.id }}/transfer" style="margin-top:6px">
+      <p class="muted3 small" style="margin-top:0">
+        Il riporto entra nel tetto del budget di destinazione ma resta esposto come «riporto AP»:
+        così si vede sempre quanto di quel tetto è denaro dell'anno precedente.
+      </p>
+
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px">
+        <input type="radio" name="mode" value="esistente" checked>
+        <strong>Trasferimento</strong> — su un budget già aperto
+      </label>
+      <select name="to_budget_id" style="margin-top:4px">
+        {% for ab in open_dest if ab.id != b.id %}
+        <option value="{{ ab.id }}">{{ ab.period }} ({{ ab.year }}) — tetto proprio {{ ab.total_cap | eur }}</option>
+        {% else %}
+        <option value="">nessun altro budget aperto — usa la riapertura</option>
+        {% endfor %}
+      </select>
+
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-top:14px">
+        <input type="radio" name="mode" value="nuovo">
+        <strong>Riapertura</strong> — inizializza un budget nuovo
+      </label>
+      <div class="frow" style="margin-top:4px">
+        <div><label class="fld">Periodo (etichetta)</label>
+          <input type="text" name="period" placeholder="Assunzioni {{ b.year + 1 }}"></div>
+        <div><label class="fld">Anno</label>
+          <input type="number" name="year" value="{{ b.year + 1 }}"></div>
+        <div><label class="fld">Tetto proprio €</label>
+          <input type="number" name="total_cap" value="0" step="0.01"></div>
+        <div><label class="fld">Nota</label>
+          <input type="text" name="new_note"></div>
+      </div>
+
+      <div class="frow" style="margin-top:14px">
+        <div><label class="fld">Riporto €</label>
+          <input type="number" name="amount" value="{{ '%.2f' % b.residuo }}" step="0.01">
+          <p class="muted3 small" style="margin-top:4px">Proposto: il residuo di questo budget. Modificabile.</p></div>
+        <div><label class="fld">Nota del trasferimento</label>
+          <input type="text" name="note" placeholder="es. residuo non speso 2026"></div>
+      </div>
+
+      {% if b.aperte %}
+      <div class="card-title" style="margin-top:14px">Posizioni ancora aperte</div>
+      <table class="tbl small">
+        {% for p in b.aperte %}
+        <tr>
+          <td><strong>{{ p.title }}</strong> <span class="muted3">{{ p.expected_ral | eur }}</span></td>
+          <td style="width:340px">
+            <div class="actions" style="margin:0;gap:12px">
+              <label style="display:flex;gap:5px;align-items:center"><input type="radio" name="pos_{{ p.id }}" value="trasferisci" checked> trasferisci</label>
+              <label style="display:flex;gap:5px;align-items:center"><input type="radio" name="pos_{{ p.id }}" value="chiudi"> chiudi</label>
+              <label style="display:flex;gap:5px;align-items:center"><input type="radio" name="pos_{{ p.id }}" value="resta"> lascia qui</label>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+      <p class="muted3 small">«Chiudi» annulla la posizione (resta nello storico). Se ne lasci qualcuna qui, il budget non viene chiuso: non ha senso archiviare un budget con posizioni vive dentro.</p>
+      {% else %}
+      <p class="muted3 small" style="margin-top:14px">Nessuna posizione aperta da spostare: si trasferisce solo il residuo, e il budget si chiude.</p>
+      {% endif %}
+
+      <div class="actions"><button class="btn sm">Trasferisci e chiudi →</button></div>
+    </form>
+  </details>
+  {% endif %}
+
+  {% if not public() %}{# importi grezzi nei form: niente in modalità pubblica #}
+  <details style="margin-top:8px">
+    <summary class="muted small" style="cursor:pointer">Modifica budget (errore di inserimento)</summary>
+    <form method="post" action="/comp/hiring/{{ b.id }}/update">
+      <div class="frow">
+        <div><label class="fld">Periodo</label><input type="text" name="period" value="{{ b.period }}" required></div>
+        <div><label class="fld">Anno</label><input type="number" name="year" value="{{ b.year }}" required></div>
+        <div><label class="fld">Tetto proprio €</label><input type="number" name="total_cap" value="{{ b.total_cap }}" step="0.01" required></div>
+      </div>
+      <label class="fld">Nota</label><input type="text" name="note" value="{{ b.note or '' }}">
+      <div class="actions">
+        <button class="btn sm">Correggi</button>
+        {% if not b.positions %}
+        <button class="btn sm danger" formaction="/comp/hiring/{{ b.id }}/delete"
+                onclick="return confirm('Eliminare il budget {{ b.period }}?')">Elimina budget</button>
+        {% else %}
+        <span class="muted3 small">Per eliminarlo, prima rimuovi/annulla le posizioni.</span>
+        {% endif %}
+        {% if b.riporto %}
+        <span class="muted3 small">Il riporto AP ({{ b.riporto | eur }}) non si corregge qui: si annulla il trasferimento nel budget di origine.</span>
+        {% endif %}
+      </div>
+    </form>
+  </details>
+  {% endif %}
+
+  <details style="margin-top:8px">
+    <summary class="muted small" style="cursor:pointer">+ Nuova posizione</summary>
+    <form method="post" action="/comp/hiring/{{ b.id }}/position">
+      <div class="frow">
+        <div><label class="fld">Titolo posizione</label><input type="text" name="title" required placeholder="es. Sviluppatore senior"></div>
+        <div><label class="fld">Team</label>
+          <select name="team_id"><option value="">—</option>
+            {% for t in teams %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+          </select></div>
+        <div><label class="fld">Ruolo</label>
+          <select name="role_type">{% for l in lookups('role_type') %}<option value="{{ l.code }}">{{ l.label }}</option>{% endfor %}</select></div>
+      </div>
+      <div class="frow">
+        <div><label class="fld">RAL prevista €</label><input type="number" name="expected_ral" step="0.01" required></div>
+        <div><label class="fld">Inizio previsto</label><input type="date" name="expected_start"></div>
+        <div><label class="fld">Nota</label><input type="text" name="note"></div>
+      </div>
+      <div class="actions"><button class="btn sm">Aggiungi posizione</button></div>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% block content %}
+<div class="page-head"><h1>Budget assunzioni</h1></div>
+
+{% for b in open_budgets %}{{ hiring_card(b) }}{% else %}
+<div class="card"><p class="muted">
+  Nessun budget assunzioni aperto. Il budget mette un tetto alle RAL delle nuove assunzioni dell'anno;
+  le posizioni pianificate impegnano il budget, le assunzioni reali (persone censite e collegate) lo consumano.
+</p></div>
+{% endfor %}
+
+<div class="card" style="max-width:620px">
+  <div class="card-title">Nuovo budget assunzioni</div>
+  <form method="post" action="/comp/hiring">
+    <div class="frow">
+      <div><label class="fld">Periodo (etichetta)</label><input type="text" name="period" placeholder="Assunzioni 2026" required></div>
+      <div><label class="fld">Anno</label><input type="number" name="year" value="{{ today()[:4] }}" required></div>
+      <div><label class="fld">Tetto €</label><input type="number" name="total_cap" step="0.01" required></div>
+    </div>
+    <label class="fld">Nota</label><input type="text" name="note">
+    <div class="actions"><button class="btn">Crea →</button></div>
+  </form>
+</div>
+
+{% if closed_budgets %}
+<details style="margin-top:8px">
+  <summary class="muted3 small" style="cursor:pointer">Storico — {{ closed_budgets | length }} budget chiusi</summary>
+  <div style="margin-top:8px">
+    {% for b in closed_budgets %}{{ hiring_card(b, compact=true) }}{% endfor %}
+  </div>
+</details>
+{% endif %}
+{% endblock %}

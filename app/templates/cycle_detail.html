@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ c.name }}</h1>
+  <span class="badge {{ 'green' if c.status == 'aperto' else '' }}">{{ c.status }}</span>
+  <div class="spacer"></div>
+  {% if c.status == 'aperto' %}
+  <form method="post" action="/cycles/{{ c.id }}/close" onsubmit="return confirm('Chiudere il ciclo?')">
+    <button class="btn ghost sm">Chiudi ciclo</button>
+  </form>
+  {% else %}
+  <form method="post" action="/cycles/{{ c.id }}/riapri" onsubmit="return confirm('Riaprire il ciclo {{ c.name }}?')">
+    <button class="btn ghost sm">Riapri ciclo</button>
+  </form>
+  {% endif %}
+</div>
+
+<details style="margin-bottom:12px">
+  <summary class="muted small" style="cursor:pointer">Correggi nome o anno del ciclo (errore di inserimento)</summary>
+  <form method="post" action="/cycles/{{ c.id }}/update">
+    <div class="frow">
+      <div><label class="fld">Nome</label><input type="text" name="name" value="{{ c.name }}" required></div>
+      <div><label class="fld">Anno</label><input type="number" name="year" value="{{ c.year }}" required></div>
+    </div>
+    <div class="actions"><button class="btn sm">Correggi</button></div>
+  </form>
+</details>
+
+<div class="card">
+  <table class="tbl">
+    <thead><tr><th>Persona</th><th class="num">Obiettivi definiti</th><th class="num">Σ pesi</th><th>Review</th><th>Rating</th><th></th></tr></thead>
+    {% for p in people %}
+    <tr>
+      <td><a href="/people/{{ p.id }}">{{ p.full_name }}</a></td>
+      <td class="num">{{ p.n_goals }}</td>
+      <td class="num">
+        {% if p.n_goals %}
+        <span class="{{ 'pos' if p.weight_ok else 'neg' }}">
+          {%- for cat, s in p.weight_sums.items() -%}
+            {{ lookup_label('goal_category', cat)[:4] | lower }} {{ s | int }}%{{ ' · ' if not loop.last }}
+          {%- endfor -%}
+        </span>
+        {% else %}—{% endif %}
+      </td>
+      <td>
+        {% if p.review_status == 'finalizzata' %}<span class="badge green">finalizzata</span>
+        {% elif p.review_status %}<span class="badge amber">bozza</span>
+        {% else %}<span class="badge">non avviata</span>{% endif %}
+      </td>
+      <td>{% if p.rating %}<span class="badge blue">{{ p.rating }}/5</span>{% endif %}</td>
+      <td><a class="btn sm" href="/cycles/{{ c.id }}/person/{{ p.id }}">Apri →</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

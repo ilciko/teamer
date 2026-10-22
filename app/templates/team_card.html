@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Team {{ t.name }}{% endblock %}
+{% block content %}
+<div class="page-head" style="margin-bottom:6px">
+  {% if prev_t %}
+  <a class="btn ghost sm" href="/org/team/{{ prev_t.id }}" title="Precedente">← {{ prev_t.name }}</a>
+  {% else %}<span class="btn ghost sm" style="visibility:hidden">←</span>{% endif %}
+  <div class="spacer"></div>
+  <a class="btn ghost sm" href="/org">Organigramma</a>
+  <div class="spacer"></div>
+  {% if next_t %}
+  <a class="btn ghost sm" href="/org/team/{{ next_t.id }}" title="Prossimo">{{ next_t.name }} →</a>
+  {% else %}<span class="btn ghost sm" style="visibility:hidden">→</span>{% endif %}
+</div>
+
+<div class="page-head">
+  <div>
+    <h1>{{ t.name }}{% if t.archived_at %} <span class="badge">archiviato</span>{% endif %}</h1>
+    <div class="muted small">
+      {% if t.lead_name %}Responsabile: <strong>{{ t.lead_name }}</strong>{% endif %}
+      {% if t.parent_name %} · parte di {{ t.parent_name }}{% endif %}
+      {% if t.description %} · {{ t.description }}{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="grid3" style="margin-bottom:14px">
+  <div class="stat">
+    <div class="v">{{ members | length }}{% if total_people != members|length %}<span class="muted3"> / {{ total_people }}</span>{% endif %}</div>
+    <div class="k">{% if total_people != members|length %}Persone dirette / con sotto-team{% else %}Persone{% endif %}</div>
+  </div>
+  <div class="stat"><div class="v">{{ tot.ral | eur }}</div><div class="k">Monte RAL</div></div>
+  <div class="stat"><div class="v">{{ tot.costo | eur }}</div><div class="k">Costo totale {{ year }}</div></div>
+</div>
+
+<div class="card">
+  <div class="card-title">Membri — retribuzione, contratto e benefit</div>
+  <div style="overflow-x:auto">
+  <table class="tbl">
+    <thead><tr>
+      <th></th><th>Persona</th><th>Ruolo</th><th>Livello</th><th>Contratto</th>
+      <th class="num">RAL</th><th class="num">A piano</th><th>Benefit</th>
+      <th class="num">Costo benefit</th><th class="num">Costo tot. {{ year }}</th><th>9-box</th>
+    </tr></thead>
+    {% for m in members %}
+    <tr>
+      <td style="width:34px"><span class="av">{{ m.initials }}</span></td>
+      <td><a href="/people/{{ m.id }}"><strong>{{ m.full_name }}</strong></a>
+        <div class="muted3 small">dal {{ m.hire_date | dt }}</div></td>
+      <td>{{ lookup_label('role_type', m.role_type) }}</td>
+      <td>{{ lookup_label('livello', m.livello) if m.livello else '—' }}</td>
+      <td class="muted">{{ lookup_label('tipo_contratto', m.tipo_contratto) if m.tipo_contratto else '—' }}
+        {% if m.part_time_pct and m.part_time_pct < 100 %}<span class="badge">{{ m.part_time_pct | int }}%</span>{% endif %}</td>
+      <td class="num">{{ m.ral | eur }}</td>
+      <td class="num">{% if m.pending %}<span class="badge amber">+{{ m.pending | eur }}</span>{% else %}<span class="muted3">—</span>{% endif %}</td>
+      <td class="small">
+        {% for b in m.benefits %}{{ b.name }}{% if b.value_kind == 'amount' %} ({{ (b.value or 0) | float | eur }}){% endif %}{{ ', ' if not loop.last }}{% else %}<span class="muted3">—</span>{% endfor %}
+      </td>
+      <td class="num">{{ m.benefit_cost | eur if m.benefit_cost else '—' }}</td>
+      <td class="num"><strong>{{ m.total_cost | eur }}</strong></td>
+      <td>{% if m.box %}<span class="badge {{ 'green' if m.box >= 7 else 'red' if m.box == 1 else 'amber' }}">{{ m.box }}</span>{% else %}—{% endif %}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="11" class="muted">Nessun membro attivo.</td></tr>
+    {% endfor %}
+    {% if members %}
+    <tr>
+      <td colspan="5"><strong>Totale team</strong></td>
+      <td class="num"><strong>{{ tot.ral | eur }}</strong></td>
+      <td></td><td></td>
+      <td class="num"><strong>{{ tot.benefit | eur }}</strong></td>
+      <td class="num"><strong>{{ tot.costo | eur }}</strong></td>
+      <td></td>
+    </tr>
+    {% endif %}
+  </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="page-head" style="margin-bottom:8px">
+    <div class="card-title" style="margin:0">Assunzioni a budget — posizioni aperte</div>
+    <div class="spacer"></div>
+    {% if open_positions %}<span class="badge amber">impegnato {{ tot_hiring | eur }}</span>{% endif %}
+    <a class="btn ghost sm" href="/comp/hiring">apri assunzioni →</a>
+  </div>
+  {% if open_positions %}
+  <table class="tbl">
+    <thead><tr>
+      <th>Posizione</th><th>Ruolo</th><th>Budget</th>
+      <th class="num">RAL prevista</th><th>Inizio previsto</th><th>Stato</th>
+    </tr></thead>
+    {% for hp in open_positions %}
+    <tr>
+      <td><strong>{{ hp.title }}</strong>
+        {% if hp.replaces_name %}<div class="small"><span class="badge blue">sostituisce</span>
+          <a href="/people/{{ hp.replaces_person_id }}">{{ hp.replaces_name }}</a></div>{% endif %}
+        {% if hp.note %}<div class="muted3 small">{{ hp.note }}</div>{% endif %}</td>
+      <td>{{ lookup_label('role_type', hp.role_type) }}</td>
+      <td class="muted">{{ hp.budget_period }}</td>
+      <td class="num">{{ hp.expected_ral | eur }}</td>
+      <td>{{ hp.expected_start | dt }}</td>
+      <td><span class="badge {{ 'amber' if hp.status == 'in_selezione' }}">
+        {{ lookup_label('position_status', hp.status) }}</span></td>
+    </tr>
+    {% endfor %}
+    <tr>
+      <td colspan="3"><strong>Totale impegnato</strong></td>
+      <td class="num"><strong>{{ tot_hiring | eur }}</strong></td>
+      <td></td><td></td>
+    </tr>
+  </table>
+  {% else %}
+  <p class="muted small">Nessuna posizione aperta a budget per questo team.</p>
+  {% endif %}
+</div>
+
+{% if open_cycle and not public() %}{# obiettivi: come Cicli & obiettivi, riservati #}
+<div class="card">
+  <div class="card-title">Obiettivi del team — {{ open_cycle.name }}</div>
+  {% if goals %}
+  <table class="tbl small">
+    <thead><tr><th>Persona</th><th>Obiettivo</th><th>Cat.</th><th class="num">Peso</th><th>Review</th></tr></thead>
+    {% for g in goals %}
+    <tr>
+      <td><a href="/cycles/{{ g.cycle_id }}/person/{{ g.person_id }}">{{ g.full_name }}</a></td>
+      <td>{{ g.description }}</td>
+      <td>{{ lookup_label('goal_category', g.category) }}</td>
+      <td class="num">{{ g.weight_pct | int }}%</td>
+      <td>{% if g.review_status == 'finalizzata' %}<span class="badge green">finalizzata</span>
+          {% elif g.review_status %}<span class="badge amber">bozza</span>
+          {% else %}<span class="badge">—</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted small">Nessun obiettivo definito per i membri in questo ciclo.
+    <a href="/cycles/{{ open_cycle.id }}">Vai al ciclo →</a></p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if subteams %}
+<div class="card">
+  <div class="card-title">Sotto-team</div>
+  {% for s in subteams %}
+  <a class="btn ghost sm" href="/org/team/{{ s.id }}" style="margin-right:6px">{{ s.name }}
+    <span class="muted3">· {{ subteam_totals[s.id].total if s.id in subteam_totals else 0 }}</span> →</a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

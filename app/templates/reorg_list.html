@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Simulazioni{% endblock %}
+{% block content %}
+{% set status_badge = {'bozza': '', 'approvata': 'blue', 'applicata': 'green', 'scartata': 'red'} %}
+<div class="page-head">
+  <div>
+    <h1>Simulazioni di riorganizzazione</h1>
+    <div class="muted small">Prove di organigramma: team nuovi o modificati, spostamenti e posizioni ipotetiche, senza toccare la realtà finché non le applichi.</div>
+  </div>
+  <div class="spacer"></div>
+  <a class="btn ghost sm" href="/org">← Organigramma</a>
+</div>
+
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Nuova simulazione</div>
+    <form method="post" action="/org/sim">
+      <label class="fld">Nome</label><input type="text" name="name" required placeholder="es. Team X sotto Factory">
+      <label class="fld">Descrizione</label><input type="text" name="description">
+      <div class="actions"><button class="btn">Crea →</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Confronta 1:1</div>
+    <form method="get" action="/org/sim/compare">
+      <div class="frow">
+        <div><label class="fld">A</label>
+          <select name="a"><option value="0">Organigramma attuale</option>
+            {% for s in scenarios %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select></div>
+        <div><label class="fld">B</label>
+          <select name="b"><option value="0">Organigramma attuale</option>
+            {% for s in scenarios %}<option value="{{ s.id }}" {{ 'selected' if loop.first }}>{{ s.name }}</option>{% endfor %}</select></div>
+      </div>
+      <div class="actions"><button class="btn">Confronta →</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Simulazioni</div>
+  {% if scenarios %}
+  <table class="tbl">
+    <thead><tr><th>Nome</th><th>Stato</th><th>Differenze</th><th>Creata</th><th></th></tr></thead>
+    <tbody>
+    {% for s in scenarios %}
+    <tr>
+      <td><a href="/org/sim/{{ s.id }}"><strong>{{ s.name }}</strong></a>
+        {% if s.description %}<div class="muted small">{{ s.description }}</div>{% endif %}</td>
+      <td><span class="badge {{ status_badge.get(s.status, '') }}">{{ lookup_label('reorg_status', s.status) }}</span>
+        {% if s.status == 'applicata' %}<span class="muted small">dal {{ s.effective_date | dt }}</span>{% endif %}</td>
+      <td class="muted small">
+        {{ s.n_new }} team nuov{{ 'o' if s.n_new == 1 else 'i' }} · {{ s.n_mod }} modificat{{ 'o' if s.n_mod == 1 else 'i' }} ·
+        {{ s.n_moves }} spostament{{ 'o' if s.n_moves == 1 else 'i' }}{% if s.n_exits %} · {{ s.n_exits }} uscit{{ 'a' if s.n_exits == 1 else 'e' }}{% endif %} · {{ s.n_pos_moves }} posizion{{ 'e' if s.n_pos_moves == 1 else 'i' }} in budget spostat{{ 'a' if s.n_pos_moves == 1 else 'e' }}{% if s.n_pos_hidden %} ({{ s.n_pos_hidden }} nascost{{ 'a' if s.n_pos_hidden == 1 else 'e' }}){% endif %} ·
+        {{ s.n_pos }} ipotetic{{ 'a' if s.n_pos == 1 else 'he' }}</td>
+      <td class="muted small">{{ s.created_at | dt }}</td>
+      <td style="white-space:nowrap">
+        <a class="btn ghost sm" href="/org/sim/compare?a=0&b={{ s.id }}">vs attuale</a>
+        <form method="post" action="/org/sim/{{ s.id }}/duplicate" style="display:inline"><button class="btn ghost sm">Duplica</button></form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">Nessuna simulazione. Creane una qui sopra.</p>{% endif %}
+</div>
+{% endblock %}

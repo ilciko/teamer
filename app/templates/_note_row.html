@@ -1,0 +1,16 @@
+{# Riga di una nota, in sola lettura. Caricata una volta: nessun trigger la rigenera. #}
+<div id="nota-{{ n.id }}" style="padding:8px 0;border-bottom:0.5px solid var(--border){{ ';opacity:.6' if n.archived_at }}">
+  <div>
+    <input type="checkbox" name="ids" value="{{ n.id }}" form="note-sel" aria-label="Seleziona nota">
+    <span class="badge">{{ lookup_label('meeting_type', n.type) }}</span>
+    <a href="/people/{{ n.person_id }}"><strong>{{ n.full_name }}</strong></a>
+    <span class="muted3 small">{{ n.note_date | dt }}</span>
+    {% if n.title %} · <strong class="small">{{ n.title }}</strong>{% endif %}
+    {% if n.updated_at %}<span class="muted3 small">· modificata il {{ n.updated_at | dt }}</span>{% endif %}
+    {% if n.archived_at %}<span class="badge">archiviata il {{ n.archived_at | dt }}</span>{% endif %}
+    <a class="btn sm ghost" style="float:right"
+       hx-get="/notes/{{ n.id }}/modifica?f_q={{ f_q | urlencode }}&f_person_id={{ f_person_id or '' }}&f_archived={{ f_archived or '' }}"
+       hx-target="#nota-{{ n.id }}" hx-swap="outerHTML">Modifica</a>
+  </div>
+  {% if n.body %}<div class="muted small" style="margin-top:3px;line-height:1.5;white-space:pre-line">{{ n.body }}</div>{% endif %}
+</div>

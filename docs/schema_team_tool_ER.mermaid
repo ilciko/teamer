@@ -1,0 +1,305 @@
+erDiagram
+    %% ============ CORE / ORGANIGRAMMA ============
+    PERSON {
+        int id PK
+        string full_name
+        blob avatar
+        date hire_date
+        string status
+    }
+    TEAM {
+        int id PK
+        int parent_team_id FK
+        int lead_person_id FK
+        string name
+        int sort_order
+        datetime archived_at
+    }
+    PERSON_ASSIGNMENT {
+        int id PK
+        int person_id FK
+        int team_id FK
+        int manager_person_id FK
+        string role_type
+        date start_date
+        date end_date
+        int listino_profile_id FK
+    }
+    LISTINO_PROFILE {
+        int id PK
+        string code
+        string description
+        int active
+        int sort_order
+        float day_rate
+    }
+    LISTINO_PERSON_PARAM {
+        int person_id PK
+        float formazione_pct
+        float interne_pct
+        float saturazione_pct
+    }
+    EMPLOYMENT {
+        int id PK
+        int person_id FK
+        string livello
+        string tipo_contratto
+        string smartwork
+        string timbratura_scheme
+        real part_time_pct
+        date start_date
+        date end_date
+    }
+    LOOKUP {
+        int id PK
+        string category
+        string code
+        string label
+        int sort_order
+        bool active
+    }
+    APP_META {
+        string key PK
+        string value
+    }
+
+    %% ============ VALUTAZIONI E OBIETTIVI ============
+    REVIEW_CYCLE {
+        int id PK
+        string name
+        int year
+        string status
+    }
+    GOAL {
+        int id PK
+        int person_id FK
+        int cycle_id FK
+        string category
+        string description
+        real weight_pct
+        string status
+    }
+    GOAL_REVIEW {
+        int id PK
+        int goal_id FK
+        int review_id FK
+        real self_score
+        real tl_score
+        string note
+    }
+    PERFORMANCE_REVIEW {
+        int id PK
+        int person_id FK
+        int cycle_id FK
+        date review_date
+        int overall_rating
+        string status
+    }
+    WELLBEING_ENTRY {
+        int id PK
+        int review_id FK
+        string workload_rating
+        string satisfaction_rating
+        bool wlb_resources
+        bool wlb_time_difficulty
+        bool wlb_balance
+    }
+    EVALUATION_MODEL {
+        int id PK
+        string name
+        string type
+        json config
+        bool active
+    }
+    EVALUATION {
+        int id PK
+        int person_id FK
+        int model_id FK
+        int cycle_id FK
+        date eval_date
+        real overall_score
+        string status
+    }
+    EVALUATION_ITEM {
+        int id PK
+        int evaluation_id FK
+        string competency
+        real self_score
+        real manager_score
+        real weight
+    }
+    NINEBOX_ASSESSMENT {
+        int id PK
+        int person_id FK
+        int evaluation_id FK
+        date eval_date
+        string role_type
+        string seniority
+        real adj_perf
+        real adj_pot
+        int box_number
+        json weights_snapshot
+        json answers
+    }
+    NINEBOX_WEIGHT {
+        string role_type PK
+        string seniority PK
+        real perf_adj
+        real pot_adj
+    }
+    WEIGHT_MAPPING {
+        int box_number PK
+        real weight
+    }
+
+    %% ============ RETRIBUZIONE ============
+    RAL_EVENT {
+        int id PK
+        int person_id FK
+        int budget_id FK
+        date effective_date
+        real amount
+        real delta
+        string change_type
+        string reason
+    }
+    RAL_BUDGET {
+        int id PK
+        string period
+        int cycle_id FK
+        real total_cap
+    }
+    RAL_PROPOSAL {
+        int id PK
+        int person_id FK
+        int budget_id FK
+        real amount
+        date effective_date
+        string new_livello
+        string status
+        int ral_event_id FK
+    }
+    RAL_PROJECTION {
+        int id PK
+        int person_id FK
+        string scenario
+        date target_date
+        real projected_amount
+    }
+    BENEFIT_TYPE {
+        int id PK
+        string name
+        string value_kind
+        json enum_options
+        bool is_cost
+    }
+    BENEFIT_ASSIGNMENT {
+        int id PK
+        int person_id FK
+        int benefit_type_id FK
+        string value
+        date effective_date
+        date end_date
+    }
+    INCENTIVE {
+        int id PK
+        int person_id FK
+        date inc_date
+        real amount
+        string reason
+    }
+    BONUS_POOL {
+        int id PK
+        string period
+        int cycle_id FK
+        real total_cap
+        string status
+    }
+    BONUS_ALLOCATION {
+        int id PK
+        int pool_id FK
+        int person_id FK
+        real weight
+        real proposed_amount
+        real final_amount
+    }
+
+    %% ============ INTERAZIONI ============
+    MEETING_NOTE {
+        int id PK
+        int person_id FK
+        date note_date
+        string type
+        string title
+        string body
+    }
+    ACTION_ITEM {
+        int id PK
+        int meeting_note_id FK
+        int person_id FK
+        string description
+        date due_date
+        string status
+    }
+    ATTACHMENT {
+        int id PK
+        int person_id FK
+        int review_id FK
+        string filename
+        string mime
+        blob content
+    }
+
+    %% ============ RELAZIONI ============
+    TEAM ||--o{ TEAM : "sotto-team"
+    TEAM ||--o{ PERSON_ASSIGNMENT : contiene
+    PERSON ||--o{ PERSON_ASSIGNMENT : ricopre
+    PERSON ||--o{ PERSON_ASSIGNMENT : "e' manager di"
+    LISTINO_PROFILE ||--o{ PERSON_ASSIGNMENT : prezza
+    PERSON ||--o| LISTINO_PERSON_PARAM : "produttivita' propria"
+    PERSON ||--o{ EMPLOYMENT : "contratto"
+    LOOKUP ||..o{ EMPLOYMENT : "tipizza (enum)"
+
+    EVALUATION_MODEL ||--o{ EVALUATION : definisce
+    PERSON ||--o{ EVALUATION : riceve
+    EVALUATION ||--o{ EVALUATION_ITEM : dettaglia
+    PERSON ||--o{ NINEBOX_ASSESSMENT : mappato_in
+    EVALUATION ||--o| NINEBOX_ASSESSMENT : include
+    WEIGHT_MAPPING ||..o{ BONUS_ALLOCATION : "pesa (da box)"
+
+    REVIEW_CYCLE ||--o{ GOAL : "definiti nel ciclo"
+    REVIEW_CYCLE ||--o{ PERFORMANCE_REVIEW : contiene
+    REVIEW_CYCLE ||--o{ EVALUATION : inquadra
+    REVIEW_CYCLE ||--o{ RAL_BUDGET : aggancia
+    REVIEW_CYCLE ||--o{ BONUS_POOL : aggancia
+    PERSON ||--o{ GOAL : "ha obiettivi"
+    PERSON ||--o{ PERFORMANCE_REVIEW : riceve
+    GOAL ||--o{ GOAL_REVIEW : valutato_da
+    PERFORMANCE_REVIEW ||--o{ GOAL_REVIEW : raggruppa
+    PERFORMANCE_REVIEW ||--o| WELLBEING_ENTRY : rileva
+    PERFORMANCE_REVIEW ||--o{ ATTACHMENT : allega
+    PERSON ||--o{ ATTACHMENT : possiede
+
+    PERSON ||--o{ RAL_EVENT : percepisce
+    RAL_BUDGET ||--o{ RAL_EVENT : finanzia
+    PERSON ||--o{ RAL_PROPOSAL : "proposta per"
+    RAL_BUDGET ||--o{ RAL_PROPOSAL : impegna
+    RAL_PROPOSAL ||--o| RAL_EVENT : "applicata genera"
+    PERSON ||--o{ RAL_PROJECTION : proietta
+    BENEFIT_TYPE ||--o{ BENEFIT_ASSIGNMENT : tipizza
+    PERSON ||--o{ BENEFIT_ASSIGNMENT : gode
+    PERSON ||--o{ INCENTIVE : riceve
+    BONUS_POOL ||--o{ BONUS_ALLOCATION : distribuisce
+    PERSON ||--o{ BONUS_ALLOCATION : assegnato
+
+    PERSON ||--o{ MEETING_NOTE : oggetto_di
+    MEETING_NOTE ||--o{ ACTION_ITEM : genera
+    PERSON ||--o{ ACTION_ITEM : responsabile
+
+    REORG_SCENARIO ||--o{ REORG_TEAM : modifica
+    REORG_SCENARIO ||--o{ REORG_MOVE : sposta
+    REORG_SCENARIO ||--o{ REORG_POSITION : ipotizza
+    TEAM ||--o{ REORG_TEAM : sovrascritto_da
+    PERSON ||--o{ REORG_MOVE : spostata
+    REORG_SCENARIO ||--o{ REORG_POSITION_MOVE : sposta
+    HIRING_POSITION ||--o{ REORG_POSITION_MOVE : spostata

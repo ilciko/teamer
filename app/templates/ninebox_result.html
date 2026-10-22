@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Esito 9-Box · {{ a.full_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Esito valutazione</h1>
+  <span class="muted">{{ a.full_name }} · {{ a.eval_date | dt }}</span>
+</div>
+
+<div class="grid2">
+  <div>
+    <div class="card">
+      <div class="card-title">Risultato</div>
+      <div style="font-size:26px;font-weight:600;color:{{ '#0F6E56' if a.box_number >= 6 else '#E24B4A' if a.box_number == 1 else '#BA7517' }}">
+        {{ a.box_number }} · {{ box.label }}
+      </div>
+      <p class="muted" style="margin-top:8px;line-height:1.6">{{ box.desc }}</p>
+      <div class="grid2" style="margin-top:12px">
+        <div class="stat"><div class="v">{{ {'low':'Bassa','med':'Media','high':'Alta'}[a.perf_level] }}</div><div class="k">Prestazione ({{ '%.2f' | format(a.adj_perf) }})</div></div>
+        <div class="stat"><div class="v">{{ {'low':'Basso','med':'Medio','high':'Alto'}[a.pot_level] }}</div><div class="k">Potenziale ({{ '%.2f' | format(a.adj_pot) }})</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Calcolo</div>
+      <table class="tbl small">
+        <tr><td class="muted">Punteggio grezzo prestazione</td><td class="num">{{ '%.2f' | format(a.raw_perf) }}</td></tr>
+        <tr><td class="muted">Aggiustamento contesto ({{ a.role_type }} · {{ a.seniority }})</td>
+            <td class="num {{ 'neg' if snapshot.perf_adj < 0 else 'pos' if snapshot.perf_adj > 0 else '' }}">{{ '%+.2f' | format(snapshot.perf_adj) }}</td></tr>
+        <tr><td><strong>→ Prestazione finale</strong></td><td class="num"><strong>{{ '%.2f' | format(a.adj_perf) }}</strong></td></tr>
+        <tr><td class="muted">Punteggio grezzo potenziale</td><td class="num">{{ '%.2f' | format(a.raw_pot) }}</td></tr>
+        <tr><td class="muted">Aggiustamento contesto</td>
+            <td class="num {{ 'neg' if snapshot.pot_adj < 0 else 'pos' if snapshot.pot_adj > 0 else '' }}">{{ '%+.2f' | format(snapshot.pot_adj) }}</td></tr>
+        <tr><td><strong>→ Potenziale finale</strong></td><td class="num"><strong>{{ '%.2f' | format(a.adj_pot) }}</strong></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="card-title">Griglia</div>
+      <div class="g9">
+        {% for n in [6,8,9,3,5,7,1,2,4] %}
+        {% set b = (boxes.values() | selectattr('n', 'equalto', n) | list)[0] %}
+        <div class="c9 {{ 'hl' if n == a.box_number }}" data-z="{{ b.zone }}">
+          <div><span class="cn">{{ n }}</span> <span class="cl">{{ b.label }}</span></div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Risposte</div>
+      <table class="tbl small">
+        {% for d in detail %}
+        <tr><td class="muted" style="width:38%">{{ d.label }}</td><td>{{ d.text }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+
+    {% if history | length > 1 %}
+    <div class="card">
+      <div class="card-title">Movimento nella griglia</div>
+      <table class="tbl small">
+        {% for h in history %}
+        <tr><td>{{ h.eval_date | dt }}</td>
+            <td><span class="badge {{ 'green' if h.box_number >= 7 else 'red' if h.box_number == 1 else 'amber' }}">box {{ h.box_number }}</span></td>
+            <td class="muted">{{ h.role_type }} · {{ h.seniority }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="actions">
+  <a class="btn" href="/people/{{ a.person_id }}">Vai alla scheda →</a>
+  <a class="btn ghost" href="/ninebox">Torna alla griglia</a>
+</div>
+
+{% if not a.voided %}
+{# Il posto giusto per annullare è qui: è il momento in cui ci si accorge di
+   aver valutato la persona sbagliata, prima che la valutazione entri nella
+   griglia, nel montepremi e nei report. #}
+<details style="margin-top:10px">
+  <summary class="muted small" style="cursor:pointer">Annulla questa valutazione (errore di inserimento)</summary>
+  <form method="post" action="/ninebox/{{ a.id }}/void"
+        onsubmit="return confirm('Annullare la valutazione di {{ a.full_name }} del {{ a.eval_date | dt }}?')">
+    <input type="hidden" name="back" value="/people/{{ a.person_id }}">
+    <label class="fld">Motivo</label>
+    <input type="text" name="reason" placeholder="es. valutata la persona sbagliata">
+    <div class="actions"><button class="btn sm ghost">Annulla valutazione</button></div>
+    <p class="muted3 small">Sparisce dalla griglia, dal montepremi e dai report, ma resta nello storico. Per una valutazione aggiornata usa "Rivaluta", che conserva questa.</p>
+  </form>
+</details>
+{% else %}
+<div class="flash" style="margin-top:10px">Valutazione annullata{% if a.void_reason %}: {{ a.void_reason }}{% endif %}.</div>
+{% endif %}
+{% endblock %}

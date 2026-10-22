@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Budget aumenti{% endblock %}
+
+{% macro budget_card(b, compact=false) %}
+<div class="card {{ 'muted3' if compact }}">
+  <div class="page-head" style="margin-bottom:8px">
+    <strong>{{ b.period }}</strong>
+    {% if b.year %}<span class="badge">{{ b.year }}</span>{% endif %}
+    {% if b.pct is not none %}<span class="badge blue">{{ b.pct }}% del monte RAL</span>{% endif %}
+    {% if b.description %}<span class="muted small">{{ b.description }}</span>{% endif %}
+    <div class="spacer"></div>
+    {% if b.pct is not none %}<span class="badge">monte {{ b.monte | eur }}</span>{% endif %}
+    <span class="badge">tetto {{ b.total_cap | eur }}</span>
+    <span class="badge green">applicato {{ b.applicato | eur }}</span>
+    <span class="badge amber">impegnato {{ b.impegnato | eur }}</span>
+    <span class="badge {{ 'red' if b.residuo < 0 else 'blue' }}">residuo {{ b.residuo | eur }}</span>
+    {% if not compact %}
+    <form method="post" action="/comp/budget/{{ b.id }}/close"
+          onsubmit="return confirm('Chiudere il budget {{ b.period }}? Sparirà dalle selezioni ma resterà nello storico.')">
+      <button class="btn sm ghost">Chiudi</button>
+    </form>
+    {% else %}
+    <form method="post" action="/comp/budget/{{ b.id }}/reopen">
+      <button class="btn sm ghost">Riapri</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if b.members %}
+  <details style="margin-bottom:8px">
+    <summary class="muted small" style="cursor:pointer">
+      Platea: {{ b.members | selectattr('included') | list | length }} incluse su {{ b.members | length }}
+      {% if b.pct is not none %}— il tetto si ricalcola quando includi/escludi{% endif %}
+    </summary>
+    <table class="tbl small" style="margin-top:6px">
+      <thead><tr><th>Persona</th><th class="num">RAL (snapshot)</th><th>Assunzione</th><th>Stato</th><th></th></tr></thead>
+      {% for m in b.members %}
+      <tr class="{{ 'muted3' if not m.included }}">
+        <td><a href="/people/{{ m.person_id }}">{{ m.full_name }}</a></td>
+        <td class="num">{{ m.ral_snapshot | eur }}</td>
+        <td>{{ m.hire_date | dt }}</td>
+        <td>
+          {% if m.included %}<span class="badge green">inclusa</span>
+          {% else %}<span class="badge">esclusa{{ ' — ' + m.auto_reason if m.auto_reason }}</span>{% endif %}
+        </td>
+        <td>{% if not compact %}<form method="post" action="/comp/budget/{{ b.id }}/member/{{ m.id }}/toggle">
+          <button class="btn sm ghost">{{ 'Escludi' if m.included else 'Includi' }}</button></form>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% if not compact %}
+    <form method="post" action="/comp/budget/{{ b.id }}/refresh-ral" style="margin-top:6px">
+      <button class="btn sm ghost" title="Riallinea gli snapshot alle RAL correnti">↻ Aggiorna RAL della platea</button>
+    </form>
+    {% endif %}
+  </details>
+  {% endif %}
+
+  {% if b.pending %}
+  <details style="margin-bottom:8px">
+    <summary class="muted small" style="cursor:pointer">Impegnato: {{ b.pending | length }} proposte non ancora applicate</summary>
+    <table class="tbl small" style="margin-top:6px">
+      <thead><tr><th>Persona</th><th>Stato</th><th class="num">Importo</th><th>Decorrenza</th></tr></thead>
+      {% for p in b.pending %}
+      <tr><td>{{ p.full_name }}</td>
+          <td><span class="badge {{ 'amber' if p.status == 'proposta' else 'blue' if p.status == 'approvata' else '' }}">{{ lookup_label('proposal_status', p.status) }}</span></td>
+          <td class="num">+{{ p.amount | eur }}</td><td>{{ p.effective_date | dt }}</td></tr>
+      {% endfor %}
+    </table>
+    <div class="actions"><a class="btn sm ghost" href="/comp/plan?budget_id={{ b.id }}">Apri il piano →</a></div>
+  </details>
+  {% endif %}
+
+  {% if b.events %}
+  <details {{ 'open' if not compact }}>
+    <summary class="muted small" style="cursor:pointer">Aumenti applicati ({{ b.events | length }})</summary>
+    <table class="tbl small" style="margin-top:6px">
+      <thead><tr><th>Persona</th><th>Data</th><th class="num">Δ</th><th>Motivo</th></tr></thead>
+      {% for e in b.events %}
+      <tr><td>{{ e.full_name }}</td><td>{{ e.effective_date | dt }}</td>
+          <td class="num pos">+{{ e.delta | eur }}</td><td class="muted">{{ e.reason or '' }}</td></tr>
+      {% endfor %}
+    </table>
+  </details>
+  {% elif not compact %}<p class="muted small">Nessun aumento imputato a questo budget.</p>{% endif %}
+</div>
+{% endmacro %}
+
+{% block content %}
+<div class="page-head"><h1>Budget aumenti</h1></div>
+
+{% for b in open_budgets %}{{ budget_card(b) }}{% else %}
+<div class="card"><p class="muted">Nessun budget aperto. I budget mettono un tetto agli aumenti di un periodo; gli eventi RAL vi si agganciano dall'analisi salary.</p></div>
+{% endfor %}
+
+<div class="card" style="max-width:620px">
+  <div class="card-title">Nuovo budget</div>
+  <form method="post" action="/comp/budget">
+    <div class="frow">
+      <div><label class="fld">Periodo (etichetta)</label><input type="text" name="period" placeholder="Aumenti 2026" required></div>
+      <div><label class="fld">Anno</label><input type="number" name="year" value="{{ today()[:4] }}" required></div>
+    </div>
+    <div class="frow">
+      <div><label class="fld">% sul monte RAL</label><input type="number" name="pct" step="0.1" min="0" placeholder="es. 2.5"></div>
+      <div><label class="fld">oppure tetto fisso €</label><input type="number" name="total_cap" step="0.01" min="0"></div>
+    </div>
+    <label class="fld">Descrizione</label><input type="text" name="description">
+    <p class="muted3 small" style="margin-top:6px">
+      Compila la % <em>oppure</em> il tetto fisso. Con la %, la platea parte da tutte le persone attive
+      <strong>esclusi gli assunti dell'anno</strong> (e chi non ha RAL); poi la gestisci dalla lista, e il tetto si ricalcola.
+    </p>
+    <div class="actions"><button class="btn">Crea →</button></div>
+  </form>
+</div>
+
+{% if closed_budgets %}
+<details style="margin-top:8px">
+  <summary class="muted3 small" style="cursor:pointer">Storico — {{ closed_budgets | length }} budget chiusi</summary>
+  <div style="margin-top:8px">
+    {% for b in closed_budgets %}{{ budget_card(b, compact=true) }}{% endfor %}
+  </div>
+</details>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+{% block title %}Configurazione{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Configurazione</h1>
+  <div class="spacer"></div>
+  <div class="actions" style="margin:0">
+    <a class="btn sm {{ 'ghost' if tab != 'general' }}" href="/settings?tab=general">Generale</a>
+    <a class="btn sm {{ 'ghost' if tab != 'lookup' }}" href="/settings?tab=lookup">Liste valori</a>
+    <a class="btn sm {{ 'ghost' if tab != 'benefit' }}" href="/settings?tab=benefit">Benefit</a>
+    <a class="btn sm {{ 'ghost' if tab != 'listino' }}" href="/settings?tab=listino">Listino</a>
+    <a class="btn sm {{ 'ghost' if tab != 'ninebox' }}" href="/settings?tab=ninebox">9-box</a>
+    <a class="btn sm {{ 'ghost' if tab != 'models' }}" href="/settings?tab=models">Modelli</a>
+    <a class="btn sm {{ 'ghost' if tab != 'import' }}" href="/settings?tab=import">Import</a>
+    <a class="btn sm {{ 'ghost' if tab != 'security' }}" href="/settings?tab=security">Sicurezza</a>
+    <a class="btn sm {{ 'ghost' if tab != 'update' }}" href="/settings?tab=update">Aggiornamenti{% if update_available() %} ●{% endif %}</a>
+  </div>
+</div>
+
+{% if saved == '1' %}<div class="flash">Salvato.</div>
+{% elif saved == 'err' %}<div class="flash error">Dati non validi, nulla è stato salvato.</div>
+{% elif saved == 'wrongpw' %}<div class="flash error">Password attuale errata.</div>{% endif %}
+
+{% if tab == 'general' %}
+<div class="card" style="max-width:520px">
+  <div class="card-title">Valori predefiniti</div>
+  <form method="post" action="/settings/general">
+    <label class="fld">CCNL predefinito</label>
+    <input type="text" name="default_ccnl" value="{{ meta('default_ccnl','') }}">
+    <p class="muted3 small" style="margin-top:6px">Precompilato nei nuovi inserimenti contrattuali e nell'import Excel (se la colonna è vuota). Modificabile caso per caso.</p>
+    <div class="card-title" style="margin-top:18px">Evidenzia ultima variazione di RAL</div>
+    <div class="frow">
+      <div><label class="fld">Arancio oltre (anni)</label>
+        <input type="number" name="ral_stale_amber_years" min="1" step="1" required
+               value="{{ meta('ral_stale_amber_years','2') }}"></div>
+      <div><label class="fld">Rosso oltre (anni)</label>
+        <input type="number" name="ral_stale_red_years" min="2" step="1" required
+               value="{{ meta('ral_stale_red_years','4') }}"></div>
+    </div>
+    <p class="muted3 small" style="margin-top:6px">Nell'analisi salary la data dell'ultima variazione di RAL si colora quando è più vecchia di questi anni. Il rosso deve stare oltre l'arancio.<br>
+      Con i valori salvati, oggi è <span class="txt-amber">arancio</span> chi è fermo da prima del {{ ral_stale_from.amber | dt }} e <span class="txt-red">rosso</span> da prima del {{ ral_stale_from.red | dt }}.</p>
+    <div class="actions"><button class="btn sm">Salva</button></div>
+  </form>
+</div>
+
+{% elif tab == 'lookup' %}
+<div class="grid2">
+  <div>
+    {% for cat, rows in categories.items() %}
+    <div class="card">
+      <div class="card-title">{{ cat }}</div>
+      <table class="tbl small">
+        {% for r in rows %}
+        <tr class="{{ 'muted3' if not r.active }}">
+          <td style="width:22%"><code>{{ r.code }}</code></td>
+          <td colspan="2">
+            <form method="post" action="/settings/lookup/{{ r.id }}/update" class="frow" style="gap:6px">
+              <input type="text" name="label" value="{{ r.label }}" style="flex:3">
+              <input type="number" name="sort_order" value="{{ r.sort_order }}" style="flex:0 0 60px;text-align:right">
+              <button class="btn sm ghost" title="Salva modifica">✓</button>
+            </form>
+          </td>
+          <td style="width:1%"><form method="post" action="/settings/lookup/{{ r.id }}/toggle">
+            <button class="btn sm ghost">{{ 'disattiva' if r.active else 'riattiva' }}</button></form></td>
+        </tr>
+        {% endfor %}
+      </table>
+      <p class="muted3 small" style="margin-top:6px">L'etichetta si propaga ovunque (anche sullo storico); il codice resta fisso.</p>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="card" style="align-self:start">
+    <div class="card-title">Aggiungi / modifica voce</div>
+    <p class="muted small" style="margin-bottom:8px">Stessa categoria + codice = la voce viene aggiornata.</p>
+    <form method="post" action="/settings/lookup">
+      <div class="frow">
+        <div><label class="fld">Categoria</label><input type="text" name="category" list="cats" required>
+          <datalist id="cats">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist></div>
+        <div><label class="fld">Codice</label><input type="text" name="code" required></div>
+      </div>
+      <div class="frow">
+        <div><label class="fld">Etichetta</label><input type="text" name="label" required></div>
+        <div><label class="fld">Ordine</label><input type="number" name="sort_order" value="0"></div>
+      </div>
+      <div class="actions"><button class="btn sm">Salva</button></div>
+    </form>
+  </div>
+</div>
+
+{% elif tab == 'benefit' %}
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Catalogo benefit</div>
+    <table class="tbl">
+      <thead><tr><th>Nome</th><th>Tipo</th><th>Opzioni (enum)</th><th title="concorre al costo totale">Costo</th><th></th></tr></thead>
+      {% for b in benefit_types %}
+      <tr class="{{ 'muted3' if not b.active }}">
+        <td colspan="4">
+          <form method="post" action="/settings/benefit/{{ b.id }}/update" class="frow" style="gap:6px;align-items:center">
+            <input type="text" name="name" value="{{ b.name }}" style="flex:2">
+            <span class="badge" style="flex:0 0 auto">{{ b.value_kind }}</span>
+            {% if b.value_kind == 'enum' %}
+            <input type="text" name="enum_options" value="{{ (b.enum_options | from_json | join(',')) if b.enum_options else '' }}" placeholder="si,no,addebito" style="flex:2">
+            {% endif %}
+            <label style="display:flex;gap:4px;align-items:center;font-size:11px;flex:0 0 auto">
+              <input type="checkbox" name="is_cost" value="1" {{ 'checked' if b.is_cost }}> costo
+            </label>
+            <button class="btn sm ghost" title="Salva modifica">✓</button>
+          </form>
+        </td>
+        <td style="width:1%"><form method="post" action="/settings/benefit/{{ b.id }}/toggle">
+          <button class="btn sm ghost">{{ 'disattiva' if b.active else 'riattiva' }}</button></form></td>
+      </tr>
+      {% else %}<tr><td colspan="5" class="muted">Nessun benefit a catalogo (es. Auto, Rimborso pasto, MLO, Reperibilità H24…).</td></tr>{% endfor %}
+    </table>
+    <p class="muted3 small" style="margin-top:6px">Il nome si propaga a tutte le assegnazioni, anche storiche.</p>
+  </div>
+  <div class="card" style="align-self:start">
+    <div class="card-title">Nuovo benefit</div>
+    <form method="post" action="/settings/benefit">
+      <label class="fld">Nome</label><input type="text" name="name" required>
+      <div class="frow">
+        <div><label class="fld">Tipo valore</label>
+          <select name="value_kind">
+            <option value="boolean">booleano (sì/no)</option>
+            <option value="enum">opzioni (enum)</option>
+            <option value="amount">importo €</option>
+          </select></div>
+        <div><label class="fld">Opzioni (se enum, separate da virgola)</label><input type="text" name="enum_options" placeholder="si,no,addebito"></div>
+      </div>
+      <label style="display:flex;gap:6px;align-items:center;margin-top:10px;font-size:13px">
+        <input type="checkbox" name="is_cost" value="1" checked> concorre al costo totale
+      </label>
+      <div class="actions"><button class="btn sm">Aggiungi</button></div>
+    </form>
+  </div>
+</div>
+
+{% elif tab == 'listino' %}
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Codici di listino</div>
+    <table class="tbl">
+      <thead><tr><th>Codice</th><th>Descrizione</th><th class="num" title="tariffa giornaliera di vendita a listino">Listino €/gg</th><th class="num">Ordine</th><th></th><th title="assegnazioni che lo usano, anche storiche">Usato</th><th></th></tr></thead>
+      {% for lp in listino_profiles %}
+      <tr class="{{ 'muted3' if not lp.active }}">
+        <td><code>{{ lp.code }}</code></td>
+        <td colspan="4">
+          <form method="post" action="/settings/listino/{{ lp.id }}/update" class="frow" style="gap:6px;align-items:center">
+            <input type="text" name="description" value="{{ lp.description }}" style="flex:3" required>
+            <input type="number" name="day_rate" value="{{ '%g' % lp.day_rate if lp.day_rate is not none else '' }}" step="1" min="0" placeholder="€/gg" style="flex:0 0 90px;text-align:right">
+            <input type="number" name="sort_order" value="{{ lp.sort_order }}" style="flex:0 0 70px;text-align:right">
+            <button class="btn sm ghost" title="Salva modifica">✓</button>
+          </form>
+        </td>
+        <td class="muted small">{{ lp.n_ref }}</td>
+        <td style="width:1%"><form method="post" action="/settings/listino/{{ lp.id }}/toggle">
+          <button class="btn sm ghost">{{ 'disattiva' if lp.active else 'riattiva' }}</button></form></td>
+      </tr>
+      {% else %}<tr><td colspan="7" class="muted">Nessun codice. Es. GE040 · Consultant PM, PS010 · Professional Service.</td></tr>{% endfor %}
+    </table>
+    <p class="muted3 small" style="margin-top:6px">Il codice è stabile e la descrizione si propaga ovunque. La tariffa è quella del listino commerciale corrente: il <a href="/comp/listino">listino</a> la confronta col costo giornaliero calcolato. Un codice disattivato resta sulle assegnazioni che lo usano, ma non si propone più.</p>
+  </div>
+  <div class="card" style="align-self:start">
+    <div class="card-title">Nuovo codice</div>
+    <form method="post" action="/settings/listino">
+      <div class="frow">
+        <div style="flex:0 0 120px"><label class="fld">Codice</label><input type="text" name="code" placeholder="GE040" required></div>
+        <div><label class="fld">Descrizione</label><input type="text" name="description" placeholder="Consultant PM" required></div>
+      </div>
+      <div class="frow">
+        <div><label class="fld">Listino €/gg (corrente)</label><input type="number" name="day_rate" step="1" min="0" placeholder="es. 450" style="text-align:right"></div>
+        <div style="flex:0 0 80px"><label class="fld">Ordine</label><input type="number" name="sort_order" value="0" style="text-align:right"></div>
+      </div>
+      <p class="muted3 small" style="margin-top:6px">È la categoria d'offerta commerciale, più larga del ruolo: un junior dev e un senior hardware possono stare nello stesso codice se la policy li pone allo stesso livello d'offerta.</p>
+      <div class="actions"><button class="btn sm">Aggiungi</button></div>
+    </form>
+  </div>
+</div>
+
+{% elif tab == 'ninebox' %}
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Aggiustamenti dinamici (ruolo × anzianità)</div>
+    <p class="muted small" style="margin-bottom:8px">Applicati ai punteggi grezzi: prestazione e potenziale, con segno. Ogni valutazione salva comunque uno snapshot dei pesi usati.</p>
+    <form method="post" action="/settings/ninebox-weights">
+      <table class="tbl small">
+        <thead><tr><th>Ruolo</th><th>Anzianità</th><th class="num">Prestazione ±</th><th class="num">Potenziale ±</th></tr></thead>
+        {% for w in weights %}
+        <tr>
+          <td>{{ lookup_label('role_type', w.role_type) }}</td>
+          <td>{{ lookup_label('seniority', w.seniority) }}</td>
+          <td class="num"><input type="number" step="0.05" name="p|{{ w.role_type }}|{{ w.seniority }}" value="{{ w.perf_adj }}" style="width:80px;text-align:right"></td>
+          <td class="num"><input type="number" step="0.05" name="q|{{ w.role_type }}|{{ w.seniority }}" value="{{ w.pot_adj }}" style="width:80px;text-align:right"></td>
+        </tr>
+        {% endfor %}
+      </table>
+      <div class="actions"><button class="btn sm">Salva aggiustamenti</button></div>
+    </form>
+  </div>
+  <div style="align-self:start">
+    <div class="card">
+      <div class="card-title">Peso premio per casella (montepremi)</div>
+      <form method="post" action="/settings/weight-mapping">
+        <table class="tbl small">
+          <thead><tr><th>Box</th><th class="num">Peso</th></tr></thead>
+          {% for m in mapping %}
+          <tr>
+            <td>Box {{ m.box_number }}</td>
+            <td class="num"><input type="number" step="0.1" name="box_{{ m.box_number }}" value="{{ m.weight }}" style="width:80px;text-align:right"></td>
+          </tr>
+          {% endfor %}
+        </table>
+        <div class="actions"><button class="btn sm">Salva pesi</button></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Moltiplicatori premio (peso composito)</div>
+      <p class="muted3 small" style="margin-bottom:8px">
+        Peso = casella × ruolo × rating review × obiettivi (punteggio TL professionale ÷ 3, non configurabile).
+        Chi non ha review o 9-box ha fattori neutri ×1.
+      </p>
+      <form method="post" action="/settings/bonus-factors">
+        <div class="frow">
+          <table class="tbl small">
+            <thead><tr><th>Ruolo</th><th class="num">×</th></tr></thead>
+            {% for f in role_factors %}
+            <tr><td>{{ lookup_label('role_type', f.code) }}</td>
+                <td class="num"><input type="number" step="0.05" name="role|{{ f.code }}" value="{{ f.factor }}" style="width:70px;text-align:right"></td></tr>
+            {% endfor %}
+          </table>
+          <table class="tbl small">
+            <thead><tr><th>Rating review</th><th class="num">×</th></tr></thead>
+            {% for f in rating_factors %}
+            <tr><td>{{ f.code }} / 5</td>
+                <td class="num"><input type="number" step="0.05" name="rating|{{ f.code }}" value="{{ f.factor }}" style="width:70px;text-align:right"></td></tr>
+            {% endfor %}
+          </table>
+        </div>
+        <div class="actions"><button class="btn sm">Salva moltiplicatori</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% elif tab == 'models' %}
+{% for m in models %}
+<div class="card">
+  <div class="card-title">{{ m.name }} <span class="badge">{{ m.type }}</span></div>
+  <form method="post" action="/settings/model/{{ m.id }}">
+    <label class="fld">Nome</label><input type="text" name="name" value="{{ m.name }}">
+    <label class="fld">Config (JSON: domande, note contestuali, caselle)</label>
+    <textarea name="config_json" style="min-height:280px;font-family:monospace;font-size:11px">{{ m.config }}</textarea>
+    <div class="actions"><button class="btn sm">Salva modello</button></div>
+  </form>
+</div>
+{% endfor %}
+
+{% elif tab == 'import' %}
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Import persone da Excel (censimento)</div>
+    <p class="muted small" style="margin-bottom:10px;line-height:1.6">
+      Scarica il template, compilalo (una riga per persona, solo <strong>nome</strong> obbligatorio) e caricalo qui.
+      L'import crea lo <strong>stato attuale</strong>: anagrafica, team (creati se mancanti), assegnazione con manager,
+      situazione contrattuale e RAL con tipo <em>censimento</em>. Le persone già presenti vengono saltate,
+      quindi puoi ricaricare lo stesso file per aggiungere solo le righe nuove.
+    </p>
+    <div class="actions" style="margin-bottom:14px">
+      <a class="btn ghost sm" href="/settings/import/template">↓ Scarica template</a>
+    </div>
+    <form hx-post="/settings/import" hx-target="#import-result" enctype="multipart/form-data">
+      <div class="frow">
+        <div><label class="fld">File compilato</label><input type="file" name="file" accept=".xlsx" required></div>
+        <div><label class="fld">Data di riferimento censimento</label><input type="date" name="ref_date" value="{{ today() }}" required></div>
+      </div>
+      <div class="actions"><button class="btn">Importa →</button></div>
+    </form>
+  </div>
+  <div id="import-result"></div>
+</div>
+
+{% elif tab == 'security' %}
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Cambio password</div>
+    <p class="muted small" style="margin-bottom:8px">La password cifra il database (SQLCipher re-key): cambiarla ricifra il file.</p>
+    <form method="post" action="/settings/password">
+      <label class="fld">Password attuale</label><input type="password" name="current" required>
+      <div class="frow">
+        <div><label class="fld">Nuova password (min 8)</label><input type="password" name="new" required></div>
+        <div><label class="fld">Conferma</label><input type="password" name="confirm" required></div>
+      </div>
+      <div class="actions"><button class="btn sm" onclick="return confirm('Ricifrare il database con la nuova password?')">Cambia password</button></div>
+    </form>
+  </div>
+  <div class="card" style="align-self:start">
+    <div class="card-title">Backup</div>
+    <p class="muted small" style="margin-bottom:8px">Scarica una copia consistente e <strong>ancora cifrata</strong> del database (VACUUM INTO). Conservala su un supporto separato.</p>
+    <form method="post" action="/settings/backup">
+      <div class="actions"><button class="btn sm">Scarica backup cifrato ↓</button></div>
+    </form>
+  </div>
+</div>
+{% elif tab == 'update' %}
+{% set st = upd.state or {} %}
+{% set lt = upd.latest or {} %}
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Versione</div>
+    <table class="tbl">
+      <tr><td class="muted">Installata</td><td><strong>{{ upd.current }}</strong></td></tr>
+      <tr><td class="muted">Ultima pubblicata</td>
+          <td>{% if lt.tag %}<a href="{{ lt.url }}" target="_blank" rel="noopener">{{ lt.tag }}</a>{% if upd.available %} <span class="badge green">nuova</span>{% else %} <span class="muted small">già installata</span>{% endif %}{% else %}—{% endif %}</td></tr>
+      <tr><td class="muted">Ultimo controllo</td>
+          <td>{{ lt.checked_at | dt if lt.checked_at else 'mai' }}{% if lt.error %} <span class="badge amber" title="{{ lt.error }}">non riuscito</span>{% endif %}</td></tr>
+    </table>
+    <p class="muted3 small" style="margin-top:6px">Il controllo parte da solo una volta al giorno su <code>github.com/{{ upd.repo }}</code> e avvisa soltanto: l'aggiornamento si lancia da qui.</p>
+    <form method="post" action="/settings/update/check"><div class="actions"><button class="btn sm ghost">Controlla ora</button></div></form>
+  </div>
+
+  <div class="card" id="upd-card">
+    <div class="card-title">Aggiorna</div>
+    {% if saved == 'avviato' or upd.pending %}
+    <div class="flash" id="upd-wait" data-version="{{ upd.current }}">Aggiornamento in corso: il servizio si riavvia da solo e questa pagina si ricarica appena è pronto (poi serve la password per sbloccare).</div>
+    {% elif saved == 'err' %}<div class="flash error">Richiesta non accettata: aggiornamento già in corso o non disponibile su questa installazione.</div>{% endif %}
+    {% if upd.can_request %}
+    <p class="small">Scarica l'ultima release, fa un <strong>backup del database</strong> e riavvia Teamer (circa un minuto). Il database non viene toccato: le eventuali modifiche di schema si applicano al prossimo sblocco.</p>
+    <form method="post" action="/settings/update/run" onsubmit="return confirm('Aggiornare Teamer ora? Il servizio si riavvia: salva prima il lavoro aperto nelle altre schede.')">
+      <div class="actions"><button class="btn" {{ 'disabled' if upd.pending or not upd.available }}>Aggiorna{% if upd.available %} a {{ upd.available.tag }}{% endif %}</button></div>
+    </form>
+    {% if not upd.available %}<p class="muted3 small">Nessuna versione più nuova di quella installata.</p>{% endif %}
+    {% else %}
+    <p class="muted small">L'aggiornamento dall'app non è disponibile qui: manca l'updater di sistema (<code>teamer-update.path</code>), che installa l'installer del container. Aggiorna da riga di comando con <code>teamer-update</code>.</p>
+    {% endif %}
+    {% if st.status %}
+    <div class="card-title" style="margin-top:14px">Ultimo aggiornamento</div>
+    <p class="small"><span class="badge {{ 'green' if st.status == 'ok' else 'red' if st.status == 'error' else 'amber' }}">{{ {'ok': 'riuscito', 'error': 'non riuscito', 'running': 'in corso'}.get(st.status, st.status) }}</span>
+      {{ st.get('from', '?') }} → {{ st.get('to', '?') }}{% if st.finished %} · {{ st.finished | dt }}{% endif %}{% if st.message %} · {{ st.message }}{% endif %}</p>
+    {% if upd.log %}<details><summary class="muted small" style="cursor:pointer">Log</summary><pre class="upd-log">{{ upd.log }}</pre></details>{% endif %}
+    {% endif %}
+    {% if upd.backups %}
+    <div class="card-title" style="margin-top:14px">Backup automatici del database</div>
+    <p class="muted3 small">Copie (cifrate) fatte prima di ogni aggiornamento in <code>data/backups/</code>, le ultime 5.</p>
+    <table class="tbl small">
+      {% for b in upd.backups %}<tr><td><code>{{ b.name }}</code></td><td class="muted">{{ b.at | dt }}</td><td class="num muted">{{ b.size_kb }} KB</td></tr>{% endfor %}
+    </table>
+    {% endif %}
+  </div>
+</div>
+<script>
+// Aspetta il riavvio: il battito (fuori dal guard, JSON anche a DB bloccato) riporta la versione.
+(function () {
+  const wait = document.getElementById('upd-wait');
+  if (!wait) return;
+  const from = wait.dataset.version;
+  const tick = function () {
+    const fd = new FormData(); fd.append('tab', 'update-wait');
+    fetch('/heartbeat', { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (j.version && j.version !== from) location.reload(); })
+      .catch(function () { /* servizio in riavvio: si riprova */ });
+  };
+  setInterval(tick, 3000);
+})();
+</script>
+{% endif %}
+{% endblock %}

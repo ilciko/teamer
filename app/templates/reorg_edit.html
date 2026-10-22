@@ -1,0 +1,310 @@
+{% extends "base.html" %}
+{% block title %}Simulazione {{ s.name }} - {{ today }}{% endblock %}
+{% block content_class %} wide{% endblock %}
+{% import "_oc_macros.html" as oc with context %}
+
+{% macro team_select(name, selected, exclude=(), empty=None) %}
+<select name="{{ name }}">
+  {% if empty %}<option value="">{{ empty }}</option>{% endif %}
+  {% for t in team_opts %}{% if t.id not in exclude %}
+  <option value="{{ t.id }}" {{ 'selected' if t.id == selected }}>{{ '  ' * t.depth }}{{ t.name }}{{ ' (nuovo)' if t.new }}</option>
+  {% endif %}{% endfor %}
+</select>
+{% endmacro %}
+
+{% block content %}
+{% set status_badge = {'bozza': '', 'approvata': 'blue', 'applicata': 'green', 'scartata': 'red'} %}
+<div class="page-head">
+  <div>
+    <h1>{{ s.name }}</h1>
+    <div class="muted small">
+      <span class="badge {{ status_badge.get(s.status, '') }}">{{ lookup_label('reorg_status', s.status) }}</span>
+      {% if s.status == 'applicata' %} applicata dal {{ s.effective_date | dt }}{% endif %}
+      {% if s.description %} · {{ s.description }}{% endif %}
+      · {{ diff | length }} person{{ 'a' if diff | length == 1 else 'e' }} con team, ruolo o riporto diversi da oggi
+      <span class="print-only-inline"> · simulazione al {{ today | dt }}</span>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn ghost sm no-print" type="button" data-fit-toggle>Zoom 100%</button>
+  <button class="btn sm no-print" type="button" onclick="window.print()">Esporta PDF</button>
+  <a class="btn ghost sm no-print" href="/org/sim/compare?a=0&b={{ s.id }}">Confronta con l'attuale</a>
+  <a class="btn ghost sm no-print" href="/org/sim">← Simulazioni</a>
+</div>
+
+{% if err == 'team_busy' %}<div class="flash error no-print">Nella simulazione quel team non è vuoto: sposta prima persone, sotto-team e posizioni.</div>{% endif %}
+
+<div class="card no-print">
+  <div class="card-title">Stato</div>
+  <div class="sim-bar">
+    {% if s.status == 'bozza' %}
+    <form method="post" action="/org/sim/{{ s.id }}/status"><input type="hidden" name="action" value="approva"><button class="btn sm">Approva</button></form>
+    <form method="post" action="/org/sim/{{ s.id }}/status"><input type="hidden" name="action" value="scarta"><button class="btn ghost sm">Scarta</button></form>
+    <span class="muted small">Approvata non si modifica più: si applica con una data, o si riporta in bozza.</span>
+    {% elif s.status == 'approvata' %}
+    <form method="post" action="/org/sim/{{ s.id }}/apply" class="sim-bar"
+          onsubmit="return confirm('Applicare la simulazione all’organigramma reale? Gli spostamenti diventano nuove assegnazioni dalla data indicata.')">
+      <label class="small">Applica dal</label><input type="date" name="effective_date" value="{{ today }}" required style="width:auto">
+      <button class="btn sm">Applica all'organigramma</button>
+    </form>
+    <form method="post" action="/org/sim/{{ s.id }}/status"><input type="hidden" name="action" value="bozza"><button class="btn ghost sm">Riporta in bozza</button></form>
+    <form method="post" action="/org/sim/{{ s.id }}/status"><input type="hidden" name="action" value="scarta"><button class="btn ghost sm">Scarta</button></form>
+    {% elif s.status == 'scartata' %}
+    <form method="post" action="/org/sim/{{ s.id }}/status"><input type="hidden" name="action" value="bozza"><button class="btn ghost sm">Riporta in bozza</button></form>
+    {% else %}
+    <span class="muted small">Applicata: team e assegnazioni sono stati registrati nell'organigramma reale.</span>
+    {% endif %}
+    <span class="spacer"></span>
+    <form method="post" action="/org/sim/{{ s.id }}/duplicate"><button class="btn ghost sm">Duplica come variante</button></form>
+    {% if s.status != 'applicata' %}
+    <form method="post" action="/org/sim/{{ s.id }}/delete" onsubmit="return confirm('Eliminare questa simulazione?')"><button class="btn ghost sm danger">Elimina</button></form>
+    {% endif %}
+  </div>
+  {% if s.status == 'applicata' and removed %}
+  <p class="ctx-note">Team tolti nella simulazione ma ancora nell'organigramma (non erano vuoti all'applicazione): {{ removed | map(attribute='name') | join(', ') }}.</p>
+  {% endif %}
+  {% if editable %}
+  <details style="margin-top:8px">
+    <summary class="muted small" style="cursor:pointer">Rinomina / descrizione</summary>
+    <form method="post" action="/org/sim/{{ s.id }}/meta">
+      <div class="frow">
+        <div><label class="fld">Nome</label><input type="text" name="name" value="{{ s.name }}" required></div>
+        <div><label class="fld">Descrizione</label><input type="text" name="description" value="{{ s.description or '' }}"></div>
+      </div>
+      <div class="actions"><button class="btn sm">Salva</button></div>
+    </form>
+  </details>
+  {% endif %}
+</div>
+
+<div class="oc-legend">
+  {% for r in roles %}<span class="badge {{ role_badge.get(r.code, '') }}">{{ r.label }}</span>{% endfor %}
+  <span class="oc-mini pos oc-legend-pos"><span class="av">+</span><span class="tx"><span class="nm">Posizione aperta o da assumere</span></span></span>
+  <span class="oc-legend-mk mk-team">cambia team</span><span class="oc-legend-mk mk-role">cambia ruolo</span><span class="oc-legend-mk mk-manager">cambia riporto</span>
+  <span class="oc-team new">team nuovo</span>
+</div>
+<div class="card oc-wrap" data-print data-fit>
+  {% if chart.roots %}<div class="oc"><ul>{% for r in chart.roots %}{{ oc.item(r, mk) }}{% endfor %}</ul></div>
+  {% else %}<p class="muted">Nessuna persona attiva.</p>{% endif %}
+</div>
+
+<div class="grid2 no-print">
+  <div class="card" id="team">
+    <div class="card-title">Team nella simulazione</div>
+    {% for t in team_opts %}
+    {% set st = sim_teams[t.id] %}{% set info = team_info[t.id] %}
+    <details id="st{{ t.id }}" style="margin-bottom:6px;padding-left:{{ t.depth * 14 }}px">
+      <summary style="cursor:pointer;font-size:13px">
+        <strong>{{ st.name }}</strong>
+        {% if t.new %}<span class="badge green">nuovo</span>{% elif info.modified %}<span class="badge amber">modificato</span>{% endif %}
+      </summary>
+      {% if editable %}
+      <form method="post" action="/org/sim/{{ s.id }}/team/{{ t.id }}/update">
+        <label class="fld">Nome</label><input type="text" name="name" value="{{ st.name }}" required>
+        <div class="frow">
+          <div><label class="fld">Team padre</label>{{ team_select('parent_ref', st.parent_team_id, info.descendants, '— radice —') }}</div>
+          <div><label class="fld">Responsabile</label>
+            <select name="lead_person_id"><option value="">—</option>
+              {% for pp in people_opts %}<option value="{{ pp.id }}" {{ 'selected' if pp.id == st.lead_person_id }}>{{ pp.full_name }}</option>{% endfor %}
+            </select></div>
+        </div>
+        <div class="actions"><button class="btn sm">Salva</button></div>
+      </form>
+      <div class="actions" style="margin-top:4px">
+        {% if info.modified %}
+        <form method="post" action="/org/sim/{{ s.id }}/team/{{ t.id }}/restore"><button class="btn ghost sm">Ripristina com'è oggi</button></form>
+        {% endif %}
+        <form method="post" action="/org/sim/{{ s.id }}/team/{{ t.id }}/remove">
+          <button class="btn ghost sm danger" {{ 'disabled' if info.blockers }}
+                  title="{{ 'Non vuoto: ' ~ info.blockers | join(', ') if info.blockers else 'Togli il team dalla simulazione' }}">{{ 'Elimina team nuovo' if t.new else 'Togli team' }}</button>
+        </form>
+      </div>
+      {% endif %}
+    </details>
+    {% endfor %}
+    {% if removed and s.status != 'applicata' %}
+    <p class="muted small" style="margin-top:8px">Tolti: {% for r in removed %}{{ r.name }}
+      {% if editable %}<form method="post" action="/org/sim/{{ s.id }}/team/{{ r.id }}/restore" style="display:inline"><button class="btn ghost sm">ripristina</button></form>{% endif %}{{ ', ' if not loop.last }}{% endfor %}</p>
+    {% endif %}
+    {% if editable %}
+    <details style="margin-top:10px" {{ 'open' if team_opts | length < 2 }}>
+      <summary class="muted small" style="cursor:pointer">Nuovo team</summary>
+      <form method="post" action="/org/sim/{{ s.id }}/team">
+        <label class="fld">Nome</label><input type="text" name="name" required>
+        <div class="frow">
+          <div><label class="fld">Team padre</label>{{ team_select('parent_ref', None, (), '— radice —') }}</div>
+          <div><label class="fld">Responsabile</label>
+            <select name="lead_person_id"><option value="">—</option>
+              {% for pp in people_opts %}<option value="{{ pp.id }}">{{ pp.full_name }}</option>{% endfor %}
+            </select></div>
+        </div>
+        <div class="actions"><button class="btn sm">Aggiungi team</button></div>
+      </form>
+    </details>
+    {% endif %}
+  </div>
+
+  <div class="card" id="posizioni">
+    <div class="card-title">Posizioni ipotetiche</div>
+    {% if positions %}
+    {% for pos in positions %}
+    <details style="margin-bottom:6px">
+      <summary style="cursor:pointer;font-size:13px">
+        <strong>{{ pos.title }}</strong>{% if pos.internal %} <span class="badge green">interna</span>{% endif %}
+        <span class="muted small">· {{ sim_teams[pos.team_ref].name if pos.team_ref in sim_teams else '— senza team —' }} · {{ role_label.get(pos.role_type, pos.role_type) }}</span>
+      </summary>
+      {% if editable %}
+      <form method="post" action="/org/sim/{{ s.id }}/position/{{ pos.id }}/update">
+        <div class="frow">
+          <div><label class="fld">{{ 'Persona' if pos.internal else 'Titolo' }}</label><input type="text" name="title" value="{{ pos.title }}" required></div>
+          <div><label class="fld">Team</label>{{ team_select('team_ref', pos.team_ref) }}</div>
+          <div><label class="fld">Ruolo</label>
+            <select name="role_type">{% for r in roles | reverse %}<option value="{{ r.code }}" {{ 'selected' if r.code == pos.role_type }}>{{ r.label }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="sim-bar" style="margin-top:6px">
+          <label class="opt-inline"><input type="checkbox" name="internal" value="1" {{ 'checked' if pos.internal }}> figura interna da un altro team</label>
+          <span class="spacer"></span>
+          <button class="btn sm">Salva</button>
+        </div>
+      </form>
+      <form method="post" action="/org/sim/{{ s.id }}/position/{{ pos.id }}/delete" style="margin-top:4px"><button class="btn ghost sm danger">Elimina</button></form>
+      {% endif %}
+    </details>
+    {% endfor %}
+    {% else %}<p class="muted small">Nessuna. Servono a vedere dove andrebbero le assunzioni previste dalla riorganizzazione.</p>{% endif %}
+    {% if s.status == 'applicata' and positions %}<p class="ctx-note">Applicando non si creano posizioni nel budget: aprile da <a href="/comp/hiring">Assunzioni</a>.</p>{% endif %}
+    {% if editable %}
+    <form method="post" action="/org/sim/{{ s.id }}/position" style="margin-top:8px">
+      <div class="frow">
+        <div><label class="fld">Titolo (o nome, se interna)</label><input type="text" name="title" required></div>
+        <div><label class="fld">Team</label>{{ team_select('team_ref', None) }}</div>
+        <div><label class="fld">Ruolo</label>
+          <select name="role_type">{% for r in roles | reverse %}<option value="{{ r.code }}">{{ r.label }}</option>{% endfor %}</select></div>
+      </div>
+      <div class="sim-bar" style="margin-top:6px">
+        <label class="opt-inline"><input type="checkbox" name="internal" value="1"> figura interna da un altro team</label>
+        <span class="spacer"></span>
+        <button class="btn sm">Aggiungi posizione</button>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card no-print" id="budget">
+  <div class="card-title">Posizioni in budget assunzioni</div>
+  {% if budget_rows %}
+  <form method="post" action="/org/sim/{{ s.id }}/position-moves">
+    <table class="tbl">
+      <thead><tr><th>Posizione</th><th>Budget</th><th>Oggi</th><th>Team nella simulazione</th><th>Ruolo</th><th>Nascondi</th></tr></thead>
+      <tbody>
+      {% for r in budget_rows %}
+      {% set sel_team = r.move.team_ref if r.hidden else r.sim.team_id %}
+      {% set sel_role = r.move.role_type if r.hidden else r.sim.role_type %}
+      <tr class="{{ 'row-moved' if r.moved }}{{ ' row-hidden' if r.hidden }}">
+        <td>{{ r.real.title }}{% if r.real.expected_start %}<div class="muted small">dal {{ r.real.expected_start | dt }}</div>{% endif %}</td>
+        <td class="muted small">{{ r.info.period or '—' }} · {{ lookup_label('position_status', r.real.status) }}</td>
+        <td class="muted small">{{ real_teams[r.real.team_id].name if r.real.team_id in real_teams else '— senza team —' }} · {{ role_label.get(r.real.role_type, '—') }}</td>
+        {% if editable %}
+        <td>{{ team_select('pteam_' ~ r.real.id, sel_team, (), '— senza team —' if not sel_team else None) }}</td>
+        <td><select name="prole_{{ r.real.id }}">{% for ro in roles | reverse %}<option value="{{ ro.code }}" {{ 'selected' if ro.code == sel_role }}>{{ ro.label }}</option>{% endfor %}</select></td>
+        <td><label class="opt-inline" title="Nella simulazione la posizione non c'è; nel budget resta"><input type="checkbox" name="phide_{{ r.real.id }}" value="1" {{ 'checked' if r.hidden }}> nascosta</label></td>
+        {% else %}
+        <td>{{ sim_teams[sel_team].name if sel_team in sim_teams else '—' }}</td>
+        <td>{{ role_label.get(sel_role, '—') }}</td>
+        <td>{% if r.hidden %}<span class="badge">nascosta</span>{% endif %}</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if editable %}
+    <div class="actions"><button class="btn">Salva posizioni</button>
+      <span class="muted small">Applicando la simulazione la posizione cambia team e ruolo nel budget (RAL prevista e date restano); una nascosta resta com'è.</span></div>
+    {% endif %}
+  </form>
+  {% else %}<p class="muted small">Nessuna posizione aperta nel budget assunzioni.</p>{% endif %}
+</div>
+
+<div class="card no-print" id="persone">
+  <div class="card-title">Persone</div>
+  <form method="post" action="/org/sim/{{ s.id }}/moves">
+    <table class="tbl">
+      <thead><tr><th>Persona</th><th>Oggi</th><th>Team nella simulazione</th><th>Ruolo</th><th>Riporto</th><th>Esce</th></tr></thead>
+      <tbody>
+      {% for r in people_rows %}
+      <tr class="{{ 'row-moved' if r.moved }}{{ ' row-hidden' if r.hidden }}">
+        <td><a href="/people/{{ r.sim.id }}">{{ r.sim.full_name }}</a></td>
+        <td class="muted small">{{ real_teams[r.real.team_id].name if r.real.team_id in real_teams else '—' }} · {{ role_label.get(r.real.role_type, '—') }}</td>
+        {% if editable %}
+        <td>{{ team_select('team_' ~ r.sim.id, r.sim.team_id) }}</td>
+        <td><select name="role_{{ r.sim.id }}">{% for ro in roles | reverse %}<option value="{{ ro.code }}" {{ 'selected' if ro.code == r.sim.role_type }}>{{ ro.label }}</option>{% endfor %}</select></td>
+        {% else %}
+        <td>{{ sim_teams[r.sim.team_id].name if r.sim.team_id in sim_teams else '—' }}</td>
+        <td>{{ role_label.get(r.sim.role_type, '—') }}</td>
+        {% endif %}
+        <td class="muted small">{{ sim_by_id[r.sim.manager_person_id].full_name if r.sim.manager_person_id in sim_by_id else '—' }}</td>
+        <td>{% if editable %}<label class="opt-inline" title="Nella simulazione la persona non c'è; nella realtà resta"><input type="checkbox" name="hide_{{ r.sim.id }}" value="1" {{ 'checked' if r.hidden }}> esce</label>
+            {% elif r.hidden %}<span class="badge red">esce</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if editable %}
+    <div class="actions"><button class="btn">Salva spostamenti</button>
+      <span class="muted small">Il riporto si ricalcola da team e ruolo dopo il salvataggio. Chi esce resta nella realtà anche applicando la simulazione.</span></div>
+    {% endif %}
+  </form>
+</div>
+<div class="print-only print-break">
+  <h2>Cambi della simulazione</h2>
+  <p class="muted small">{{ s.name }}{% if s.description %} — {{ s.description }}{% endif %} · rispetto all'organigramma al {{ today | dt }}</p>
+
+  <h3>Team</h3>
+  {% if team_changes %}
+  <table class="tbl small">
+    {% for c in team_changes %}
+    <tr><td><strong>{{ c.name }}</strong></td><td>{{ c.kind }}</td><td>{{ c.details | join('; ') }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted small">Nessun cambio ai team.</p>{% endif %}
+
+  <h3>Persone</h3>
+  {% if diff %}
+  <table class="tbl small">
+    <thead><tr><th>Persona</th><th>Oggi</th><th>Nella simulazione</th></tr></thead>
+    {% for d in diff %}
+    <tr><td><strong>{{ d.person.full_name }}</strong></td>
+        <td>{% if d.a %}{{ d.a.team or '—' }} · {{ role_label.get(d.a.role, '—') }} · riporto {{ d.a.manager or '—' }}{% else %}esce{% endif %}</td>
+        <td>{% if d.b %}{{ d.b.team or '—' }} · {{ role_label.get(d.b.role, '—') }} · riporto {{ d.b.manager or '—' }}{% else %}esce{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted small">Nessuna persona cambia team, ruolo o riporto.</p>{% endif %}
+
+  <h3>Posizioni in budget assunzioni</h3>
+  {% if pos_diff %}
+  <table class="tbl small">
+    <thead><tr><th>Posizione</th><th>Oggi</th><th>Nella simulazione</th></tr></thead>
+    {% for d in pos_diff %}
+    <tr><td><strong>{{ d.position.title }}</strong></td>
+        <td>{% if d.a %}{{ d.a.team or '—' }} · {{ role_label.get(d.a.role, '—') }}{% else %}nascosta{% endif %}</td>
+        <td>{% if d.b %}{{ d.b.team or '—' }} · {{ role_label.get(d.b.role, '—') }}{% else %}nascosta{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted small">Nessuna posizione del budget spostata o nascosta.</p>{% endif %}
+
+  <h3>Posizioni ipotetiche</h3>
+  {% if positions %}
+  <table class="tbl small">
+    {% for pos in positions %}
+    <tr><td><strong>{{ pos.title }}</strong>{% if pos.internal %} (interna){% endif %}</td>
+        <td>{{ sim_teams[pos.team_ref].name if pos.team_ref in sim_teams else '— senza team —' }}</td>
+        <td>{{ role_label.get(pos.role_type, pos.role_type) }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted small">Nessuna.</p>{% endif %}
+</div>
+
+<script src="/static/js/oc-print.js?v={{ asset_v() }}" defer></script>
+<script src="/static/js/oc-fit.js?v={{ asset_v() }}" defer></script>
+{% endblock %}

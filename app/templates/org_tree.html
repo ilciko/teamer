@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Organigramma{% endblock %}
+
+{% macro node(n, first, last) %}
+<li class="tree-node" id="team-{{ n.team.id }}">
+  <div class="tree-team">
+    <a class="tname" href="/org/team/{{ n.team.id }}">{{ n.team.name }}</a>
+    <span class="muted small">{{ n.total }} person{{ 'a' if n.total == 1 else 'e' }}</span>
+    {% if n.team.lead_name %}<span class="badge blue">lead: {{ n.team.lead_name }}</span>
+    {% set d = direct_reports.get(n.team.lead_person_id, 0) %}
+    <span class="muted3 small">{{ d }} dirett{{ 'o' if d == 1 else 'i' }}</span>{% endif %}
+    <span class="spacer"></span>
+    <form class="tree-move" method="post" action="/org/team/{{ n.team.id }}/move">
+      <button class="btn ghost sm" name="direction" value="up" title="Sposta su" {{ 'disabled' if first }}>↑</button>
+      <button class="btn ghost sm" name="direction" value="down" title="Sposta giù" {{ 'disabled' if last }}>↓</button>
+    </form>
+    {% set why = blockers.get(n.team.id) %}
+    {% if why and not why.block %}
+    <form class="tree-move" method="post" action="/org/team/{{ n.team.id }}/archive"
+          onsubmit='return confirm("Archiviare il team " + {{ n.team.name | tojson }} + "? Sparisce dall\u0027organigramma, lo storico resta.")'>
+      <button class="btn ghost sm" title="Vuoto ma con {{ why.history | join(', ') }}: si archivia (lo storico resta)">Archivia</button>
+    </form>
+    {% else %}
+    <form class="tree-move" method="post" action="/org/team/{{ n.team.id }}/delete"
+          onsubmit='return confirm("Eliminare il team " + {{ n.team.name | tojson }} + "?")'>
+      <button class="btn ghost sm danger" {{ 'disabled' if why }}
+              title="{{ 'Non eliminabile: ' ~ (why.block + why.history) | join(', ') if why else 'Elimina team (è vuoto)' }}">✕</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if n.members %}
+  <div class="tree-people">
+    {% for m in n.members %}
+    <a class="chip-person" href="/people/{{ m.id }}">
+      <span class="av">{{ initials(m.full_name) }}</span>{{ m.full_name }}
+      <span class="muted3">{{ lookup_label('role_type', m.role_type) }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if n.children %}<ul>{% for c in n.children %}{{ node(c, loop.first, loop.last) }}{% endfor %}</ul>{% endif %}
+</li>
+{% endmacro %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Organigramma</h1>
+  <div class="spacer"></div>
+  <a class="btn ghost sm" href="/org/sim">Simulazioni</a>
+  <a class="btn ghost sm" href="/org/riporti?next=/org">Verifica riporti</a>
+  <a class="btn ghost sm" href="/org/chart">Linee di riporto →</a>
+</div>
+
+{% if blocked %}
+{% set bw = blockers.get(blocked.id, {'block': [], 'history': []}) %}
+<div class="flash error">Il team <strong>{{ blocked.name }}</strong> non si può eliminare: {{ (bw.block + bw.history) | join(', ') }}.</div>
+{% endif %}
+
+<div class="card tree">
+  {% if tree %}
+  <ul>{% for n in tree %}{{ node(n, loop.first, loop.last) }}{% endfor %}</ul>
+  {% else %}
+  <p class="muted">Nessun team ancora. Crea il primo qui sotto: le persone si assegnano dalla loro scheda.</p>
+  {% endif %}
+</div>
+
+{% if archived %}
+<div class="card" id="archiviati">
+  <div class="card-title">Team archiviati</div>
+  <p class="muted3 small">Vuoti ma con storico: non compaiono in organigramma, grafico, simulazioni e menu. Lo storico delle persone resta.</p>
+  {% for t in archived %}
+  <div class="sim-bar" style="margin:4px 0">
+    <a href="/org/team/{{ t.id }}">{{ t.name }}</a> <span class="muted small">archiviato il {{ t.archived_at | dt }}</span>
+    <form method="post" action="/org/team/{{ t.id }}/restore"><button class="btn ghost sm">Ripristina</button></form>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Nuovo team</div>
+    <form method="post" action="/org/team">
+      <label class="fld">Nome</label><input type="text" name="name" required>
+      <div class="frow">
+        <div>
+          <label class="fld">Team padre</label>
+          <select name="parent_team_id"><option value="">— radice —</option>
+            {% for t in teams | sort(attribute='name') %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="fld">Responsabile</label>
+          <select name="lead_person_id"><option value="">—</option>
+            {% for pp in people_opts %}<option value="{{ pp.id }}">{{ pp.full_name }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <label class="fld">Descrizione</label><input type="text" name="description">
+      <div class="actions"><button class="btn">Crea team →</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Modifica team</div>
+    {% for t in teams | sort(attribute='name') %}
+    <details style="margin-bottom:8px">
+      <summary style="cursor:pointer;font-weight:600;font-size:13px">{{ t.name }}</summary>
+      <form method="post" action="/org/team/{{ t.id }}">
+        <label class="fld">Nome</label><input type="text" name="name" value="{{ t.name }}" required>
+        <div class="frow">
+          <div>
+            <label class="fld">Team padre</label>
+            <select name="parent_team_id"><option value="">— radice —</option>
+              {% for t2 in teams | sort(attribute='name') %}{% if t2.id != t.id %}
+              <option value="{{ t2.id }}" {{ 'selected' if t2.id == t.parent_team_id }}>{{ t2.name }}</option>
+              {% endif %}{% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="fld">Responsabile</label>
+            <select name="lead_person_id"><option value="">—</option>
+              {% for pp in people_opts %}<option value="{{ pp.id }}" {{ 'selected' if pp.id == t.lead_person_id }}>{{ pp.full_name }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <label class="fld">Descrizione</label><input type="text" name="description" value="{{ t.description or '' }}">
+        <div class="actions"><button class="btn sm">Salva</button></div>
+      </form>
+    </details>
+    {% else %}<p class="muted small">Nessun team.</p>{% endfor %}
+  </div>
+</div>
+{% endblock %}

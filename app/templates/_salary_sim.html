@@ -1,0 +1,43 @@
+<div class="card fade-in" style="margin-top:14px">
+  <div class="card-title">Proposte da salvare</div>
+  {% if sim %}
+  <table class="tbl">
+    <thead><tr>
+      <th>Persona</th><th class="num">RAL attuale</th><th class="num">A piano</th>
+      <th class="num">Nuovo aumento</th><th class="num">%</th>
+      <th class="num">RAL a regime</th><th>Decorrenza</th><th>Livello</th>
+    </tr></thead>
+    {% for s in sim %}
+    <tr>
+      <td>{{ s.full_name }}</td>
+      <td class="num">{{ s.ral | eur }}</td>
+      <td class="num">{{ ('+' + (s.a_piano | eur)) if s.a_piano else '—' }}</td>
+      <td class="num {{ 'pos' if s.inc }}">{{ ('+' + (s.inc | eur)) if s.inc else '—' }}</td>
+      <td class="num">{{ ('%.2f' | format(s.pct)) + '%' if s.inc else '—' }}</td>
+      <td class="num"><strong>{{ s.a_regime | eur }}</strong></td>
+      <td>{{ s.date | dt }}</td>
+      <td>
+        {% if s.new_livello %}
+        <span class="muted">{{ lookup_label('livello', s.livello) if s.livello else '—' }}</span>
+        → <span class="badge blue">{{ lookup_label('livello', s.new_livello) }}</span>
+        {% else %}<span class="muted">invariato</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <div class="grid3" style="margin-top:12px">
+    <div class="stat"><div class="v pos">+{{ tot_delta | eur }}</div><div class="k">Totale nuove proposte</div></div>
+    {% if summary %}
+    <div class="stat"><div class="v">{{ summary.impegnato | eur }}</div><div class="k">Già impegnato</div></div>
+    <div class="stat"><div class="v {{ 'neg' if residual < 0 else 'pos' }}">{{ residual | eur }}</div><div class="k">Residuo dopo queste</div></div>
+    {% endif %}
+  </div>
+  {% if residual is not none and residual < 0 %}
+  <div class="flash error" style="margin-top:10px">Con queste proposte il budget sfora di {{ (-residual) | eur }}.</div>
+  {% endif %}
+
+  {% else %}
+  <p class="muted small">Inserisci un importo, una percentuale o un cambio di livello per vedere il riepilogo.</p>
+  {% endif %}
+</div>

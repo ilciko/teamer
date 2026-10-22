@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Analisi salary{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Analisi salary</h1>
+  <span class="badge">RAL totale {{ total | eur }}</span>
+  <div class="spacer"></div>
+  <form method="get" action="/comp/salary" class="frow" style="min-width:300px;align-items:center">
+    <select name="budget_id" onchange="this.form.submit()">
+      <option value="">— senza budget —</option>
+      {% for b in budgets %}
+      <option value="{{ b.id }}" {{ 'selected' if budget_id == b.id }}>{{ b.period }} — tetto {{ b.total_cap | eur }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">
+    Piano aumenti — quello che scrivi qui diventa una <strong>proposta</strong>, non un aumento reale
+  </div>
+  <p class="muted small" style="margin-bottom:12px;line-height:1.6">
+    Importo e percentuale si aggiornano a vicenda. La colonna <strong>A piano</strong> mostra ciò che è già
+    stato proposto e non ancora applicato{% if budget %} su <em>{{ budget.period }}</em>{% endif %}:
+    per un aumento in più step, il secondo si somma al primo.
+    L'applicazione avviene dal <a href="/comp/plan{{ '?budget_id=' ~ budget_id if budget_id }}">piano aumenti</a>, dopo il passaggio con HR.
+  </p>
+
+  <form method="post" action="/comp/salary/plan" id="simform">
+  <input type="hidden" name="budget_id" value="{{ budget_id or '' }}">
+  <div class="frow" style="max-width:520px;margin-bottom:10px">
+    <div><label class="fld">Decorrenza prevista (comune)</label><input type="date" name="effective_date" value="{{ today() }}"></div>
+    <div><label class="fld">Motivo / nota</label><input type="text" name="reason" value="revisione salariale"></div>
+  </div>
+
+  <table class="tbl">
+    <thead><tr>
+      <th>Persona</th><th>Team</th><th>Livello</th><th>9-box</th>
+      <th class="num">RAL attuale</th><th class="num">A piano</th>
+      <th class="num" style="width:110px">Aumento €</th>
+      <th class="num" style="width:90px">Aumento %</th>
+      <th style="width:105px">Nuovo livello</th>
+      <th style="width:130px">Decorrenza<div class="muted3" style="font-weight:400;text-transform:none;letter-spacing:0">vuota = comune</div></th>
+    </tr></thead>
+    {% for r in rows %}
+    <tr data-ral="{{ r.ral or 0 }}">
+      <td><a href="/people/{{ r.id }}">{{ r.full_name }}</a>
+        {% set li = last_inc.get(r.id) %}
+        {% if li %}<div class="small{{ ' txt-' ~ li.flag if li.flag }}" title="Ultima variazione di RAL">{{ li.effective_date | dt }} : {{ '+' if li.delta > 0 }}{{ li.delta | eur }}</div>{% endif %}</td>
+      <td class="muted">{{ r.team_name or '—' }}</td>
+      <td class="muted">{{ lookup_label('livello', r.livello) if r.livello else '—' }}</td>
+      <td>{% if r.box %}<span class="badge {{ 'green' if r.box >= 7 else 'red' if r.box == 1 else 'amber' }}">{{ r.box }}</span>{% else %}—{% endif %}</td>
+      <td class="num">{{ r.ral | eur }}</td>
+      <td class="num">{% if r.a_piano %}<span class="badge amber">+{{ r.a_piano | eur }}</span>{% else %}<span class="muted3">—</span>{% endif %}</td>
+      <td class="num">
+        <input type="number" name="inc_{{ r.id }}" class="inc-eur" step="0.01" min="0" style="text-align:right"
+               hx-post="/comp/salary/simulate" hx-target="#sim-out" hx-include="#simform" hx-trigger="change, keyup delay:400ms">
+      </td>
+      <td class="num">
+        <input type="number" class="inc-pct" step="0.01" min="0" style="text-align:right"
+               {{ 'disabled' if not r.ral }} title="{{ 'Senza RAL censita la % non è calcolabile' if not r.ral }}"
+               hx-post="/comp/salary/simulate" hx-target="#sim-out" hx-include="#simform" hx-trigger="change, keyup delay:400ms">
+      </td>
+      <td>
+        <select name="lvl_{{ r.id }}" hx-post="/comp/salary/simulate" hx-target="#sim-out" hx-include="#simform">
+          <option value="">invariato</option>
+          {% for l in lookups('livello') %}
+          <option value="{{ l.code }}" {{ 'selected' if l.code == r.livello }}>{{ l.label }}</option>
+          {% endfor %}
+        </select>
+      </td>
+      <td><input type="date" name="date_{{ r.id }}"
+                 hx-post="/comp/salary/simulate" hx-target="#sim-out" hx-include="#simform"></td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <div id="sim-out"></div>
+
+  <div class="actions">
+    <button type="submit" class="btn green">Salva nel piano →</button>
+    <span class="muted small">Le proposte nascono in <strong>bozza</strong>: nessun aumento diventa reale finché non lo applichi dal <a href="/comp/plan{{ '?budget_id=' ~ budget_id if budget_id }}">piano</a>.</span>
+  </div>
+  </form>
+</div>
+
+<script>
+// Invio dentro un campo aggiorna solo la simulazione: il piano si salva
+// esclusivamente col pulsante.
+document.getElementById('simform').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.preventDefault();
+});
+
+// Importo e percentuale sono due modi di scrivere la stessa cosa: chi digita
+// comanda, l'altro campo si adegua. Impostare .value da codice non emette
+// eventi, quindi non si innesca un rimbalzo tra i due.
+document.querySelectorAll('#simform tr[data-ral]').forEach(tr => {
+  const ral = parseFloat(tr.dataset.ral) || 0;
+  const eur = tr.querySelector('.inc-eur');
+  const pct = tr.querySelector('.inc-pct');
+  if (!eur || !pct) return;
+  const round2 = v => Math.round(v * 100) / 100;
+  eur.addEventListener('input', () => {
+    if (!ral) return;
+    pct.value = eur.value === '' ? '' : round2(parseFloat(eur.value) / ral * 100);
+  });
+  pct.addEventListener('input', () => {
+    if (!ral) return;
+    eur.value = pct.value === '' ? '' : round2(ral * parseFloat(pct.value) / 100);
+  });
+});
+</script>
+{% endblock %}

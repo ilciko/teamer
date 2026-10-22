@@ -1,0 +1,10 @@
+[Unit]
+Description=Teamer - richiesta di aggiornamento dall'app
+# L'app (utente teamer, senza privilegi) scrive data/update/request; l'aggiornamento gira come root.
+
+[Path]
+PathExists=/opt/teamer/data/update/request
+Unit=teamer-update.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}9-Box{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>9-Box Talent Matrix</h1>
+  <span class="badge green">coefficienti dinamici</span>
+  <div class="spacer"></div>
+  <form method="get" action="" onsubmit="location.href='/ninebox/start/'+this.pid.value; return false;">
+    <div class="frow">
+      <select name="pid" required>
+        <option value="">Valuta una persona…</option>
+        {% for pp in people %}<option value="{{ pp.id }}">{{ pp.full_name }}</option>{% endfor %}
+      </select>
+      <button class="btn">Avvia →</button>
+    </div>
+  </form>
+</div>
+
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Griglia — ultima valutazione per persona</div>
+    <div style="display:flex;gap:8px">
+      <div style="display:flex;flex-direction:column;justify-content:space-around">
+        <div class="muted3 small" style="writing-mode:vertical-rl;transform:rotate(180deg);text-align:center">← Potenziale</div>
+      </div>
+      <div style="flex:1">
+        <div class="g9">
+          {% for n in [6,8,9,3,5,7,1,2,4] %}
+          {% set b = boxes_by_n[n] %}
+          <div class="c9" data-z="{{ b.zone }}">
+            <div><span class="cn">{{ n }}</span> <span class="cl">{{ b.label }}</span></div>
+            {% for r in by_box.get(n, []) %}
+            <a class="chip-person" href="/people/{{ r.person_id }}" title="{{ r.eval_date }}">
+              <span class="av">{{ initials(r.full_name) }}</span>{{ r.full_name.split(' ')[0] }}
+            </a>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+        <div class="muted3 small" style="text-align:center;margin-top:4px">← Prestazione →</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Situazione</div>
+    <table class="tbl">
+      <thead><tr><th>Persona</th><th>Box</th><th>Data</th><th></th></tr></thead>
+      {% for r in latest %}
+      <tr>
+        <td><a href="/people/{{ r.person_id }}">{{ r.full_name }}</a></td>
+        <td><span class="badge {{ 'green' if r.box_number >= 7 else 'red' if r.box_number == 1 else 'amber' }}">{{ r.box_number }} · {{ boxes_by_n[r.box_number].label }}</span></td>
+        <td class="muted">{{ r.eval_date | dt }}</td>
+        <td><a class="btn sm ghost" href="/ninebox/start/{{ r.person_id }}">Rivaluta</a></td>
+      </tr>
+      {% endfor %}
+      {% for u in unrated %}
+      <tr>
+        <td>{{ u.full_name }}</td>
+        <td><span class="badge">mai valutato</span></td>
+        <td></td>
+        <td><a class="btn sm" href="/ninebox/start/{{ u.id }}">Valuta</a></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+{% endblock %}

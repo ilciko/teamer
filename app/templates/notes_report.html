@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{# Il titolo della pagina è il nome proposto dal browser per il PDF. #}
+{% block title %}Note 1:1 — {{ person.full_name if person else 'tutto il team' }} — {{ today.isoformat() }}{% endblock %}
+{% block content %}
+<div class="page-head no-print">
+  <h1>Report note</h1>
+  <div class="spacer"></div>
+  <button class="btn sm" type="button" onclick="window.print()">🖨 Stampa / PDF</button>
+  <a class="btn sm ghost" href="/notes?person_id={{ person_id or '' }}{{ '&archived=1' if archived }}">← Note</a>
+</div>
+
+<div class="card print-clean">
+  <h2 class="serif" style="font-size:1.3rem;margin-bottom:2px">
+    Note 1:1 — {{ person.full_name if person else 'tutto il team' }}
+  </h2>
+  <p class="muted small" style="margin-bottom:14px">
+    Generato il {{ today.strftime('%d/%m/%Y') }} · {{ notes | length }} note, dalla più recente
+    · {{ 'archiviate incluse' if archived else 'archiviate escluse' }}
+  </p>
+
+  {% for n in notes %}
+  <div class="note-print" style="padding:10px 0;border-top:0.5px solid var(--border)">
+    <div>
+      <strong>{{ n.note_date | dt }}</strong>
+      <span class="badge">{{ lookup_label('meeting_type', n.type) }}</span>
+      {% if not person %}· <strong>{{ n.full_name }}</strong>{% endif %}
+      {% if n.title %} · {{ n.title }}{% endif %}
+      {% if n.archived_at %}<span class="badge amber">archiviata il {{ n.archived_at | dt }}</span>{% endif %}
+    </div>
+    {% if n.body %}<div class="small" style="margin-top:4px;line-height:1.5;white-space:pre-line">{{ n.body }}</div>{% endif %}
+  </div>
+  {% else %}
+  <p class="muted">Nessuna nota.</p>
+  {% endfor %}
+</div>
+{% endblock %}

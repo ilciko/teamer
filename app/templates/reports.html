@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}Report{% endblock %}
+{% block head %}<script src="/static/js/chart.umd.js?v={{ asset_v() }}" defer></script>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Report</h1>
+  <div class="spacer"></div>
+  <form method="get" action="/reports" class="frow" style="min-width:380px;align-items:center">
+    <select name="team_id" onchange="this.form.submit()" {{ 'disabled' if group == 'team' }}>
+      <option value="">Tutta l'azienda</option>
+      {% for t in teams %}
+      <option value="{{ t.id }}" {{ 'selected' if team_id == t.id }}>{{ t.name }}</option>
+      {% endfor %}
+    </select>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap">
+      <input type="checkbox" name="group" value="team" {{ 'checked' if group == 'team' }}
+             onchange="this.form.team_id.value=''; this.form.submit()"> per team
+    </label>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Addetti nel tempo</div>
+  <div class="chart-box" style="height:280px"><canvas id="hcChart"></canvas></div>
+  <details style="margin-top:8px">
+    <summary class="muted small" style="cursor:pointer">Vedi i dati in tabella</summary>
+    <div style="overflow-x:auto">
+    <table class="tbl small" style="margin-top:6px">
+      <thead><tr><th>Serie</th>{% for l in labels %}<th class="num">{{ l }}</th>{% endfor %}</tr></thead>
+      {% for ds in headcount_ds %}
+      <tr><td>{{ ds.label }}</td>{% for v in ds.data %}<td class="num">{{ v }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </table>
+    </div>
+  </details>
+</div>
+
+<div class="card">
+  <div class="card-title">Monte RAL nel tempo</div>
+  {% if da %}
+  <p class="ctx-note" style="margin-top:0">L'analisi parte dal {{ da | dt }}, non ho dati precedenti.</p>
+  <div class="chart-box" style="height:280px"><canvas id="ralChart"></canvas></div>
+  {% else %}
+  <p class="ctx-note" style="margin-top:0">Non c'è un mese in cui sia nota la RAL di tutte le persone incluse: niente da diagrammare. Togli dal report chi non ha uno storico utilizzabile.</p>
+  {% endif %}
+  <details style="margin-top:8px">
+    <summary class="muted small" style="cursor:pointer">Vedi i dati in tabella</summary>
+    <div style="overflow-x:auto">
+    <table class="tbl small" style="margin-top:6px">
+      <thead><tr><th>Serie</th>{% for l in ral_labels %}<th class="num">{{ l }}</th>{% endfor %}</tr></thead>
+      {% for ds in ral_ds %}
+      <tr><td>{{ ds.label }}</td>{% for v in ds.data %}<td class="num">{{ v | eur }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </table>
+    </div>
+  </details>
+</div>
+
+<details class="card" style="max-width:720px">
+  <summary class="card-title" style="cursor:pointer;margin:0">Persone nel report — {{ inclusi | length }} incluse, {{ esclusi | length }} escluse</summary>
+  <p class="muted3 small" style="margin-top:8px">
+    Chi è escluso non compare in <em>nessuna</em> delle due serie: contarlo negli addetti ma non
+    nel monte RAL falserebbe il rapporto fra le due. Togliere chi non ha uno storico
+    utilizzabile è il modo per far partire l'analisi da più lontano. Accanto al nome, la
+    decorrenza della sua prima RAL nota: è quella la data da cui la persona è ricostruibile.
+  </p>
+  <form method="post" action="/reports/exclusions">
+    <input type="hidden" name="team_id" value="{{ team_id or '' }}">
+    <input type="hidden" name="group" value="{{ group }}">
+    <table class="tbl small">
+      {% for p in (inclusi + esclusi) | sort(attribute='full_name') %}
+      <tr>
+        <td style="width:1%"><input type="checkbox" name="include" value="{{ p.id }}"
+                                    {{ 'checked' if not p.report_excluded }}></td>
+        <td><a href="/people/{{ p.id }}">{{ p.full_name }}</a></td>
+        <td class="muted3">{% if p.prima_ral %}prima RAL {{ p.prima_ral | dt }}{% else %}nessuna RAL registrata{% endif %}</td>
+        <td class="muted3">{% if p.hire_reale %}assunta/o {{ p.hire_reale | dt }}{% else %}senza data di assunzione{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    <div class="actions"><button class="btn sm">Salva le esclusioni</button></div>
+  </form>
+</details>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const text2 = '#6b6860', grid = '#f1f0ec';
+
+  function lineChart(el, labels, datasets, fmt) {
+    const multi = datasets.length > 1;
+    new Chart(document.getElementById(el), {
+      type: 'line',
+      data: { labels, datasets: datasets.map(d => ({
+        ...d, borderWidth: 2, pointRadius: labels.length > 30 ? 0 : 2,
+        pointHoverRadius: 5, tension: 0.15 })) },
+      options: {
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: multi, labels: { color: text2, boxWidth: 12, boxHeight: 12 } },
+          tooltip: { callbacks: { label: ctx =>
+            ` ${ctx.dataset.label}: ${fmt(ctx.parsed.y)}` } }
+        },
+        scales: {
+          y: { beginAtZero: true, grid: { color: grid },
+               ticks: { color: text2, callback: v => fmt(v) } },
+          x: { grid: { display: false }, ticks: { color: text2, maxTicksLimit: 14 } }
+        }
+      }
+    });
+  }
+
+  const eur = v => '€ ' + Number(v).toLocaleString('it-IT');
+  lineChart('hcChart', {{ labels | tojson }}, {{ headcount_ds | tojson }}, v => v);
+  {% if da %}
+  lineChart('ralChart', {{ ral_labels | tojson }}, {{ ral_ds | tojson }}, eur);
+  {% endif %}
+});
+</script>
+{% endblock %}

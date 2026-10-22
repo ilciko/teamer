@@ -1,0 +1,11 @@
+-- Esclusioni dal report andamenti.
+--
+-- Il censimento iniziale è stato datato all'ultimo aumento noto di ciascuno:
+-- prima di quella data la RAL della persona non esiste, e il monte RAL non è
+-- ricostruibile finché anche l'ultimo censito non entra. Chi ha una storia
+-- particolare (o irrilevante per la lettura d'insieme) si toglie dal grafico,
+-- così l'analisi può partire da più lontano.
+--
+-- L'esclusione vale per entrambe le serie, addetti e monte RAL: una persona
+-- contata negli addetti ma non nel monte RAL falserebbe il rapporto fra le due.
+ALTER TABLE person ADD COLUMN report_excluded INTEGER NOT NULL DEFAULT 0;

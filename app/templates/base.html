@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Teamer{% endblock %} · Teamer</title>
+<link rel="stylesheet" href="/static/css/tokens.css?v={{ asset_v() }}">
+<script src="/static/js/htmx.min.js?v={{ asset_v() }}" defer></script>
+<script src="/static/js/teamer-session.js?v={{ asset_v() }}" defer></script>
+{% block head %}{% endblock %}
+</head>
+<body data-heartbeat="{{ heartbeat_seconds() }}"{% if public() %} class="public"{% endif %}>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="brand">Teamer<small>Gestione team</small></div>
+    {% set path = request.url.path %}
+    {% set pub = public() %}
+    {% if not pub %}
+    <a class="nav-link {{ 'active' if path == '/' }}" href="/">Dashboard</a>
+    <a class="nav-link {{ 'active' if path.startswith('/reports') }}" href="/reports">Report</a>
+    {% endif %}
+    <div class="nav-sep">Organizzazione</div>
+    <a class="nav-link {{ 'active' if path.startswith('/people') }}" href="/people">Persone</a>
+    <a class="nav-link {{ 'active' if path.startswith('/org') }}" href="/org">Organigramma</a>
+    <div class="nav-sep">Retribuzione</div>
+    {% if not pub %}
+    <a class="nav-link {{ 'active' if path.startswith('/comp/salary') }}" href="/comp/salary">Analisi salary</a>
+    <a class="nav-link {{ 'active' if path.startswith('/comp/plan') }}" href="/comp/plan">Piano aumenti</a>
+    <a class="nav-link {{ 'active' if path.startswith('/comp/budget') }}" href="/comp/budget">Budget aumenti</a>
+    {% endif %}
+    <a class="nav-link {{ 'active' if path.startswith('/comp/hiring') }}" href="/comp/hiring">Assunzioni</a>
+    {% if not pub %}
+    <a class="nav-link {{ 'active' if path.startswith('/comp/bonus') }}" href="/comp/bonus">Montepremi</a>
+    {% endif %}
+    <a class="nav-link {{ 'active' if path.startswith('/comp/listino') }}" href="/comp/listino">Listino</a>
+    {% if not pub %}
+    <div class="nav-sep">Valutazione</div>
+    <a class="nav-link {{ 'active' if path.startswith('/ninebox') }}" href="/ninebox">9-Box</a>
+    <a class="nav-link {{ 'active' if path.startswith('/cycles') }}" href="/cycles">Cicli &amp; obiettivi</a>
+    <div class="nav-sep">Interazioni</div>
+    <a class="nav-link {{ 'active' if path.startswith('/notes') }}" href="/notes">Note 1:1</a>
+    <a class="nav-link {{ 'active' if path.startswith('/actions') }}" href="/actions">Azioni</a>
+    <div class="nav-sep">Sistema</div>
+    <a class="nav-link {{ 'active' if path.startswith('/settings') }}" href="/settings">Configurazione</a>
+    {% endif %}
+    <div class="sidebar-foot">
+      {% set upd_badge = update_available() if not pub else none %}
+      {% if upd_badge %}<a class="btn sm update-badge" href="/settings?tab=update" title="Controllo del {{ upd_badge.checked_at | dt }}">↑ Aggiornamento {{ upd_badge.tag }}</a>{% endif %}
+      {# modalità pubblica: pagine riservate chiuse e cifre oscurate, per lo schermo condiviso #}
+      <form method="post" action="/public-mode">
+        <input type="hidden" name="next" value="{{ request.url.path }}{{ '?' ~ request.url.query if request.url.query }}">
+        <button class="public-switch{{ ' on' if pub }}" title="{{ 'Torna alla modalità completa' if pub else 'Nasconde le pagine riservate e le cifre: per condividere lo schermo' }}">
+          <span class="track"><span class="knob"></span></span> Modalità pubblica
+        </button>
+      </form>
+      <form method="post" action="/lock" data-no-lock-guard><button class="btn ghost" style="width:100%">🔒 Blocca</button></form>
+    </div>
+  </nav>
+  <main class="content{% block content_class %}{% endblock %}">
+    {% if public() %}<div class="public-banner no-print">👁 Modalità pubblica: pagine riservate chiuse, cifre oscurate.</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+<!-- Sblocco in place: markup statico, mai rigenerato da htmx. -->
+<div id="lock-overlay" hidden>
+  <div class="login-card">
+    <h1>Sessione bloccata</h1>
+    <p class="muted small" style="margin-bottom:16px">
+      Il database è stato chiuso. Inserisci la password per riaprirlo: quello che
+      hai scritto in questa pagina resta dov'è.
+    </p>
+    <div class="flash error" id="lock-error" hidden></div>
+    <label class="fld">Password</label>
+    <input type="password" id="lock-password" autocomplete="current-password">
+    <div class="actions">
+      <button type="button" class="btn" id="lock-submit" style="width:100%">Sblocca →</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

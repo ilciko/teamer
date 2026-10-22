@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# Teamer — aggiorna all'ultima release GitHub.
+#
+# Uso: teamer-update [--no-restart] [--from-app]
+#   --no-restart  non riavvia il servizio (usato dall'installer, che lo crea dopo)
+#   --from-app    lanciato da teamer-update.service quando l'app scrive data/update/request
+#
+# Il DB (data/) e la config (.env) non vengono toccati: prima dello swap si fa una copia del
+# DB in data/backups/ (le ultime 5). Stato e log dell'ultimo aggiornamento stanno in
+# data/update/ (state.json, update.log), dove l'app li legge. Al termine installa le unit
+# systemd e sé stesso dalla release nuova: un container vecchio si converte da solo.
+set -euo pipefail
+
+APP_DIR="/opt/teamer"
+DATA="$APP_DIR/data"
+UPD="$DATA/update"
+UNIT_DIR="/etc/systemd/system"
+export PATH="/usr/local/bin:$PATH"
+export UV_PYTHON_INSTALL_DIR=/opt/uv/python   # python gestito da uv in path di sistema
+# shellcheck disable=SC1091
+[[ -f "$APP_DIR/.deploy.env" ]] && source "$APP_DIR/.deploy.env"   # GH_REPO, GH_TOKEN (facoltativo)
+GH_REPO="${GH_REPO:-ilciko/teamer}"
+GH_TOKEN="${GH_TOKEN:-}"
+
+NO_RESTART=0
+FROM_APP=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-restart) NO_RESTART=1 ;;
+    --from-app) FROM_APP=1 ;;
+  esac
+done
+
+mkdir -p "$UPD" "$DATA/backups"
+id teamer &>/dev/null && chown teamer:teamer "$UPD"   # l'app ci scrive request e latest.json
+rm -f "$UPD/request"   # prima di tutto: la path unit non deve riattivarsi a ciclo
+exec 9>"$UPD/.lock"
+if ! flock -n 9; then
+  echo "Aggiornamento già in corso."
+  exit 0
+fi
+
+LOG="$UPD/update.log"
+: > "$LOG"
+exec > >(tee -a "$LOG") 2>&1
+
+msg() { echo -e "\e[1;34m[update]\e[0m $(date '+%H:%M:%S') $*"; }
+CURRENT=$(cat "$APP_DIR/.version" 2>/dev/null || echo "nessuna")
+TAG=""
+STARTED=$(date -Iseconds)
+WAS_ACTIVE=0
+STOPPED=0
+
+state() {   # status messaggio
+  local finished=""
+  [[ "$1" != "running" ]] && finished=$(date -Iseconds)
+  printf '{"status":"%s","from":"%s","to":"%s","started":"%s","finished":"%s","message":"%s","via":"%s"}\n' \
+    "$1" "$CURRENT" "${TAG:-?}" "$STARTED" "$finished" "$2" "$([[ $FROM_APP == 1 ]] && echo app || echo shell)" \
+    > "$UPD/state.json.tmp"
+  mv "$UPD/state.json.tmp" "$UPD/state.json"
+  chmod 644 "$UPD/state.json"
+}
+
+on_error() {
+  local line="$1"
+  msg "Errore alla riga ${line}: ripristino."
+  if [[ ! -d "$APP_DIR/src" && -d "$APP_DIR/src.old" ]]; then
+    mv "$APP_DIR/src.old" "$APP_DIR/src"
+  fi
+  rm -rf "$APP_DIR/src.new"
+  if (( STOPPED )); then systemctl start teamer || true; fi
+  state error "errore alla riga ${line}, versione precedente ripristinata"
+  exit 1
+}
+trap 'on_error $LINENO' ERR
+
+auth=()
+[[ -n "$GH_TOKEN" ]] && auth=(-H "Authorization: Bearer ${GH_TOKEN}")
+
+install_units() {   # dalla cartella deploy/install della versione installata
+  local src="$1" changed=0 u
+  for u in teamer-update.path teamer-update.service; do
+    [[ -f "$src/$u" ]] || continue
+    if ! cmp -s "$src/$u" "$UNIT_DIR/$u"; then
+      install -m 644 "$src/$u" "$UNIT_DIR/$u"
+      changed=1
+    fi
+  done
+  if (( changed )); then systemctl daemon-reload; fi
+  if [[ -f "$UNIT_DIR/teamer-update.path" ]] && ! systemctl is-enabled --quiet teamer-update.path; then
+    systemctl enable --now -q teamer-update.path
+  fi
+  # l'updater si sostituisce per ultimo (mv: il processo in corso tiene il file vecchio)
+  if [[ -f "$src/teamer-update" ]] && ! cmp -s "$src/teamer-update" /usr/local/bin/teamer-update; then
+    install -m 755 "$src/teamer-update" /usr/local/bin/teamer-update.new
+    mv /usr/local/bin/teamer-update.new /usr/local/bin/teamer-update
+  fi
+}
+
+TAG=$(curl -fsSL "${auth[@]}" "https://api.github.com/repos/${GH_REPO}/releases/latest" \
+      | grep -m1 '"tag_name"' | cut -d'"' -f4 || true)
+if [[ -z "$TAG" ]]; then
+  if (( FROM_APP )); then
+    state error "nessuna release raggiungibile su ${GH_REPO}"
+    exit 1
+  fi
+  msg "Nessuna release pubblicata: uso il branch main."
+  TARBALL_URL="https://api.github.com/repos/${GH_REPO}/tarball/main"
+  TAG="main-$(date +%Y%m%d%H%M)"
+else
+  TARBALL_URL="https://api.github.com/repos/${GH_REPO}/tarball/${TAG}"
+fi
+
+if [[ "$TAG" == "$CURRENT" ]]; then
+  msg "Già alla versione ${TAG}: niente da fare."
+  [[ -d "$APP_DIR/src/deploy/install" ]] && install_units "$APP_DIR/src/deploy/install"
+  state ok "già alla versione più recente"
+  exit 0
+fi
+
+state running "in corso"
+msg "Aggiorno da ${CURRENT} a ${TAG}..."
+rm -rf "$APP_DIR/src.new" "$APP_DIR/src.old"
+mkdir -p "$APP_DIR/src.new"
+curl -fsSL "${auth[@]}" "$TARBALL_URL" -o "$APP_DIR/src.new/src.tar.gz"
+tar -xzf "$APP_DIR/src.new/src.tar.gz" -C "$APP_DIR/src.new" --strip-components=1
+rm "$APP_DIR/src.new/src.tar.gz"
+
+if systemctl is-active --quiet teamer; then
+  WAS_ACTIVE=1
+  msg "Fermo il servizio..."
+  systemctl stop teamer
+  STOPPED=1
+fi
+
+if [[ -f "$DATA/teamer.db" ]]; then
+  BACKUP="$DATA/backups/teamer-${CURRENT}-$(date +%Y%m%d%H%M%S).db"
+  msg "Backup del database in ${BACKUP}..."
+  cp -p "$DATA/teamer.db" "$BACKUP"
+  for ext in wal shm; do
+    [[ -f "$DATA/teamer.db-$ext" ]] && cp -p "$DATA/teamer.db-$ext" "$BACKUP-$ext"
+  done
+  # tiene gli ultimi 5 backup
+  find "$DATA/backups" -maxdepth 1 -name 'teamer-*.db' -printf '%T@ %p\n' | sort -rn | tail -n +6 \
+    | cut -d' ' -f2- | while read -r old; do rm -f "$old" "$old-wal" "$old-shm"; done
+  chmod 600 "$DATA"/backups/teamer-*.db*
+  id teamer &>/dev/null && chown teamer:teamer "$DATA/backups" "$DATA"/backups/teamer-*.db*
+fi
+
+# swap: il venv va creato nel path definitivo (contiene path assoluti)
+[[ -d "$APP_DIR/src" ]] && mv "$APP_DIR/src" "$APP_DIR/src.old"
+mv "$APP_DIR/src.new" "$APP_DIR/src"
+
+msg "Installo le dipendenze (uv sync)..."
+if ! (cd "$APP_DIR/src" && uv sync --no-dev --quiet); then
+  msg "uv sync fallito: ripristino la versione precedente."
+  rm -rf "$APP_DIR/src"
+  [[ -d "$APP_DIR/src.old" ]] && mv "$APP_DIR/src.old" "$APP_DIR/src"
+  if (( STOPPED )); then systemctl start teamer; fi
+  state error "dipendenze non installabili, versione precedente ripristinata"
+  exit 1
+fi
+
+echo "$TAG" > "$APP_DIR/.version"
+id teamer &>/dev/null && chown -R teamer:teamer "$APP_DIR/src" "$APP_DIR/.version"
+rm -rf "$APP_DIR/src.old"
+
+install_units "$APP_DIR/src/deploy/install"
+
+if (( NO_RESTART == 0 )) && { (( WAS_ACTIVE )) || systemctl cat teamer &>/dev/null; }; then
+  systemctl restart teamer
+  msg "Servizio riavviato."
+fi
+state ok "aggiornato"
+echo -e "\e[1;32m[ok]\e[0m Teamer aggiornato a ${TAG}."

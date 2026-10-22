@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Dashboard</h1></div>
+
+<div class="grid3" style="margin-bottom:14px">
+  <div class="stat"><div class="v">{{ headcount }}</div><div class="k">Persone attive</div></div>
+  <div class="stat"><div class="v">{{ ral_tot | eur }}</div><div class="k">Monte RAL</div></div>
+  <div class="stat"><div class="v">{{ ral_media | eur }}</div><div class="k">RAL media</div></div>
+</div>
+
+{% if processes %}
+<div class="card">
+  <div class="card-title">Processi in corso</div>
+  {% for p in processes %}
+  <div class="small" style="margin-bottom:5px">
+    <span class="badge {{ 'blue' if p.attention }}">{{ p.kind }}</span>
+    <a href="{{ p.url }}"><strong>{{ p.title }}</strong></a>
+    — {{ p.detail }}
+    {% if p.attention %}<span class="badge green">pronte da applicare</span>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="grid2">
+  <div>
+    <div class="card">
+      <div class="card-title">⚠ Scadenze — prossimi 90 giorni</div>
+      {% if expiring_contracts %}
+      <div class="small" style="font-weight:600;margin-bottom:4px">Contratti a termine</div>
+      {% for e in expiring_contracts %}
+      <div class="small" style="margin-bottom:3px">
+        <span class="badge amber">{{ e.end_date | dt }}</span>
+        <a href="/people/{{ e.person_id }}">{{ e.full_name }}</a>
+        <span class="muted">{{ lookup_label('tipo_contratto', e.tipo_contratto) }}</span>
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% if ending_benefits %}
+      <div class="small" style="font-weight:600;margin:8px 0 4px">Benefit in scadenza</div>
+      {% for b in ending_benefits %}
+      <div class="small" style="margin-bottom:3px">
+        <span class="badge amber">{{ b.end_date | dt }}</span>
+        <a href="/people/{{ b.person_id }}">{{ b.full_name }}</a> <span class="muted">{{ b.name }}</span>
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% if not expiring_contracts and not ending_benefits %}
+      <p class="muted small">Nessuna scadenza contrattuale nei prossimi 90 giorni.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Azioni</div>
+      {% if overdue_actions %}
+      <div class="small" style="font-weight:600;margin-bottom:4px;color:var(--red-text)">In ritardo</div>
+      {% for a in overdue_actions %}
+      <div class="small" style="margin-bottom:3px">
+        <span class="badge red">{{ a.due_date | dt }}</span>
+        <a href="/people/{{ a.person_id }}">{{ a.full_name }}</a> — {{ a.description }}
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% if upcoming_actions %}
+      <div class="small" style="font-weight:600;margin:8px 0 4px">In arrivo</div>
+      {% for a in upcoming_actions %}
+      <div class="small" style="margin-bottom:3px">
+        <span class="badge">{{ a.due_date | dt }}</span>
+        <a href="/people/{{ a.person_id }}">{{ a.full_name }}</a> — {{ a.description }}
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% if not overdue_actions and not upcoming_actions %}
+      <p class="muted small">Nessuna azione in scadenza.</p>
+      {% endif %}
+      <div class="actions"><a class="btn sm ghost" href="/actions">Tutte le azioni →</a></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="card-title">Valutazione</div>
+      {% for c in open_cycles %}
+      <div class="small" style="margin-bottom:4px">
+        <span class="badge green">aperto</span> <a href="/cycles/{{ c.id }}"><strong>{{ c.name }}</strong></a>
+      </div>
+      {% else %}
+      <p class="muted small">Nessun ciclo aperto. <a href="/cycles">Creane uno</a> per la review annuale.</p>
+      {% endfor %}
+      {% if never_rated %}
+      <div class="small" style="margin-top:6px">
+        <span class="badge amber">{{ never_rated }}</span> persone mai valutate al 9-box
+        — <a href="/ninebox">vai alla griglia</a>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Ultime note</div>
+      {% for n in recent_notes %}
+      <div class="small" style="margin-bottom:5px">
+        <span class="muted3">{{ n.note_date | dt }}</span>
+        <a href="/people/{{ n.person_id }}"><strong>{{ n.full_name }}</strong></a>
+        <span class="badge">{{ n.type }}</span> {{ n.title or '' }}
+      </div>
+      {% else %}<p class="muted small">Nessuna nota registrata.</p>{% endfor %}
+      <div class="actions"><a class="btn sm ghost" href="/notes">Tutte le note →</a></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Scorciatoie</div>
+      <div class="actions" style="flex-wrap:wrap;margin-top:0">
+        <a class="btn sm" href="/people">+ Persona</a>
+        <a class="btn sm" href="/ninebox">Valuta 9-box</a>
+        <a class="btn sm" href="/comp/salary">Analisi salary</a>
+        <a class="btn sm" href="/notes">+ Nota 1:1</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

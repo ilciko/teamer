@@ -1,0 +1,9 @@
+{# Solo i totali ricalcolati: il bottone di submit resta FUORI da questo
+   frammento, altrimenti lo swap lo distruggerebbe sotto il click. #}
+<span class="badge green">Salvato alle {{ ora }}</span>
+{% for cat, v in tl_totals.items() %}{% if v is not none %}
+<span class="badge blue">TL {{ lookup_label('goal_category', cat) | lower }}: {{ v }}</span>
+{% endif %}{% endfor %}
+{% for cat, v in self_totals.items() %}{% if v is not none %}
+<span class="badge">auto {{ lookup_label('goal_category', cat) | lower }}: {{ v }}</span>
+{% endif %}{% endfor %}

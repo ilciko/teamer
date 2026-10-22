@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Accesso · Teamer</title>
+<link rel="stylesheet" href="/static/css/tokens.css?v={{ asset_v() }}">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card fade-in">
+    <h1>Teamer</h1>
+    <p class="muted small" style="margin-bottom:16px">
+      {% if first_run %}Primo avvio: scegli la password che cifrerà il database.{% else %}Il database è cifrato: inserisci la password per aprirlo.{% endif %}
+    </p>
+    {% if bloccato %}<div class="flash">Sessione bloccata: il database è stato chiuso.</div>{% endif %}
+    {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+    <form method="post" action="/login">
+      <label class="fld">Password</label>
+      <input type="password" name="password" autofocus required>
+      {% if first_run %}
+      <label class="fld">Conferma password</label>
+      <input type="password" name="password_confirm" required>
+      {% endif %}
+      <div class="actions">
+        <button class="btn" style="width:100%">{% if first_run %}Crea database →{% else %}Apri →{% endif %}</button>
+      </div>
+    </form>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Montepremi {{ pool.period }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Montepremi {{ pool.period }}</h1>
+  <span class="badge {{ 'green' if pool.status == 'chiuso' else 'amber' }}">{{ pool.status }}</span>
+  <div class="spacer"></div>
+  <div id="residual-box">{% include "_bonus_residual.html" %}</div>
+</div>
+
+{% if pool.status != 'chiuso' %}
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Dati del montepremi</div>
+    <form method="post" action="/comp/bonus/{{ pool.id }}/update" class="frow">
+      <div><label class="fld">Periodo</label><input type="text" name="period" value="{{ pool.period }}" required></div>
+      <div><label class="fld">Tetto €</label><input type="number" name="total_cap" value="{{ pool.total_cap }}" step="0.01" {{ 'disabled' if pool.per_head }}></div>
+      <div><label class="fld">Cifra a testa €</label><input type="number" name="per_head" value="{{ pool.per_head or '' }}" step="0.01" placeholder="—"></div>
+      <div style="align-self:flex-end" class="actions">
+        <button class="btn sm">Correggi</button>
+        <button class="btn sm danger" formaction="/comp/bonus/{{ pool.id }}/delete"
+                onclick="return confirm('Eliminare il montepremi {{ pool.period }} e tutte le sue allocazioni?')">Elimina</button>
+      </div>
+    </form>
+    {% if pool.per_head %}
+    <p class="muted3 small" style="margin-top:6px">Tetto = {{ pool.per_head | eur }} a testa × platea inclusa (si ricalcola da solo). Svuota il campo per tornare al tetto fisso.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-title">Colonne di valutazione — spente non pesano nel calcolo</div>
+    <form method="post" action="/comp/bonus/{{ pool.id }}/factors"
+          onsubmit="return confirm('Applicare i fattori scelti e rigenerare le proposte? I finali ritoccati a mano restano.')">
+      <div class="frow" style="flex-wrap:wrap;gap:14px;font-size:13px">
+        <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="use_box" value="1" {{ 'checked' if pool.use_box }}> 9-box</label>
+        <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="use_role" value="1" {{ 'checked' if pool.use_role }}> Ruolo</label>
+        <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="use_rating" value="1" {{ 'checked' if pool.use_rating }}> Rating review</label>
+        <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="use_goal" value="1" {{ 'checked' if pool.use_goal }}> Obiettivi</label>
+      </div>
+      <div class="actions"><button class="btn sm">Applica e rigenera →</button></div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% if request.query_params.get('excluded') is not none %}
+<div class="flash">Escluse {{ request.query_params.get('excluded') }} persone dalla platea; proposte e tetto ricalcolati.</div>
+{% endif %}
+
+<div class="card">
+  {% if allocs and pool.status != 'chiuso' %}
+  <div class="actions" style="margin:0 0 10px 0;flex-wrap:wrap">
+    <span class="muted small">Esclusioni rapide:</span>
+    <form method="post" action="/comp/bonus/{{ pool.id }}/exclude-rule"
+          onsubmit="return confirm('Escludere chi è stato assunto negli ultimi 12 mesi?')">
+      <button class="btn sm ghost" name="rule" value="recent">Assunti ultimo anno</button>
+    </form>
+    <form method="post" action="/comp/bonus/{{ pool.id }}/exclude-rule"
+          onsubmit="return confirm('Escludere chi non è stato operativo almeno 6 mesi nell\'anno di competenza?')">
+      <button class="btn sm ghost" name="rule" value="competence">Non operativi ≥6 mesi nell'anno</button>
+    </form>
+  </div>
+  {% endif %}
+  {% if not allocs %}
+  <p class="muted">Nessuna allocazione: genera le proposte dal peso composito
+    (con le colonne di valutazione attive qui sopra).</p>
+  <form method="post" action="/comp/bonus/{{ pool.id }}/generate">
+    <div class="actions"><button class="btn">Genera proposte →</button></div>
+  </form>
+  {% else %}
+  <div style="overflow-x:auto">
+  <table class="tbl">
+    <thead><tr>
+      <th>Persona</th>
+      {% if pool.use_box %}<th class="num">Box</th>{% endif %}
+      {% if pool.use_role %}<th class="num">Ruolo</th>{% endif %}
+      {% if pool.use_rating %}<th class="num">Rating</th>{% endif %}
+      {% if pool.use_goal %}<th class="num">Obiettivi</th>{% endif %}
+      <th class="num">→ Peso</th>
+      <th class="num">Proposto</th><th class="num" style="width:130px">Finale €</th><th>Nota</th>
+      {% if pool.status != 'chiuso' %}<th></th>{% endif %}
+    </tr></thead>
+    {% for a in allocs %}
+    <tr class="{{ 'muted3' if not a.included }}">
+      <td><a href="/people/{{ a.person_id }}">{{ a.full_name }}</a>
+        {% if not a.included %}<span class="badge">esclusa</span>{% endif %}</td>
+      {% if a.detail and a.included %}
+      {% if pool.use_box %}<td class="num" title="peso casella">{{ a.detail.box or '—' }} <span class="muted3">×{{ a.detail.box_w }}</span></td>{% endif %}
+      {% if pool.use_role %}<td class="num" title="moltiplicatore ruolo">{{ a.detail.role or '—' }} <span class="muted3">×{{ a.detail.role_f }}</span></td>{% endif %}
+      {% if pool.use_rating %}<td class="num" title="moltiplicatore rating review">{{ a.detail.rating or '—' }} <span class="muted3">×{{ a.detail.rating_f }}</span></td>{% endif %}
+      {% if pool.use_goal %}<td class="num" title="punteggio obiettivi TL / 3">{{ a.detail.goal_score or '—' }} <span class="muted3">×{{ a.detail.goal_f }}</span></td>{% endif %}
+      {% else %}
+      <td class="num muted3" colspan="{{ pool.use_box + pool.use_role + pool.use_rating + pool.use_goal }}">{{ 'esclusa dalla platea' if not a.included else 'peso manuale' }}</td>
+      {% endif %}
+      <td class="num"><strong>{{ a.weight if a.included else '—' }}</strong></td>
+      <td class="num muted">{{ a.proposed_amount | eur }}</td>
+      <td class="num">
+        <form hx-post="/comp/bonus/{{ pool.id }}/alloc/{{ a.id }}" hx-target="#residual-box" hx-trigger="change">
+          <input type="number" name="final_amount" value="{{ a.final_amount or 0 }}" step="0.01" style="text-align:right"
+                 {{ 'disabled' if pool.status == 'chiuso' or not a.included }}>
+        </form>
+      </td>
+      <td class="muted small">{{ a.note or '' }}</td>
+      {% if pool.status != 'chiuso' %}
+      <td><form method="post" action="/comp/bonus/{{ pool.id }}/alloc/{{ a.id }}/toggle">
+        <button class="btn sm ghost">{{ 'Escludi' if a.included else 'Includi' }}</button></form></td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  <div class="actions">
+    {% if pool.status != 'chiuso' %}
+    <form method="post" action="/comp/bonus/{{ pool.id }}/generate"
+          onsubmit="return confirm('Rigenerare le proposte dai fattori correnti? I finali ritoccati a mano restano.')">
+      <button class="btn ghost sm">Rigenera proposte</button>
+    </form>
+    <form method="post" action="/comp/bonus/{{ pool.id }}/close" onsubmit="return confirm('Chiudere il montepremi?')">
+      <button class="btn green sm">Chiudi montepremi</button>
+    </form>
+    {% else %}
+    <form method="post" action="/comp/bonus/{{ pool.id }}/reopen"
+          onsubmit="return confirm('Riaprire il montepremi per correzioni?')">
+      <button class="btn ghost sm">Riapri</button>
+    </form>
+    {% endif %}
+    <span class="muted3 small">I moltiplicatori si configurano in <a href="/settings?tab=ninebox">Configurazione → 9-box</a>.</span>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

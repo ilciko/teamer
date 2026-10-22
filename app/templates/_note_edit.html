@@ -1,0 +1,43 @@
+{# Correzione di una nota. Form classico POST + redirect: nessun hx-post e
+   nessun hx-trigger qui dentro, così nessuno swap può distruggere il bottone
+   di submit mentre lo si clicca (trappola nota, vedi CLAUDE.md). #}
+<div id="nota-{{ n.id }}" style="padding:8px 0;border-bottom:0.5px solid var(--border)">
+  <form method="post" action="/notes/{{ n.id }}">
+    <input type="hidden" name="f_q" value="{{ f_q }}">
+    <input type="hidden" name="f_person_id" value="{{ f_person_id or '' }}">
+    <input type="hidden" name="f_archived" value="{{ f_archived or '' }}">
+    <div class="frow">
+      <div><label class="fld">Persona</label>
+        <select name="person_id" required>
+          {% for pp in people %}<option value="{{ pp.id }}" {{ 'selected' if pp.id == n.person_id }}>{{ pp.full_name }}</option>{% endfor %}
+        </select></div>
+      <div><label class="fld">Data</label><input type="date" name="note_date" value="{{ n.note_date }}" required></div>
+      <div><label class="fld">Tipo</label>
+        <select name="type">
+          {% for l in lookups('meeting_type') %}<option value="{{ l.code }}" {{ 'selected' if l.code == n.type }}>{{ l.label }}</option>{% endfor %}
+        </select></div>
+    </div>
+    <label class="fld">Titolo</label><input type="text" name="title" value="{{ n.title or '' }}">
+    <label class="fld">Testo</label><textarea name="body" style="min-height:200px">{{ n.body or '' }}</textarea>
+    {% if linked %}
+    <p class="muted small" style="margin-top:6px">
+      Azioni collegate: {% for a in linked %}{{ a.description }}{{ '; ' if not loop.last }}{% endfor %} —
+      <a href="/actions">gestiscile in Azioni →</a>
+    </p>
+    {% endif %}
+    <div class="actions">
+      <button class="btn sm">Salva modifiche →</button>
+      <a class="btn sm ghost"
+         hx-get="/notes/{{ n.id }}/riga?f_q={{ f_q | urlencode }}&f_person_id={{ f_person_id or '' }}&f_archived={{ f_archived or '' }}"
+         hx-target="#nota-{{ n.id }}" hx-swap="outerHTML">Annulla</a>
+    </div>
+    <p class="muted3 small">Sovrascrive questa nota. Per un altro incontro usa "Nuova nota".</p>
+  </form>
+  <form method="post" action="/notes/{{ n.id }}/delete" style="margin-top:6px"
+        onsubmit="return confirm('Eliminare definitivamente questa nota?{% if linked %} Le {{ linked|length }} azioni collegate restano in elenco, scollegate.{% endif %}')">
+    <input type="hidden" name="f_q" value="{{ f_q }}">
+    <input type="hidden" name="f_person_id" value="{{ f_person_id or '' }}">
+    <input type="hidden" name="f_archived" value="{{ f_archived or '' }}">
+    <button class="btn sm ghost">Elimina nota</button>
+  </form>
+</div>

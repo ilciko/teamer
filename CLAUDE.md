@@ -1,0 +1,58 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+Teamer è un tool mono-utente (COO) di gestione team: organigramma, retribuzione (RAL, benefit, budget aumenti/assunzioni, montepremi), valutazioni 9-box, ciclo annuale obiettivi/review/benessere, note 1:1, report. UI e commit in italiano.
+
+## Comandi
+
+```bash
+make setup      # uv sync (su mac sqlcipher3 compila contro brew sqlcipher; se fallisce:
+                #   CFLAGS="-I$(brew --prefix sqlcipher)/include" LDFLAGS="-L$(brew --prefix sqlcipher)/lib" make setup)
+make dev        # uvicorn --reload su http://127.0.0.1:8000
+make seed       # DB demo in data/teamer.db (password: demo1234) — rifiuta se il DB esiste già
+make test       # pytest
+uv run pytest tests/test_services.py -q                  # un file
+uv run pytest tests/test_db.py::test_fts_search -q       # un singolo test
+```
+
+### Rilascio e aggiornamenti
+
+Ogni feature viene rilasciata subito: bump `version` in `pyproject.toml` → `uv lock` → commit → tag annotato → push (anche del tag) → GitHub Release. L'updater legge `releases/latest`: senza la Release nuova installa la versione vecchia. Le istanze si aggiornano **dall'app** (Configurazione → Aggiornamenti: l'app scrive `data/update/request`, la path unit `teamer-update.path` lancia `teamer-update` come root; vedi `app/services/updater.py` e `deploy/install/`) oppure con `pct exec <ctid> -- /usr/local/bin/teamer-update`. I dettagli della macchina di sviluppo e dei container (host, chiavi, firma) stanno in `CLAUDE.local.md`, non versionato.
+
+`teamer-update` non tocca mai `/opt/teamer/data` (DB) né `.env`: prima dello swap copia il DB in `data/backups/` (ultimi 5), se `uv sync` fallisce fa rollback, e a fine corsa installa unit systemd e sé stesso dalla release nuova. L'installer da zero è `deploy/ct/teamer.sh` (standalone stile community-scripts: il loro `build.func` non supporta install-script di repo terzi); il repo è pubblico, il token serve solo a un fork privato.
+
+## Architettura
+
+**Stack**: FastAPI + Jinja2 + htmx (niente SPA, niente build step), SQLite cifrato con SQLCipher, Python gestito da `uv`. Tutti gli asset (htmx, Chart.js, font DM Sans/Serif) sono vendored in `app/static/`: l'app deve funzionare offline, mai aggiungere risorse da CDN.
+
+**Database — il cuore delle convenzioni** (`app/db.py`, `migrations/`):
+- Connessione globale unica protetta da lock; esiste solo dopo il login: la password di login È la chiave SQLCipher (`PRAGMA key`), niente tabella utenti. Primo avvio = creazione DB.
+- **Blocco senza timeout di inattività**: la sessione vale finché il DB è aperto e il cookie è firmato. Ogni pagina manda un battito (`app/static/js/teamer-session.js` → `POST /heartbeat`, registro in `app/session.py`); quando l'ultima si chiude, il reaper del lifespan chiama `close_db()` — il blocco è reale, non solo il cookie. `/heartbeat` e `/unlock` stanno **fuori** dal guard di `main` e rispondono sempre JSON: una pagina con una nota a metà non deve mai essere trascinata via da una richiesta di sfondo. A DB bloccato compare un overlay che chiede la password e sblocca in place (il testo non salvato resta, e un submit trattenuto riparte da solo). Chi accede al DB fuori tempo riceve `db.DatabaseLocked`, gestita in `main` con redirect/`HX-Redirect`.
+- Migrazioni = file SQL numerati in `migrations/`, applicati in ordine all'avvio (`schema_version` in `app_meta`). Ogni modifica di schema è un nuovo file, mai editare i vecchi.
+- **Append-only**: ciò che evolve (RAL, assegnazioni, contratti, valutazioni) non si aggiorna, si aggiunge un record; lo stato corrente è `end_date IS NULL` / l'ultimo evento. Le tabelle a eventi hanno `created_at`, `voided`, `void_reason`: gli errori si annullano (`voided=1`), non si cancellano. Le query di stato filtrano sempre `voided=0`.
+- Regola UX correlata: ogni entità offre due strade distinte — il **cambiamento reale** (nuovo record storicizzato: "Nuova assegnazione", nuovo evento RAL) e la **correzione di un errore** (form "Correggi" in place, void, o delete guardato). Mantenerla per ogni feature nuova. Per i **documenti** (nota 1:1) il cambiamento reale è una nota nuova e la correzione è la modifica in place: non c'è stato derivato da storicizzare, quindi niente `voided`.
+- Config in tabelle, non nel codice: pick-list in `lookup` (i dati salvano il `code`, le etichette si rinominano e si propagano), pesi 9-box in `ninebox_weight`, domande/caselle 9-box in `evaluation_model.config` (JSON), moltiplicatori premio in `bonus_factor`, default (es. CCNL) in `app_meta`.
+
+**Layout applicativo**:
+- `app/routers/*` — route + query SQL inline; ogni router recupera i template via `from app.main import templates` (import tardivo per evitare cicli).
+- `app/services/*` — logica di calcolo pura e testabile (ninebox_calc, goal_score, budget, cost, trends, importer, hr_report): i test unitari vivono qui, i router restano sottili.
+- `app/templates/*` — Jinja2; i frammenti htmx hanno prefisso `_` (es. `_salary_sim.html`). Filtri custom: `|eur`, `|dt` (formato it-IT), globals `lookups()`, `lookup_label()`, `meta()`, `today()`.
+- Pattern htmx: il server ricalcola e restituisce un frammento (`hx-post` + `hx-target`). **Trappola nota**: mai mettere pulsanti di submit dentro un frammento rigenerato da htmx — lo swap può distruggere il bottone prima che il click arrivi (già successo: il submit va statico, fuori dal target).
+
+**Semantiche di dominio non ovvie**:
+- Gli aumenti non si applicano mai direttamente: nascono come proposte (`ral_proposal`, stati bozza→proposta→approvata→applicata/respinta); solo l'applicazione genera il `ral_event` (e la `employment` nuova se cambia livello). Budget: residuo = tetto − applicato − **impegnato** (proposte pendenti). Nel piano si conferma la **nuova RAL** (è quella che decide HR, di norma diversa dall'aumento proposto): `ral_proposal.amount` resta il delta, ricalcolato dal server come nuova RAL − baseline (RAL corrente + tranche pendenti che la precedono) — è quel delta che consuma il budget.
+- La Δ mostrata nella RAL timeline è **derivata** dalla timeline visibile (`cost.derive_deltas`), non il `delta` salvato: void e reinserimenti non possono sfasarla. Il `delta` in tabella resta il dato di budget. Chi calcola una RAL a una certa data usa `cost.current_ral(pid, on_date=...)`, mai la RAL "più recente in assoluto".
+- Pesi degli obiettivi review: 100% **per categoria** (professionale e personale separatamente), mai sommati insieme.
+- Montepremi: peso composito = casella 9-box × ruolo × rating review × obiettivi, fattori accendibili per pool (`use_*`), platea con `included` per allocazione; i `final_amount` ritoccati a mano (≠ proposed) sopravvivono a rigenerazioni e ridistribuzioni.
+- Riporto diretto (`person_assignment.manager_person_id`) **derivato, mai scelto**: `org_tree.expected_manager` risale dal team della persona ai team padre e prende il ruolo superiore più vicino tra membri e lead del team (Specialist → TL → Manager → Director; a parità il lead, poi il nome). Responsabile può essere solo un ruolo da TL in su (`org_tree.MIN_MANAGER_ROLE`): Junior e Specialist non hanno mai riporti. Nuova assegnazione, correzione e censimento lo calcolano per la persona; modifica team (responsabile) e cambi di ruolo/team passano da `_verify_reports`, che se qualche riporto altrui non torna manda a `/org/riporti` (correzione in place o cambiamento reale con data). Le posizioni aperte usano la stessa regola, dopo il riporto del sostituito.
+- Grafico linee di riporto (`org_tree.build_chart`): una riga per ruolo da TL in su più una per tutti quelli sotto. I rami che passano da team intermedi senza responsabile (es. Operation → PMO → PM Lead/PM Tech) si raccolgono in una casella di raggruppamento (`kind: "group"`: l'etichetta del team centrata nello spazio della casella del manager che manca, con sotto «coordinatore:» il responsabile della scheda team se attivo); se quella riga non è libera i rami scendono di una.
+- Simulazioni di riorganizzazione (`/org/sim`, `app/services/reorg.py`, migrazione 0021): una simulazione salva **solo le differenze** dalla realtà (`reorg_team` = team nuovi con id virtuale negativo `-reorg_team.id` o override completi di team reali, `reorg_move` solo per chi cambia team/ruolo o esce (`hidden`, applicando non si tocca), `reorg_position` ipotetiche (nuove assunzioni, disegnate come posizioni in budget; o `internal` = figura di un altro team, titolo = nome, disegnata come persona che cambia team), `reorg_position_move` per le posizioni aperte del budget spostate di team/ruolo o nascoste con `hidden`, che applicando non si toccano); lo stato = realtà di oggi + differenze, con riporti sempre ricalcolati (anche l'"attuale" nei confronti, per non mischiare i riporti reali da verificare). Si modifica solo in `bozza`; `approvata` si applica con una data: team creati/aggiornati in place, spostamenti come nuove assegnazioni storicizzate, posizioni del budget aggiornate in place (team/ruolo, solo se ancora aperte), poi `_verify_reports`. Le posizioni ipotetiche non entrano nel budget assunzioni.
+- Team: si **elimina** solo se vuoto e senza storia (né assegnazioni, nemmeno chiuse, né posizioni); se resta solo storia si **archivia** (`team.archived_at`): sparisce da organigramma, grafico, simulazioni e select, ma le assegnazioni passate continuano a puntarci. Le liste di team "vivi" filtrano `archived_at IS NULL`; i calcoli su storico/discendenti no. Motivi in `org._team_blockers` (`block` = vivo, `history` = solo storia).
+- Modalità pubblica (`app/public.py`, switch in fondo alla barra laterale): flag `app_meta.public_mode`, letto dal middleware `auth_guard` a ogni richiesta (ContextVar) e persistente fino allo spegnimento. Le pagine riservate (`public.BLOCKED_PREFIXES` + sotto-route RAL/benefit/incentivi/allegati/sostituzione della persona) rispondono 403 a qualunque metodo, `/` rimanda a `/org`. Le cifre passano da `|eur`, che in pubblica stampa `•••`; `|eur_plain` solo per ciò che resta mostrabile (listino per codice, in chiaro; per team e dettaglio per persona non si mostrano). Valori grezzi fuori da `|eur` (input precompilati, dati JS) vanno chiusi con `{% if not public() %}`: ogni pagina condivisibile nuova va aggiunta all'audit in `tests/test_public.py`.
+- Cessazione → redirect al flusso sostituzione (posizione nel budget assunzioni, anche dell'anno successivo creato al volo).
+- Listino (`/comp/listino`, `app/services/listino.py`): costo/giorno = costo azienda annuo ÷ giorni fatturabili, calcolo puro senza DB. Il **codice di listino** (`listino_profile`, Configurazione → Listino) sta sulla `person_assignment` corrente: platea = chi ne ha uno, niente flag a parte. Parametri in `app_meta` (`listino_*`, `listino_festivita_gg = ''` = festività feriali dal calendario dell'anno), con formazione/interne/saturazione sovrascrivibili per persona in `listino_person_param` (NULL = globale); weekend e festività si contano davvero, mai 104/11 fissi. Il frammento htmx non contiene controlli: il select del codice sta nella card statica.
+
+**Test** (`tests/`): unit sui services + e2e con `TestClient` (login su DB temporaneo via `TEAMER_DB_PATH`, vedi `conftest.py`). Le feature nuove si verificano anche con uno script e2e usa-e-getta che percorre il flusso reale via HTTP.
+
+**Documentazione di dominio**: `docs/schema_team_tool.md` (schema commentato, da tenere allineato quando si aggiungono tabelle) + `docs/schema_team_tool_ER.mermaid`; `docs/proposte_integrazioni_schema.md` contiene i razionali e la sezione Design System (palette/font per la UI, ripresi in `tokens.css`).

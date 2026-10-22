@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}9-Box · {{ p.full_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <span class="av lg">{{ initials }}</span>
+  <div>
+    <h1>Valutazione 9-Box</h1>
+    <div class="muted small" id="subtitle">{{ p.full_name }}</div>
+  </div>
+  <div class="spacer"></div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div class="pdots" id="pdots">
+      {% for i in range(6) %}<div class="pd {{ 'cur' if i == 0 }}" id="pd{{ i }}"></div>{% endfor %}
+    </div>
+    <span class="muted small" id="plbl">0 / 6</span>
+  </div>
+</div>
+
+<form method="post" action="/ninebox/save" id="nbform">
+  <input type="hidden" name="person_id" value="{{ p.id }}">
+  <input type="hidden" name="answers" id="answers-input">
+  <input type="hidden" name="eval_date" value="{{ today() }}">
+
+  <div class="card" id="ctx-card">
+    <div class="qtag ctx">Contesto — precompilato dall'assegnazione corrente, modificabile</div>
+    <div class="frow">
+      <div>
+        <label class="fld">Livello di responsabilità</label>
+        <select name="role_type" id="role-sel">
+          {% for r in roles %}<option value="{{ r.code }}" {{ 'selected' if r.code == role }}>{{ r.label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="fld">Anzianità nel ruolo</label>
+        <select name="seniority" id="sen-sel">
+          {% for s in seniorities %}<option value="{{ s.code }}" {{ 'selected' if s.code == seniority }}>{{ s.label }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="muted small" style="margin-top:8px" id="adj-preview"></div>
+    <div class="actions"><button type="button" class="btn" onclick="startQs()">Avvia domande →</button></div>
+  </div>
+
+  <div id="q-area"></div>
+</form>
+
+<script>
+const CONFIG  = {{ config_json | safe }};
+const WEIGHTS = {{ weights_json | safe }};
+let answers = [], current = -1;
+
+function adjFor() {
+  const key = document.getElementById('role-sel').value + '|' + document.getElementById('sen-sel').value;
+  return WEIGHTS[key] || [0, 0];
+}
+function fmt(v){ return (v >= 0 ? '+' : '') + v.toFixed(2); }
+function updAdjPreview() {
+  const [pa, po] = adjFor();
+  document.getElementById('adj-preview').textContent =
+    (pa || po) ? `Coefficienti applicati: prestazione ${fmt(pa)}, potenziale ${fmt(po)}` : 'Nessun aggiustamento per questo contesto.';
+}
+document.getElementById('role-sel').addEventListener('change', updAdjPreview);
+document.getElementById('sen-sel').addEventListener('change', updAdjPreview);
+updAdjPreview();
+
+function updProg(n) {
+  for (let i = 0; i < 6; i++) {
+    const d = document.getElementById('pd' + i);
+    d.className = 'pd' + (i < n ? ' done' : i === n ? ' cur' : '');
+  }
+  document.getElementById('plbl').textContent = Math.min(n, 6) + ' / 6';
+}
+
+function startQs() {
+  document.getElementById('ctx-card').style.display = 'none';
+  document.getElementById('subtitle').textContent =
+    '{{ p.full_name }} · ' + document.getElementById('role-sel').selectedOptions[0].text +
+    ' · ' + document.getElementById('sen-sel').selectedOptions[0].text;
+  answers = [];
+  renderQ(0);
+}
+
+function renderQ(i) {
+  current = i;
+  updProg(i);
+  const q = CONFIG.questions[i];
+  const role = document.getElementById('role-sel').value;
+  const sen = document.getElementById('sen-sel').value;
+  const note = (q.ctx_notes || {})[role] || (q.ctx_notes || {})[sen] || '';
+  const area = document.getElementById('q-area');
+  area.innerHTML = `
+    <div class="card fade-in">
+      <div class="qtag ${q.type}">${q.tag}</div>
+      <div style="font-size:14px;line-height:1.6;margin-bottom:12px">${q.text}</div>
+      ${note ? `<div class="ctx-note">⚑ ${note}</div>` : ''}
+      <div style="display:flex;flex-direction:column;gap:7px">
+        ${q.options.map(o => `
+          <div class="opt" data-val="${o.value}" onclick="selectOpt(this)">
+            <div class="opt-icon"></div>
+            <div style="font-size:13px;line-height:1.55">${o.text}</div>
+          </div>`).join('')}
+      </div>
+      <div class="actions" style="justify-content:flex-end">
+        <button type="button" class="btn" id="nxtbtn" disabled onclick="nextQ()">${i < 5 ? 'Avanti →' : 'Calcola e salva →'}</button>
+      </div>
+    </div>`;
+  window.scrollTo(0, 0);
+}
+
+let selVal = null;
+function selectOpt(el) {
+  document.querySelectorAll('.opt').forEach(o => o.classList.remove('sel'));
+  el.classList.add('sel');
+  selVal = parseInt(el.dataset.val);
+  document.getElementById('nxtbtn').disabled = false;
+}
+
+function nextQ() {
+  if (selVal === null) return;
+  answers.push(selVal);
+  selVal = null;
+  if (current < 5) renderQ(current + 1);
+  else {
+    updProg(6);
+    document.getElementById('answers-input').value = answers.join(',');
+    document.getElementById('nbform').submit();
+  }
+}
+</script>
+{% endblock %}

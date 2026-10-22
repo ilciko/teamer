@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Montepremi{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Montepremi</h1></div>
+
+<div class="card">
+  <table class="tbl">
+    <thead><tr><th>Periodo</th><th>Stato</th><th class="num">Tetto</th><th class="num">Allocato</th><th class="num">Persone</th><th></th></tr></thead>
+    {% for p in pools %}
+    <tr>
+      <td><strong>{{ p.period }}</strong></td>
+      <td><span class="badge {{ 'green' if p.status == 'chiuso' else 'amber' }}">{{ p.status }}</span></td>
+      <td class="num">{{ p.total_cap | eur }}</td>
+      <td class="num">{{ p.allocated | eur }}</td>
+      <td class="num">{{ p.n }}</td>
+      <td><a class="btn sm ghost" href="/comp/bonus/{{ p.id }}">Apri</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="muted">Nessun montepremi. Creane uno: la distribuzione parte dai pesi 9-box e poi si aggiusta a mano.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card" style="max-width:520px">
+  <div class="card-title">Nuovo montepremi</div>
+  <form method="post" action="/comp/bonus">
+    <label class="fld">Periodo</label><input type="text" name="period" placeholder="Premi 2026" required>
+    <div class="frow">
+      <div><label class="fld">Tetto fisso €</label><input type="number" name="total_cap" step="0.01" min="0"></div>
+      <div><label class="fld">oppure cifra a testa €</label><input type="number" name="per_head" step="0.01" min="0" placeholder="es. 500"></div>
+    </div>
+    <p class="muted3 small" style="margin-top:6px">Con la cifra a testa il tetto = cifra × persone incluse nella platea, e si ricalcola quando escludi/includi qualcuno.</p>
+    <div class="actions"><button class="btn">Crea →</button></div>
+  </form>
+</div>
+{% endblock %}

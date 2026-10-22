@@ -1,0 +1,89 @@
+{# Frammento rigenerato a ogni modifica dei parametri: nessun bottone, nessun select. #}
+{% macro gg(v) -%}{{ ('%.1f' % v) | replace('.', ',') if v is not none else '—' }}{%- endmacro %}
+{# Listino per codice: in chiaro anche in modalità pubblica (eur_plain); per team e per persona lì non si mostrano. #}
+{% macro delta(sc) -%}
+{% if sc %}<span class="{{ 'pos' if sc.delta >= 0 else 'neg' }}">{{ '+' if sc.delta >= 0 else '−' }}{{ (sc.delta | abs) | eur_plain }}{% if sc.pct is not none %} <span class="small">({{ '+' if sc.pct >= 0 else '−' }}{{ ('%.1f' % (sc.pct | abs)) | replace('.', ',') }}%)</span>{% endif %}</span>{% else %}<span class="muted3">—</span>{% endif %}
+{%- endmacro %}
+{% macro gruppo(rows, label_col, listino=false) -%}
+<table class="tbl">
+  <thead><tr><th>{{ label_col }}</th><th class="num">n</th><th class="num">min</th><th class="num">media</th><th class="num" title="Σ costi annui ÷ Σ giorni fatturabili: la tariffa vera del gruppo. Coincide con la media quando tutti hanno gli stessi giorni fatturabili; si stacca con part-time o giorni diversi">blended</th><th class="num">max</th>
+    {% if listino %}<th class="num" title="tariffa corrente del listino commerciale (Configurazione → Listino)">listino</th><th class="num" title="listino − costo blended; tra parentesi il margine sul prezzo">Δ vs blended</th>{% endif %}</tr></thead>
+  {% for r in rows %}
+  <tr{% if r.key == '__tot__' %} style="font-weight:600;border-top:2px solid var(--border, #ddd)"{% endif %}>
+    <td>{{ caller(r) }}{% if r.n_escluse %} <span class="badge amber" title="senza RAL o senza giorni: non contano nelle medie">{{ r.n_escluse }} escl.</span>{% endif %}</td>
+    <td class="num">{{ r.n }}</td>
+    <td class="num">{{ r.min | eur_plain }}</td>
+    <td class="num">{{ r.media | eur_plain }}</td>
+    <td class="num"><strong>{{ r.blended | eur_plain }}</strong></td>
+    <td class="num">{{ r.max | eur_plain }}{% if listino and r.max_sopra %} <span class="badge red" title="la persona più cara del codice costa più della tariffa a listino">sopra listino</span>{% endif %}</td>
+    {% if listino %}
+    <td class="num">{{ r.listino_rate | eur_plain }}</td>
+    <td class="num">{{ delta(r.scost) }}</td>
+    {% endif %}
+  </tr>
+  {% else %}<tr><td colspan="{{ 8 if listino else 6 }}" class="muted">—</td></tr>{% endfor %}
+</table>
+{%- endmacro %}
+<div class="fade-in">
+  {% if g.fatturabili_fte <= 0 %}
+  <div class="flash error">Con questi parametri i giorni fatturabili di un full-time sono {{ gg(g.fatturabili_fte) }}: nessun costo giornaliero è calcolabile.</div>
+  {% endif %}
+  {% if prod_errori is defined %}
+  <div class="flash error">Valore non valido per {{ prod_errori.persona }} ({{ prod_errori.campi | join(', ') | replace('_pct', '') }}): formazione e interne tra 0 e 100, saturazione tra 0 e 200. Resta il valore precedente.</div>
+  {% endif %}
+  {% if not platea %}
+  <div class="flash">Nessuna assegnazione corrente ha un codice di listino: assegnali nella tabella qui sotto.</div>
+  {% elif escluse %}
+  <div class="flash">{{ escluse }} person{{ 'a' if escluse == 1 else 'e' }} con codice ma senza RAL censita: elencat{{ 'a' if escluse == 1 else 'e' }} nel dettaglio, fuori dalle medie.</div>
+  {% endif %}
+
+  <p class="muted small" style="margin:0 0 10px;line-height:1.6">
+    {{ anno }}: {{ g.giorni }} giorni − {{ g.weekend }} weekend − {{ gg(g.festivita_tot) }} festività ({{ 'dal calendario' if g.festivita_auto else 'impostate' }}) = {{ gg(g.lavorabili) }} lavorabili
+    − {{ gg(p.ferie_gg) }} ferie e permessi − {{ gg(p.malattia_gg) }} malattia = {{ gg(g.presenza) }} di presenza
+    → {{ gg(g.fatturabili_fte) }} fatturabili per un full-time con la produttività predefinita ·
+    costo annuo = RAL × {{ '%g' % p.oneri_mult }}{% if p.premi_pct %} × (1 + {{ '%g' % p.premi_pct }}% premi){% endif %} + benefit a costo + {{ p.altri_costi | eur }}
+  </p>
+
+  <div class="card">
+    <div class="card-title">Listino per codice</div>
+    {% set righe = per_codice + ([dict(totale, key='__tot__', listino_rate=none, scost=none, max_sopra=false)] if totale and per_codice|length > 1 else []) %}
+    {% call(r) gruppo(righe, 'Codice', listino=true) %}{% if r.key == '__tot__' %}Tutta la platea{% else %}<code>{{ r.key }}</code> <span class="muted">{{ r.label }}</span>{% endif %}{% endcall %}
+    {% if per_codice and per_codice | rejectattr('listino_rate') | list | length %}
+    <p class="muted3 small" style="margin-top:6px">Per i codici senza tariffa non c'è confronto: impostala in <a href="/settings?tab=listino">Configurazione → Listino</a>.</p>
+    {% endif %}
+  </div>
+
+  {% if not public() %}{# per team e per persona: niente in modalità pubblica #}
+  <div class="card">
+    <div class="card-title">Per team</div>
+    {% call(r) gruppo(per_team, 'Team') %}{{ r.key or '—' }}{% endcall %}
+  </div>
+
+  {% if platea %}
+  <div class="card">
+    <div class="card-title">Dettaglio per persona</div>
+    <table class="tbl">
+      <thead><tr><th>Persona</th><th>Codice</th><th>Descrizione</th><th class="num">Listino €/gg</th><th>Team</th><th>Ruolo</th>
+        <th class="num">gg fatturabili</th><th class="num">Costo / gg</th><th class="num" title="tariffa del codice − costo/gg della persona; tra parentesi il margine sul prezzo">Δ listino</th></tr></thead>
+      {% for r in platea %}
+      <tr>
+        <td><a href="/people/{{ r.id }}">{{ r.full_name }}</a></td>
+        <td><code>{{ r.listino_code }}</code>{% if not r.listino_active %} <span class="badge amber">disattivato</span>{% endif %}</td>
+        <td class="muted">{{ r.listino_desc }}</td>
+        <td class="num">{{ r.listino_rate | eur_plain }}</td>
+        <td class="muted">{{ r.team_name or '—' }}</td>
+        <td class="muted">{{ lookup_label('role_type', r.role_type) if r.role_type else '—' }}</td>
+        {% if r.motivo == 'ral' %}
+        <td colspan="3"><span class="badge amber">RAL mancante</span> <span class="muted3 small">censiscila dalla scheda: senza RAL non c'è costo</span></td>
+        {% else %}
+        <td class="num">{{ gg(r.fatturabili) }}{% if r.prod_custom %} <span class="muted3 small" title="produttività personalizzata: formazione {{ '%g' % r.prod.formazione_pct }}%, interne {{ '%g' % r.prod.interne_pct }}%, saturazione {{ '%g' % r.prod.saturazione_pct }}%">pers.</span>{% endif %}{% if r.part_time_pct != 100 %} <span class="muted3 small" title="part-time">{{ '%g' % r.part_time_pct }}%</span>{% endif %}</td>
+        <td class="num"><strong>{{ r.costo_gg | eur if r.costo_gg is not none else '—' }}</strong></td>
+        <td class="num">{{ delta(r.scost) }}</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}{# /public #}
+</div>

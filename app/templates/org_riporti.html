@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Verifica riporti{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Verifica riporti</h1>
+    <div class="muted small">Il riporto diretto si calcola da team e ruolo: Specialist → TL → Manager → Director, e se manca una figura si sale di un livello.</div>
+  </div>
+  <div class="spacer"></div>
+  <a class="btn ghost sm" href="{{ next }}">{{ 'Non ora →' if rows else 'Indietro →' }}</a>
+</div>
+
+{% if rows %}
+<form method="post" action="/org/riporti" class="card">
+  <div class="card-title">{{ rows | length }} riport{{ 'o' if rows | length == 1 else 'i' }} da aggiornare</div>
+  <table class="tbl">
+    <thead><tr><th></th><th>Persona</th><th>Team</th><th>Ruolo</th><th>Riporto attuale</th><th>Nuovo riporto</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><input type="checkbox" name="pid" value="{{ r.person.id }}" checked></td>
+      <td><a href="/people/{{ r.person.id }}">{{ r.person.full_name }}</a></td>
+      <td>{{ r.team_name }}</td>
+      <td>{{ lookup_label('role_type', r.person.role_type) }}</td>
+      <td class="muted">{% if r.current_name %}{{ r.current_name }}{% elif r.inactive %}non più attivo{% else %}—{% endif %}</td>
+      <td><strong>{{ r.expected_name or '— nessuno —' }}</strong></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <div style="margin-top:14px">
+    <label class="opt-inline"><input type="radio" name="mode" value="correzione" {{ 'checked' if mode == 'correzione' }}>
+      <strong>Correzione</strong> <span class="muted small">— sovrascrive l'assegnazione corrente (il riporto era sbagliato)</span></label>
+    <label class="opt-inline"><input type="radio" name="mode" value="cambiamento" {{ 'checked' if mode == 'cambiamento' }}>
+      <strong>Cambiamento reale dal</strong> <input type="date" name="date" value="{{ on_date }}" style="width:auto;display:inline-block">
+      <span class="muted small">— nuova assegnazione, lo storico resta</span></label>
+  </div>
+  <input type="hidden" name="next" value="{{ next }}">
+  <div class="actions">
+    <button class="btn">Applica ai selezionati</button>
+    <a class="btn ghost" href="{{ next }}">Non ora</a>
+  </div>
+  <p class="muted3 small">Chi resta non spuntato tiene il riporto attuale e ricompare alla prossima verifica.</p>
+</form>
+{% else %}
+<div class="card"><p class="muted">Tutti i riporti corrispondono a team e ruolo.</p></div>
+{% endif %}
+{% endblock %}
