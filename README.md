@@ -38,9 +38,14 @@ systemd `teamer` (utente non-root, hardening) e stampa l'IP interno.
 L'app espone **HTTP semplice sulla porta 8080**: va messa dietro un reverse proxy
 che termina il TLS.
 
-Variabili opzionali: `CTID`, `HOSTNAME`, `DISK_GB`, `RAM_MB`, `CORES`, `BRIDGE`,
-`NET_IP` (dhcp o CIDR), `GATEWAY`, `STORAGE`, `APP_PORT`; per un fork `GH_REPO=<owner>/teamer`
-(e `GH_TOKEN` solo se il fork è privato).
+Da terminale lo script mostra un riepilogo (whiptail) con i valori rilevati sul nodo: primo CTID
+libero, storage per il disco e per il template, bridge. **Crea** per procedere, **Modifica** per
+sceglierli uno per uno (storage e bridge da elenco, IP DHCP o statico con gateway, VLAN, risorse,
+porta). Le stesse impostazioni si passano come variabili d'ambiente, che fanno da valore proposto:
+`CTID`, `CT_HOSTNAME`, `DISK_GB`, `RAM_MB`, `CORES`, `STORAGE`, `TEMPLATE_STORAGE`, `BRIDGE`, `VLAN`,
+`NET_IP` (dhcp o CIDR), `GATEWAY`, `APP_PORT`; `NONINTERACTIVE=1` salta le domande, `DRY_RUN=1`
+mostra cosa verrebbe creato senza toccare nulla. Per un fork `GH_REPO=<owner>/teamer` (e `GH_TOKEN`
+solo se il fork è privato).
 
 ### Aggiornamenti
 
