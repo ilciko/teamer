@@ -15,34 +15,38 @@
     <div class="brand">Teamer<small>Gestione team</small></div>
     {% set path = request.url.path %}
     {% set pub = public() %}
-    {% if not pub %}
-    <a class="nav-link {{ 'active' if path == '/' }}" href="/">Dashboard</a>
-    <a class="nav-link {{ 'active' if path.startswith('/reports') }}" href="/reports">Report</a>
-    {% endif %}
-    <div class="nav-sep">Organizzazione</div>
-    <a class="nav-link {{ 'active' if path.startswith('/people') }}" href="/people">Persone</a>
-    <a class="nav-link {{ 'active' if path.startswith('/org') }}" href="/org">Organigramma</a>
-    <div class="nav-sep">Retribuzione</div>
-    {% if not pub %}
-    <a class="nav-link {{ 'active' if path.startswith('/comp/salary') }}" href="/comp/salary">Analisi salary</a>
-    <a class="nav-link {{ 'active' if path.startswith('/comp/plan') }}" href="/comp/plan">Piano aumenti</a>
-    <a class="nav-link {{ 'active' if path.startswith('/comp/budget') }}" href="/comp/budget">Budget aumenti</a>
-    {% endif %}
-    <a class="nav-link {{ 'active' if path.startswith('/comp/hiring') }}" href="/comp/hiring">Assunzioni</a>
-    {% if not pub %}
-    <a class="nav-link {{ 'active' if path.startswith('/comp/bonus') }}" href="/comp/bonus">Montepremi</a>
-    {% endif %}
-    <a class="nav-link {{ 'active' if path.startswith('/comp/listino') }}" href="/comp/listino">Listino</a>
-    {% if not pub %}
-    <div class="nav-sep">Valutazione</div>
-    <a class="nav-link {{ 'active' if path.startswith('/ninebox') }}" href="/ninebox">9-Box</a>
-    <a class="nav-link {{ 'active' if path.startswith('/cycles') }}" href="/cycles">Cicli &amp; obiettivi</a>
-    <div class="nav-sep">Interazioni</div>
-    <a class="nav-link {{ 'active' if path.startswith('/notes') }}" href="/notes">Note 1:1</a>
-    <a class="nav-link {{ 'active' if path.startswith('/actions') }}" href="/actions">Azioni</a>
-    <div class="nav-sep">Sistema</div>
-    <a class="nav-link {{ 'active' if path.startswith('/settings') }}" href="/settings">Configurazione</a>
-    {% endif %}
+    {# gruppi del menu: (titolo, [(etichetta, href, prefisso per "attivo", riservato)]).
+       Riservato = nascosto in modalità pubblica; un gruppo senza voci visibili non si mostra. #}
+    {% set nav_groups = [
+      ('Organizzazione', [('Persone', '/people', '/people', false), ('Organigramma', '/org', '/org', false),
+                          ('Assunzioni', '/comp/hiring', '/comp/hiring', false)]),
+      ('Retribuzione', [('Analisi salary', '/comp/salary', '/comp/salary', true), ('Piano aumenti', '/comp/plan', '/comp/plan', true),
+                        ('Budget aumenti', '/comp/budget', '/comp/budget', true), ('Montepremi', '/comp/bonus', '/comp/bonus', true),
+                        ('Listino', '/comp/listino', '/comp/listino', false)]),
+      ('Valutazione', [('9-Box', '/ninebox', '/ninebox', true), ('Cicli &amp; obiettivi', '/cycles', '/cycles', true)]),
+      ('Interazioni', [('Note 1:1', '/notes', '/notes', true), ('Azioni', '/actions', '/actions', true)]),
+      ('Sistema', [('Configurazione', '/settings', '/settings', true)]),
+    ] %}
+    <div class="sidebar-nav">
+      {% if not pub %}
+      <a class="nav-link {{ 'active' if path == '/' }}" href="/">Dashboard</a>
+      <a class="nav-link {{ 'active' if path.startswith('/reports') }}" href="/reports">Report</a>
+      {% endif %}
+      {% for title, links in nav_groups %}
+      {% set visible = links | rejectattr(3) | list if pub else links %}
+      {% if visible %}
+      {% set here = namespace(open=false) %}
+      {% for link in visible %}{% if path.startswith(link[2]) %}{% set here.open = true %}{% endif %}{% endfor %}
+      {# un solo gruppo aperto (name comune); di partenza solo quello della pagina corrente #}
+      <details class="nav-group" name="nav-groups"{{ ' open' if here.open }}>
+        <summary>{{ title }}</summary>
+        {% for label, href, prefix, _ in visible %}
+        <a class="nav-link {{ 'active' if path.startswith(prefix) }}" href="{{ href }}">{{ label | safe }}</a>
+        {% endfor %}
+      </details>
+      {% endif %}
+      {% endfor %}
+    </div>
     <div class="sidebar-foot">
       {% set upd_badge = update_available() if not pub else none %}
       {% if upd_badge %}<a class="btn sm update-badge" href="/settings?tab=update" title="Controllo del {{ upd_badge.checked_at | dt }}">↑ Aggiornamento {{ upd_badge.tag }}</a>{% endif %}
@@ -54,7 +58,17 @@
         </button>
       </form>
       <form method="post" action="/lock" data-no-lock-guard><button class="btn ghost" style="width:100%">🔒 Blocca</button></form>
+      <a class="sidebar-sign" href="https://github.com/ilciko/teamer" target="_blank" rel="noopener">by ilciko.lab @ v{{ asset_v() }}</a>
     </div>
+    <script>
+    // Un solo gruppo aperto anche dove <details name> non è supportato (browser più vecchi).
+    document.querySelectorAll('.nav-group').forEach(function (d) {
+      d.addEventListener('toggle', function () {
+        if (!d.open) return;
+        document.querySelectorAll('.nav-group[open]').forEach(function (o) { if (o !== d) o.open = false; });
+      });
+    });
+    </script>
   </nav>
   <main class="content{% block content_class %}{% endblock %}">
     {% if public() %}<div class="public-banner no-print">👁 Modalità pubblica: pagine riservate chiuse, cifre oscurate.</div>{% endif %}

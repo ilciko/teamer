@@ -43,12 +43,15 @@ h1, h2.serif { font-family: 'DM Serif Display', serif; font-weight: 400; }
 
 /* ---- layout: sidebar + contenuto ---- */
 .layout { display: flex; min-height: 100vh; }
+/* barra: intestazione fissa in alto, piede fisso in basso, scorre solo il menu in mezzo */
 .sidebar {
   width: 210px; flex-shrink: 0; background: var(--surface);
-  border-right: 0.5px solid var(--border); padding: 18px 12px;
-  display: flex; flex-direction: column; gap: 2px;
+  border-right: 0.5px solid var(--border); padding: 16px 12px 10px;
+  display: flex; flex-direction: column;
   position: sticky; top: 0; height: 100vh;
 }
+.sidebar .brand { flex: none; }
+.sidebar-nav { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-bottom: 8px; }
 .sidebar .brand { font-family: 'DM Serif Display', serif; font-size: 1.35rem; padding: 0 10px 14px; }
 .sidebar .brand small { display: block; font-family: 'DM Sans'; font-size: 10px; color: var(--text3); letter-spacing: .08em; text-transform: uppercase; margin-top: 2px; }
 .nav-link {
@@ -57,8 +60,20 @@ h1, h2.serif { font-family: 'DM Serif Display', serif; font-weight: 400; }
 }
 .nav-link:hover { background: var(--surface2); color: var(--text); }
 .nav-link.active { background: var(--blue-bg); color: var(--blue-text); }
-.nav-sep { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--text3); font-weight: 600; padding: 14px 10px 4px; }
-.sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+/* gruppi a fisarmonica: uno solo aperto (details name="nav-groups") */
+.nav-group > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px;
+  font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--text3); font-weight: 600;
+  padding: 10px 10px 6px; border-radius: var(--radius); user-select: none;
+}
+.nav-group > summary::-webkit-details-marker { display: none; }
+.nav-group > summary::before { content: '▸'; font-size: 9px; transition: transform .15s; }
+.nav-group[open] > summary::before { transform: rotate(90deg); }
+.nav-group > summary:hover { color: var(--text2); }
+.nav-group > .nav-link { margin-left: 6px; }
+.sidebar-foot { flex: none; display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 0.5px solid var(--border); }
+.sidebar-sign { text-align: center; font-size: 10px; color: var(--text3); text-decoration: none; letter-spacing: .04em; }
+.sidebar-sign:hover { color: var(--text2); }
 .upd-log { max-height: 260px; overflow: auto; font-size: 11px; background: var(--surface2); padding: 8px; border-radius: var(--radius); white-space: pre-wrap; }
 .update-badge { text-align: center; background: var(--green-bg); border-color: var(--green-border); color: var(--green-dark); }
 /* modalità pubblica: switch sopra "Blocca" e banner in testa alla pagina */
