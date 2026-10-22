@@ -236,6 +236,12 @@ erDiagram
         bool public_mode
         datetime locked_until
     }
+    USER_META {
+        int id PK
+        int owner_user_id FK
+        string key
+        string value
+    }
     AUDIT_EVENT {
         int id PK
         int user_id FK
@@ -295,4 +301,6 @@ erDiagram
     HIRING_POSITION ||--o{ REORG_POSITION_MOVE : spostata
 
     APP_USER ||--o{ AUDIT_EVENT : registra
-
+    APP_USER ||--o{ USER_META : configura
+    APP_USER ||--o{ TEAM : titolare
+    APP_USER ||--o{ REVIEW_CYCLE : crea

@@ -90,10 +90,13 @@ def _handle() -> _Handle:
 def _open_session(s) -> _Handle:
     if _sys is None or _key is None:
         raise DatabaseLocked()
+    from app import perimeter
+
     conn = _connect(Path(config.DB_PATH), _raw(_key))
     _configure(conn)
     # proprietario delle righe nuove nelle tabelle "del director" (DEFAULT (teamer_owner()))
     conn.create_function("teamer_owner", 0, lambda uid=s.user_id: uid)
+    perimeter.install(conn, s.user_id)
     return _Handle(conn)
 
 
@@ -169,6 +172,9 @@ def _connect(path: Path, key_sql: str):
     """Connessione aperta e verificata; WrongPassword se la chiave non decifra il file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlcipher.connect(str(path), check_same_thread=False)
+    # proprietario delle righe nuove nelle tabelle "del director": nessuno, finché una
+    # sessione non registra il suo (vedi _open_session). Serve anche alle migrazioni.
+    conn.create_function("teamer_owner", 0, lambda: None)
     conn.execute(f"PRAGMA key = {key_sql}")
     conn.execute("PRAGMA kdf_iter = 256000")  # solo per le passphrase (legacy); ignorato con la chiave grezza
     try:
@@ -194,12 +200,13 @@ def _install(conn, key: str) -> None:
     global _sys, _state, _key
     _configure(conn)
     conn.execute("PRAGMA journal_mode = WAL")
-    conn.create_function("teamer_owner", 0, lambda: None)  # il sistema non è proprietario di niente
     with _gate:
         _sys = _Handle(conn)
         _key = key
         _state = "pronto"
     migrate()
+    if not sys.one("SELECT 1 FROM app_meta WHERE key='instance_id'"):  # riconosce i backup di questa istanza
+        sys.execute("INSERT INTO app_meta (key, value) VALUES ('instance_id', ?)", (secrets.token_hex(8),))
 
 
 def open_db(key: str, db_path: Path | None = None):
@@ -474,6 +481,9 @@ def restore(src: Path, *, source_key: str | None = None, password: str | None = 
             sys_h = _require()
             with sys_h.lock:
                 cur = sys_h.conn
+                here = cur.execute("SELECT value FROM app_meta WHERE key='instance_id'").fetchone()
+                there = conn.execute("SELECT value FROM app_meta WHERE key='instance_id'").fetchone()
+                same_instance = bool(here and there and here[0] == there[0])
                 for table in INSTANCE_TABLES:
                     cols = [r[1] for r in cur.execute(f"PRAGMA table_info({table})")]
                     rows = cur.execute(f"SELECT {', '.join(cols)} FROM {table}").fetchall()
@@ -481,14 +491,27 @@ def restore(src: Path, *, source_key: str | None = None, password: str | None = 
                     conn.executemany(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                                      [tuple(r) for r in rows])
                 conn.execute("DELETE FROM app_meta WHERE key='public_mode'")  # ≤ 0.29: ora è per utente
+                if not same_instance:
+                    # gli utenti del file non sono quelli di qui: i dati tornano «da assegnare»
+                    from app import perimeter
+
+                    for table in [*perimeter.OWNED, *perimeter.TEAM]:
+                        conn.execute(f"UPDATE {table} SET owner_user_id=NULL")
+                    conn.execute("INSERT INTO app_meta (key, value) VALUES ('instance_id', ?) "
+                                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (here[0] if here else "",))
                 conn.commit()
-                stats = {"from_version": version,
+                stats = {"from_version": version, "same_instance": same_instance,
                          "people": conn.execute("SELECT COUNT(*) FROM person").fetchone()[0],
                          "teams": conn.execute("SELECT COUNT(*) FROM team").fetchone()[0]}
                 conn.close()
                 conn = None
                 # scambio: copia di sicurezza del DB attuale, poi il file nuovo al suo posto
-                backup = dest.parent / "backups" / f"teamer-pre-ripristino-{datetime.now():%Y%m%d%H%M%S}.db"
+                stamp = f"{datetime.now():%Y%m%d%H%M%S}"
+                backup = dest.parent / "backups" / f"teamer-pre-ripristino-{stamp}.db"
+                n = 1
+                while backup.exists():  # due ripristini nello stesso secondo
+                    n += 1
+                    backup = dest.parent / "backups" / f"teamer-pre-ripristino-{stamp}-{n}.db"
                 backup_to(backup)
                 backup.chmod(0o600)
                 close_db()
@@ -508,14 +531,23 @@ def restore(src: Path, *, source_key: str | None = None, password: str | None = 
 
 
 def get_meta(key: str, default: str = "") -> str:
-    row = one("SELECT value FROM app_meta WHERE key=?", (key,))
+    """Le chiavi di configurazione (CCNL, soglie, listino) sono del director: tabella user_meta."""
+    from app import perimeter
+
+    table = "user_meta" if perimeter.scoped_meta(key) else "app_meta"
+    row = one(f"SELECT value FROM {table} WHERE key=?", (key,))
     return row["value"] if row else default
 
 
 def set_meta(key: str, value: str) -> None:
-    execute(
-        "INSERT INTO app_meta (key, value) VALUES (?,?) "
-        "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+    from app import perimeter
+
+    if perimeter.scoped_meta(key):
+        execute("INSERT INTO user_meta (key, value) VALUES (?,?) "
+                "ON CONFLICT(owner_user_id, key) DO UPDATE SET value=excluded.value", (key, value))
+    else:
+        sys.execute("INSERT INTO app_meta (key, value) VALUES (?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
 
 
 def lookups(category: str) -> list:

@@ -72,7 +72,7 @@ def lookup_save(category: str = Form(...), code: str = Form(...), label: str = F
                 sort_order: int = Form(0)):
     db.execute(
         "INSERT INTO lookup (category, code, label, sort_order) VALUES (?,?,?,?) "
-        "ON CONFLICT(category, code) DO UPDATE SET label=excluded.label, sort_order=excluded.sort_order",
+        "ON CONFLICT(owner_user_id, category, code) DO UPDATE SET label=excluded.label, sort_order=excluded.sort_order",
         (category.strip(), code.strip(), label.strip(), sort_order))
     return RedirectResponse("/settings?tab=lookup&saved=1", status_code=302)
 
@@ -150,7 +150,7 @@ def listino_profile_save(code: str = Form(""), description: str = Form(""), sort
         return RedirectResponse("/settings?tab=listino&saved=err", status_code=302)
     db.execute(
         "INSERT INTO listino_profile (code, description, sort_order, day_rate) VALUES (?,?,?,?) "
-        "ON CONFLICT(code) DO UPDATE SET description=excluded.description, "
+        "ON CONFLICT(owner_user_id, code) DO UPDATE SET description=excluded.description, "
         "sort_order=excluded.sort_order, day_rate=excluded.day_rate",
         (code, description, sort_order, rate))
     return RedirectResponse("/settings?tab=listino&saved=1", status_code=302)

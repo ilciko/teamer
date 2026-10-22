@@ -62,6 +62,25 @@
   </table>
   <p class="muted3 small" style="margin-top:6px">Gli utenti non si cancellano: si disattivano (l'audit continua a puntare a loro).</p>
 </div>
+{% if unassigned.any %}
+<div class="card" style="max-width:720px; border-color: var(--amber-border)">
+  <div class="card-title">Dati da assegnare</div>
+  <p class="small" style="margin-bottom:8px">Nel database ci sono dati che non appartengono a nessun director (dopo l'aggiornamento alla 0.32 o un ripristino da un'altra istanza): finché non li assegni non li vede nessuno.</p>
+  <table class="tbl small" style="max-width:360px">
+    {% for g in unassigned.groups if g.n %}<tr><td>{{ g.label }}</td><td class="num">{{ g.n }}</td></tr>{% endfor %}
+    {% if unassigned.config %}<tr><td>voci di configurazione</td><td class="num">{{ unassigned.config }}</td></tr>{% endif %}
+  </table>
+  <p class="muted3 small">Vanno tutti a un solo director, con le persone dei team. La configurazione esistente prende il posto della sua dove coincide. Poi i team si possono trasferire uno per uno.</p>
+  {% if directors %}
+  <form method="post" action="/admin/assign" class="frow" style="align-items:end" onsubmit="return confirm('Assegnare tutti i dati esistenti al director scelto?')">
+    <div><label class="fld">Director</label>
+      <select name="user_id">{% for d in directors %}<option value="{{ d.id }}">{{ d.username }}{% if d.display_name %} — {{ d.display_name }}{% endif %}</option>{% endfor %}</select></div>
+    <div><label class="fld">Conferma: scrivi ASSEGNA</label><input type="text" name="confirm" autocomplete="off" required></div>
+    <div><button class="btn sm">Assegna</button></div>
+  </form>
+  {% else %}<p class="small">Crea prima un utente Director.</p>{% endif %}
+</div>
+{% endif %}
 <div class="card" style="max-width:560px">
   <div class="card-title">Nuovo utente</div>
   <form method="post" action="/admin/users">

@@ -14,7 +14,7 @@ import hmac
 import secrets
 from datetime import datetime, timedelta
 
-from app import db, session
+from app import db, perimeter, session
 
 ROLES = {"admin": "Site admin", "director": "Director"}
 MIN_PASSWORD = 12
@@ -151,6 +151,8 @@ def create(username: str, role: str, password: str, display_name: str | None = N
         (username, (display_name or "").strip() or None, role, hash_password(password),
          1 if must_change else 0, _ts(_now())))
     audit("user_create", f"utente {username} ({ROLES[role]})")
+    if role == "director":
+        perimeter.ensure_config(uid)  # parte dalla configurazione di default
     return uid
 
 
@@ -164,6 +166,8 @@ def update(uid: int, display_name: str | None, role: str) -> None:
                ((display_name or "").strip() or None, role, uid))
     if role != u["role"]:
         session.drop_user(uid)  # il ruolo decide le pagine: si rientra
+        if role == "director":
+            perimeter.ensure_config(uid)
     audit("user_update", f"{_target(u)}: ruolo {ROLES[role]}")
 
 

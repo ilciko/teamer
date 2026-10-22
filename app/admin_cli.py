@@ -10,6 +10,7 @@ come root e poi lancia questi comandi come utente `teamer`. Comandi:
     unlock NOME                 toglie il blocco per troppi tentativi
     enable NOME / disable NOME  riattiva / disattiva
     list-users
+    assign-unassigned NOME      assegna al director NOME i dati senza proprietario
     restore FILE [--source-key | --password]
                                 sostituisce i dati con quelli del file (utenti e audit restano);
                                 chiave dell'altra istanza o password ≤ 0.29 chieste a prompt.
@@ -22,7 +23,7 @@ import getpass
 import sys
 from pathlib import Path
 
-from app import config, db, session, users
+from app import config, db, perimeter, session, users
 
 
 def _fail(msg: str) -> int:
@@ -93,6 +94,7 @@ def main(argv=None) -> int:
     for cmd in ("reset-password", "unlock", "enable", "disable"):
         sub.add_parser(cmd).add_argument("username")
     sub.add_parser("list-users")
+    sub.add_parser("assign-unassigned", help="assegna a un director i dati senza proprietario").add_argument("username")
     p = sub.add_parser("restore", help="sostituisce i dati con quelli di un backup o di un DB della 0.29")
     p.add_argument("file", type=Path)
     g = p.add_mutually_exclusive_group()
@@ -128,6 +130,15 @@ def main(argv=None) -> int:
         if args.cmd == "restore":
             return _restore(args)
         u = _user(args.username)
+        if args.cmd == "assign-unassigned":
+            if u["role"] != "director" or not u["active"]:
+                return _fail(f"{u['username']} non è un director attivo")
+            counts = perimeter.assign_unassigned(u["id"])
+            users.audit("assign_unassigned", f"a {u['username']} (da shell)")
+            print(f"Assegnati a {u['username']}: " + (", ".join(
+                f"{label} {counts[t]}" for t, label, _ in perimeter.UNASSIGNED_GROUPS if counts.get(t))
+                or "solo configurazione") + ".")
+            return 0
         if args.cmd == "reset-password":
             _print_temp(u["username"], users.reset_password(u["id"]))
         elif args.cmd == "unlock":

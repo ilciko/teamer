@@ -7,8 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import config, db, users  # noqa: E402
-from app.services.ninebox_defaults import DEFAULT_NINEBOX_CONFIG, ensure_default_model  # noqa: E402
+from app import config, db, session, users  # noqa: E402
+from app.services.ninebox_defaults import DEFAULT_NINEBOX_CONFIG  # noqa: E402
 from app.services import ninebox_calc  # noqa: E402
 
 random.seed(42)
@@ -40,10 +40,11 @@ def main() -> None:
         db.write_key()
         print(f"Chiave di sviluppo creata in {config.DB_KEY_FILE}")
     db.open_db(db.load_key())
-    ensure_default_model()
-    users.create("coo", "director", DEMO_PASSWORD, "COO demo")
+    coo = users.create("coo", "director", DEMO_PASSWORD, "COO demo")   # riceve la configurazione di default
     users.create("admin", "admin", DEMO_PASSWORD, "Site admin demo")
     print(f"DB creato in {config.DB_PATH} (utenti: coo = Director, admin = Site admin; password: {DEMO_PASSWORD})")
+    # i dati demo li crea coo, nella sua sessione: sono suoi (configurazione, team, cicli, budget)
+    session.bind(session.Session(user_id=coo, username="coo", role="director"))
 
     teams = {}
     for name, parent in [("Operations", None), ("Logistica", "Operations"),
@@ -142,6 +143,7 @@ def main() -> None:
             "INSERT INTO action_item (person_id, description, due_date) VALUES (?,?,?)",
             (p["id"], f"Azione di prova {i+1}",
              (date.today() + timedelta(days=15 * (i - 1))).isoformat()))
+    session.reset()
     db.close_db()
     print(f"Seed completato: {len(PEOPLE)} persone, 2 cicli, budget 2026, 9-box per tutti, "
           f"{len(LISTINO)} codici di listino.")

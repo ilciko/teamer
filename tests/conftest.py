@@ -72,7 +72,11 @@ def client(app_db):
 
     c = TestClient(app)
     assert login(c, "coo").url.path == "/"
+    # anche le query scritte direttamente nel test girano come coo: stessa connessione,
+    # stesse viste, e le righe create prendono lui come proprietario
+    tok = session.bind(next(s for s in session._sessions.values() if s.username == "coo"))
     yield c
+    session.unbind(tok)
 
 
 @pytest.fixture()
@@ -85,3 +89,30 @@ def admin_client(app_db):
     c = TestClient(app)
     assert login(c, "it").url.path == "/admin"
     yield c
+
+
+@pytest.fixture()
+def client2(client):
+    """Secondo director, «dir2», con la sua sessione (configurazione di default, nessun dato)."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    users.create("dir2", "director", PASSWORD)
+    c = TestClient(app)
+    login(c, "dir2")
+    yield c
+
+
+class as_user:
+    """Esegue le query del test nella sessione di un utente già loggato (stesse viste)."""
+
+    def __init__(self, username):
+        self.s = next(s for s in session._sessions.values() if s.username == username)
+
+    def __enter__(self):
+        self.tok = session.bind(self.s)
+        return self.s
+
+    def __exit__(self, *exc):
+        session.unbind(self.tok)

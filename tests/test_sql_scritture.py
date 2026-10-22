@@ -15,6 +15,8 @@ import pytest
 from app import db
 
 APP = Path(__file__).resolve().parent.parent / "app"
+# codice di sistema: costruisce viste/guardie e lavora per tabella (nomi dalla classificazione)
+SYSTEM_CODE = {"db.py", "perimeter.py"}
 WRITE = re.compile(r"^\s*(INSERT|UPDATE|DELETE)\b", re.IGNORECASE)
 FORBIDDEN = re.compile(r"\b(main|temp)\.\w|\bATTACH\b|\bVACUUM\b|\bRETURNING\b|\bREPLACE\s+INTO\b|\bexecutescript\b",
                        re.IGNORECASE)
@@ -34,7 +36,7 @@ def _strings(path: Path):
 def _sql_writes():
     out = []
     for path in sorted(APP.rglob("*.py")):
-        if path.name == "db.py":
+        if path.name in SYSTEM_CODE:
             continue
         for line, text in _strings(path):
             if WRITE.match(text) and re.search(r"\b(INTO|SET|FROM)\b", text, re.IGNORECASE):
@@ -95,7 +97,7 @@ def test_ogni_scrittura_ha_un_bersaglio_noto(schema, where, sql):
 def test_nessuno_schema_esplicito_nel_codice():
     bad = []
     for path in sorted(APP.rglob("*.py")):
-        if path.name == "db.py":
+        if path.name in SYSTEM_CODE:
             continue
         for line, text in _strings(path):
             if re.search(r"\b(SELECT|INSERT|UPDATE|DELETE)\b", text) and FORBIDDEN.search(text):
@@ -106,7 +108,7 @@ def test_nessuno_schema_esplicito_nel_codice():
 def test_nessun_executescript_nell_app():
     """executescript esegue più statement senza passare da qualify(): solo le migrazioni in db.py."""
     for path in sorted(APP.rglob("*.py")):
-        if path.name == "db.py":
+        if path.name in SYSTEM_CODE:
             continue
         tree = ast.parse(path.read_text())
         calls = [n.lineno for n in ast.walk(tree)

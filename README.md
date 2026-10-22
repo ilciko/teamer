@@ -39,8 +39,11 @@ assegna una provvisoria (*Amministrazione → Utenti*, o `python -m app.admin_cl
   sua ultima pagina Teamer e riprende in place con la password. Il blocco di uno non tocca gli altri.
 - **Audit** (*Amministrazione → Audit*): accessi, errori, blocchi, gestione utenti, backup,
   aggiornamenti e ogni azione che modifica dati (chi, quando, quale indirizzo; mai il contenuto).
+- **Director separati** (dalla 0.32, `docs/perimetri.md`): ogni director ha la sua configurazione
+  (parte da quella di default), i suoi cicli, budget, montepremi e simulazioni. Dalla 0.33 vedrà
+  solo le persone dei suoi team.
 - **`teamer-admin`** (root, sul container): `init`, `create-admin`, `create-user --role`,
-  `reset-password`, `unlock`, `enable`/`disable`, `list-users`, `restore`. Ogni azione finisce nell'audit come `cli`.
+  `reset-password`, `unlock`, `enable`/`disable`, `list-users`, `assign-unassigned`, `restore`. Ogni azione finisce nell'audit come `cli`.
 
 ## Produzione (LXC su Proxmox)
 
@@ -127,6 +130,14 @@ pct exec <ctid> -- /usr/local/bin/teamer-admin list-users
 
 I backup fatti prima del passaggio (`data/backups/`) restano cifrati con la vecchia password;
 quelli successivi si aprono con la chiave.
+
+### Passaggio alla 0.32: dati da assegnare
+
+Dopo l'aggiornamento alla 0.32 configurazione, team, cicli, budget, montepremi e simulazioni
+esistenti **non appartengono a nessun director** e nessuno li vede. Il site admin li assegna in
+*Amministrazione → Utenti → Dati da assegnare* (o `teamer-admin assign-unassigned <nome>`) al
+director che deve riceverli. Gli altri director partono dalla configurazione di default.
+Lo stesso succede dopo un ripristino da un'altra istanza.
 
 ### Accesso perso
 

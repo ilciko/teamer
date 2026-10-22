@@ -14,8 +14,7 @@ from fastapi import APIRouter, Form, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from itsdangerous import BadSignature, URLSafeSerializer
 
-from app import config, db, session, users
-from app.services.ninebox_defaults import ensure_default_model
+from app import config, db, perimeter, session, users
 
 router = APIRouter()
 
@@ -108,7 +107,8 @@ def login(request: Request, username: str = Form(""), password: str = Form("")):
     user, error = users.authenticate(username, password, client_ip(request))
     if error:
         return templates.TemplateResponse(request, "login.html", _login_ctx(error=error, username=username))
-    ensure_default_model()
+    if user["role"] == "director":
+        perimeter.ensure_config(user["id"])  # director di prima della 0.32: configurazione di default
     s = _open_session(request, user)
     users.audit("login_ok", user_id=user["id"], username=user["username"], ip=s.ip)
     resp = RedirectResponse(_landing(user), status_code=302)
@@ -144,7 +144,6 @@ def login_migration(request: Request, old_password: str = Form(...), username: s
     s = _open_session(request, user)
     users.audit("migrazione_chiave", "DB ricifrato con la chiave di sistema", user_id=uid,
                 username=user["username"], ip=s.ip)
-    ensure_default_model()
     resp = RedirectResponse(_landing(user), status_code=302)
     set_cookie(resp, s)
     return resp

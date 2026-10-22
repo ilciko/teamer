@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Form, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
 
-from app import config, db, session, users
+from app import config, db, perimeter, session, users
 from app.services import updater
 
 router = APIRouter()
@@ -56,6 +56,8 @@ def admin_page(request: Request, tab: str = "users", saved: str = "", err: str =
         ctx["sessions"] = {u["id"]: session.of_user(u["id"]) for u in rows}
         ctx["temp"] = request.cookies.get("teamer_temp_pw")  # mostrata una volta sola
         ctx["now"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ctx["unassigned"] = perimeter.unassigned()
+        ctx["directors"] = [u for u in rows if u["role"] == "director" and u["active"]]
     elif tab == "audit":
         page = max(page, 1)
         rows, total = _audit_rows(user, event, date_from, date_to, page)
@@ -138,6 +140,20 @@ def user_sessions_close(uid: int):
             n += 1
     users.audit("sessions_close", f"utente {users.get(uid)['username']}: {n} sessioni chiuse")
     return _back(saved="1")
+
+
+@router.post("/admin/assign")
+def assign(user_id: int = Form(...), confirm: str = Form("")):
+    """Dati esistenti senza proprietario (dopo la 0.32, o un ripristino da altrove) a un director."""
+    u = users.get(user_id)
+    if u is None or u["role"] != "director" or not u["active"]:
+        return _back(err="Scegli un director attivo.")
+    if confirm != "ASSEGNA":
+        return _back(err="Per assegnare scrivi ASSEGNA nel campo di conferma.")
+    counts = perimeter.assign_unassigned(user_id)
+    users.audit("assign_unassigned", f"a {u['username']}: " + ", ".join(
+        f"{label} {counts[t]}" for t, label, _ in perimeter.UNASSIGNED_GROUPS if counts.get(t)) or "solo configurazione")
+    return _back(saved="assegnati")
 
 
 # ---- sistema ----
