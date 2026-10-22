@@ -24,17 +24,20 @@
   </div>
 </div>
 
+{% set multi = groups | length > 1 %}
 <div class="grid3" style="margin-bottom:14px">
   <div class="stat">
-    <div class="v">{{ members | length }}{% if total_people != members|length %}<span class="muted3"> / {{ total_people }}</span>{% endif %}</div>
-    <div class="k">{% if total_people != members|length %}Persone dirette / con sotto-team{% else %}Persone{% endif %}</div>
+    <div class="v">{{ tot.n }}</div>
+    <div class="k">Persone{% if multi %} con sotto-team · {{ members | length }} dirett{{ 'a' if members | length == 1 else 'e' }}{% endif %}</div>
   </div>
-  <div class="stat"><div class="v">{{ tot.ral | eur }}</div><div class="k">Monte RAL</div></div>
-  <div class="stat"><div class="v">{{ tot.costo | eur }}</div><div class="k">Costo totale {{ year }}</div></div>
+  <div class="stat"><div class="v">{{ tot.ral | eur }}</div>
+    <div class="k">Monte RAL{% if multi %} con sotto-team · diretti {{ direct.ral | eur }}{% endif %}</div></div>
+  <div class="stat"><div class="v">{{ tot.costo | eur }}</div>
+    <div class="k">Costo totale {{ year }}{% if multi %} con sotto-team · diretti {{ direct.costo | eur }}{% endif %}</div></div>
 </div>
 
 <div class="card">
-  <div class="card-title">Membri — retribuzione, contratto e benefit</div>
+  <div class="card-title">Membri — retribuzione, contratto e benefit{% if multi %}, per team e sotto-team{% endif %}</div>
   <div style="overflow-x:auto">
   <table class="tbl">
     <thead><tr>
@@ -42,7 +45,14 @@
       <th class="num">RAL</th><th class="num">A piano</th><th>Benefit</th>
       <th class="num">Costo benefit</th><th class="num">Costo tot. {{ year }}</th><th>9-box</th>
     </tr></thead>
-    {% for m in members %}
+    {% for g in groups %}
+    {% if multi %}
+    <tr class="team-group"><td colspan="11" style="padding-left:{{ 8 + g.depth * 18 }}px">
+      {% if g.depth %}<a href="/org/team/{{ g.team.id }}"><strong>{{ g.team.name }}</strong></a>{% else %}<strong>{{ g.team.name }}</strong>{% endif %}
+      <span class="muted3 small">· {{ g.members | length }} person{{ 'a' if g.members | length == 1 else 'e' }}{% if not g.depth %} dirett{{ 'a' if g.members | length == 1 else 'e' }}{% endif %}</span>
+    </td></tr>
+    {% endif %}
+    {% for m in g.members %}
     <tr>
       <td style="width:34px"><span class="av">{{ m.initials }}</span></td>
       <td><a href="/people/{{ m.id }}"><strong>{{ m.full_name }}</strong></a>
@@ -61,11 +71,22 @@
       <td>{% if m.box %}<span class="badge {{ 'green' if m.box >= 7 else 'red' if m.box == 1 else 'amber' }}">{{ m.box }}</span>{% else %}—{% endif %}</td>
     </tr>
     {% else %}
-    <tr><td colspan="11" class="muted">Nessun membro attivo.</td></tr>
+    <tr><td colspan="11" class="muted small" style="padding-left:{{ 8 + g.depth * 18 }}px">Nessun membro attivo{% if multi %} assegnato direttamente{% endif %}.</td></tr>
     {% endfor %}
-    {% if members %}
-    <tr>
-      <td colspan="5"><strong>Totale team</strong></td>
+    {% if multi and g.members %}
+    <tr class="team-subtotal">
+      <td colspan="5" style="padding-left:{{ 8 + g.depth * 18 }}px">Subtotale {{ g.team.name }}</td>
+      <td class="num">{{ g.tot.ral | eur }}</td>
+      <td></td><td></td>
+      <td class="num">{{ g.tot.benefit | eur }}</td>
+      <td class="num">{{ g.tot.costo | eur }}</td>
+      <td></td>
+    </tr>
+    {% endif %}
+    {% endfor %}
+    {% if tot.n %}
+    <tr class="team-total">
+      <td colspan="5"><strong>Totale {{ t.name }}{% if multi %} con sotto-team{% endif %}</strong></td>
       <td class="num"><strong>{{ tot.ral | eur }}</strong></td>
       <td></td><td></td>
       <td class="num"><strong>{{ tot.benefit | eur }}</strong></td>
@@ -79,7 +100,7 @@
 
 <div class="card">
   <div class="page-head" style="margin-bottom:8px">
-    <div class="card-title" style="margin:0">Assunzioni a budget — posizioni aperte</div>
+    <div class="card-title" style="margin:0">Assunzioni a budget — posizioni aperte{% if multi %}, con sotto-team{% endif %}</div>
     <div class="spacer"></div>
     {% if open_positions %}<span class="badge amber">impegnato {{ tot_hiring | eur }}</span>{% endif %}
     <a class="btn ghost sm" href="/comp/hiring">apri assunzioni →</a>
@@ -87,7 +108,7 @@
   {% if open_positions %}
   <table class="tbl">
     <thead><tr>
-      <th>Posizione</th><th>Ruolo</th><th>Budget</th>
+      <th>Posizione</th>{% if multi %}<th>Team</th>{% endif %}<th>Ruolo</th><th>Budget</th>
       <th class="num">RAL prevista</th><th>Inizio previsto</th><th>Stato</th>
     </tr></thead>
     {% for hp in open_positions %}
@@ -96,6 +117,7 @@
         {% if hp.replaces_name %}<div class="small"><span class="badge blue">sostituisce</span>
           <a href="/people/{{ hp.replaces_person_id }}">{{ hp.replaces_name }}</a></div>{% endif %}
         {% if hp.note %}<div class="muted3 small">{{ hp.note }}</div>{% endif %}</td>
+      {% if multi %}<td class="muted">{{ hp.team_name }}</td>{% endif %}
       <td>{{ lookup_label('role_type', hp.role_type) }}</td>
       <td class="muted">{{ hp.budget_period }}</td>
       <td class="num">{{ hp.expected_ral | eur }}</td>
@@ -105,13 +127,13 @@
     </tr>
     {% endfor %}
     <tr>
-      <td colspan="3"><strong>Totale impegnato</strong></td>
+      <td colspan="{{ 4 if multi else 3 }}"><strong>Totale impegnato</strong></td>
       <td class="num"><strong>{{ tot_hiring | eur }}</strong></td>
       <td></td><td></td>
     </tr>
   </table>
   {% else %}
-  <p class="muted small">Nessuna posizione aperta a budget per questo team.</p>
+  <p class="muted small">Nessuna posizione aperta a budget per questo team{% if multi %} e i suoi sotto-team{% endif %}.</p>
   {% endif %}
 </div>
 
@@ -137,16 +159,6 @@
   <p class="muted small">Nessun obiettivo definito per i membri in questo ciclo.
     <a href="/cycles/{{ open_cycle.id }}">Vai al ciclo →</a></p>
   {% endif %}
-</div>
-{% endif %}
-
-{% if subteams %}
-<div class="card">
-  <div class="card-title">Sotto-team</div>
-  {% for s in subteams %}
-  <a class="btn ghost sm" href="/org/team/{{ s.id }}" style="margin-right:6px">{{ s.name }}
-    <span class="muted3">· {{ subteam_totals[s.id].total if s.id in subteam_totals else 0 }}</span> →</a>
-  {% endfor %}
 </div>
 {% endif %}
 {% endblock %}

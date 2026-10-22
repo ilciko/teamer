@@ -670,16 +670,8 @@ def org_chart(request: Request, team_id: list[str] = Query([]), pos: str = "1"):
     })
 
 
-@router.get("/org/team/{tid}")
-def team_card(request: Request, tid: int):
-    t = db.one(
-        "SELECT t.*, l.full_name AS lead_name, pt.name AS parent_name FROM team t "
-        "LEFT JOIN person l ON l.id = t.lead_person_id "
-        "LEFT JOIN team pt ON pt.id = t.parent_team_id WHERE t.id=?", (tid,))
-    if not t:
-        return RedirectResponse("/org", status_code=302)
-    year = str(date.today().year)
-    members = []
+def _team_members(team_id: int, year: str) -> list[dict]:
+    """Membri attivi assegnati direttamente al team, con RAL, benefit, aumenti a piano e costo dell'anno."""
     rows = db.query(
         """SELECT p.id, p.full_name, p.hire_date, pa.role_type,
                   e.livello, e.tipo_contratto, e.part_time_pct,
@@ -689,8 +681,8 @@ def team_card(request: Request, tid: int):
            JOIN person p ON p.id = pa.person_id
            LEFT JOIN employment e ON e.person_id=p.id AND e.voided=0 AND e.end_date IS NULL
            WHERE pa.team_id=? AND pa.voided=0 AND pa.end_date IS NULL AND p.status='attivo'
-           ORDER BY p.full_name""", (tid,))
-    tot = {"ral": 0.0, "benefit": 0.0, "costo": 0.0}
+           ORDER BY p.full_name""", (team_id,))
+    out = []
     for r in rows:
         ral = cost.current_ral(r["id"])
         benefits = cost.active_benefits(r["id"])
@@ -698,56 +690,81 @@ def team_card(request: Request, tid: int):
             "SELECT COALESCE(SUM(amount),0) AS t FROM ral_proposal "
             "WHERE person_id=? AND voided=0 AND status IN ('bozza','proposta','approvata')",
             (r["id"],))["t"]
-        costs = cost.total_cost(r["id"], year)
-        members.append({**dict(r), "ral": ral["amount"] if ral else None,
-                        "benefits": benefits, "benefit_cost": cost.benefit_cost(benefits),
-                        "pending": pending, "total_cost": costs["totale"],
-                        "initials": initials(r["full_name"])})
-        tot["ral"] += (ral["amount"] if ral else 0)
-        tot["benefit"] += cost.benefit_cost(benefits)
-        tot["costo"] += costs["totale"]
+        out.append({**dict(r), "ral": ral["amount"] if ral else None,
+                    "benefits": benefits, "benefit_cost": cost.benefit_cost(benefits),
+                    "pending": pending, "total_cost": cost.total_cost(r["id"], year)["totale"],
+                    "initials": initials(r["full_name"])})
+    return out
+
+
+@router.get("/org/team/{tid}")
+def team_card(request: Request, tid: int):
+    t = db.one(
+        "SELECT t.*, l.full_name AS lead_name, pt.name AS parent_name FROM team t "
+        "LEFT JOIN person l ON l.id = t.lead_person_id "
+        "LEFT JOIN team pt ON pt.id = t.parent_team_id WHERE t.id=?", (tid,))
+    if not t:
+        return RedirectResponse("/org", status_code=302)
+    year = str(date.today().year)
+    # il team e i suoi sotto-team (a ogni profondità, in ordine di organigramma), ciascuno coi suoi membri
+    all_teams = [dict(r) for r in db.query(
+        "SELECT id, name, parent_team_id, lead_person_id, sort_order, archived_at FROM team")]
+    ids = org_svc.descendant_ids(all_teams, tid)
+    live = [r for r in all_teams if not r["archived_at"] or r["id"] == tid]
+    by_team = {r["id"]: r for r in all_teams}
+    order = [i for i in org_svc.team_order(live) if i in ids] or [tid]
+
+    def depth(team_id):
+        d, cur, seen = 0, team_id, set()
+        while cur != tid and cur is not None and cur not in seen:
+            seen.add(cur)
+            cur = by_team.get(cur, {}).get("parent_team_id")
+            d += 1
+        return d
+
+    groups = []
+    tot = {"ral": 0.0, "benefit": 0.0, "costo": 0.0, "n": 0}
+    for team_id in order:
+        group = {"team": by_team[team_id], "depth": depth(team_id), "members": _team_members(team_id, year),
+                 "tot": {"ral": 0.0, "benefit": 0.0, "costo": 0.0}}
+        for m in group["members"]:
+            for k, v in (("ral", m["ral"] or 0), ("benefit", m["benefit_cost"]), ("costo", m["total_cost"])):
+                group["tot"][k] += v
+                tot[k] += v
+        tot["n"] += len(group["members"])
+        groups.append(group)
+    members = groups[0]["members"]          # diretti del team
+    direct = groups[0]["tot"]
     open_cycle = db.one("SELECT * FROM review_cycle WHERE status='aperto' ORDER BY year DESC LIMIT 1")
     goals = []
-    if open_cycle and members:
-        ids = ",".join(str(m["id"]) for m in members)
+    everyone = [m for g in groups for m in g["members"]]
+    if open_cycle and everyone:
+        person_ids = ",".join(str(m["id"]) for m in everyone)
         goals = db.query(
             f"""SELECT g.*, p.full_name,
                   (SELECT status FROM performance_review pr
                    WHERE pr.person_id=g.person_id AND pr.cycle_id=g.cycle_id AND pr.voided=0) AS review_status
                 FROM goal g JOIN person p ON p.id=g.person_id
-                WHERE g.cycle_id=? AND g.voided=0 AND g.person_id IN ({ids})
+                WHERE g.cycle_id=? AND g.voided=0 AND g.person_id IN ({person_ids})
                 ORDER BY p.full_name, g.category""", (open_cycle["id"],))
-    subteams = db.query("SELECT * FROM team WHERE parent_team_id=? AND archived_at IS NULL "
-                        "ORDER BY sort_order, name", (tid,))
-    # persone a cascata: assegnazioni attive nel team o nei suoi discendenti, contate una volta
-    all_teams = [dict(r) for r in db.query(
-        "SELECT id, name, parent_team_id, lead_person_id, sort_order, archived_at FROM team")]
-    ids = org_svc.descendant_ids(all_teams, tid)
-    marks_t = ",".join("?" * len(ids))
-    total_people = db.one(
-        f"""SELECT COUNT(DISTINCT pa.person_id) AS n FROM person_assignment pa
-            JOIN person p ON p.id = pa.person_id
-            WHERE pa.team_id IN ({marks_t}) AND pa.voided=0 AND pa.end_date IS NULL AND p.status='attivo'""",
-        tuple(ids))["n"]
-    all_members = db.query(
-        "SELECT pa.team_id, p.id FROM person_assignment pa JOIN person p ON p.id = pa.person_id "
-        "WHERE pa.voided=0 AND pa.end_date IS NULL AND p.status='attivo'")
-    subteam_totals = org_svc.team_totals(all_teams, [dict(m) for m in all_members])
-    # headcount già impegnato: posizioni a budget ancora aperte su questo team
+    # headcount già impegnato: posizioni a budget ancora aperte sul team e sui suoi sotto-team
     marks = ",".join("?" * len(budget_svc.OPEN_POSITIONS))
-    open_positions = db.query(
-        f"""SELECT hp.*, hb.period AS budget_period, rp.full_name AS replaces_name
+    marks_t = ",".join("?" * len(ids))
+    rank = {team_id: n for n, team_id in enumerate(order)}
+    open_positions = sorted(db.query(
+        f"""SELECT hp.*, hb.period AS budget_period, rp.full_name AS replaces_name, tm.name AS team_name
             FROM hiring_position hp
             JOIN hiring_budget hb ON hb.id = hp.budget_id
+            JOIN team tm ON tm.id = hp.team_id
             LEFT JOIN person rp ON rp.id = hp.replaces_person_id
-            WHERE hp.team_id=? AND hp.voided=0 AND hp.status IN ({marks})
+            WHERE hp.team_id IN ({marks_t}) AND hp.voided=0 AND hp.status IN ({marks})
             ORDER BY hb.year DESC, hp.expected_start, hp.id""",
-        (tid, *budget_svc.OPEN_POSITIONS))
+        (*ids, *budget_svc.OPEN_POSITIONS)), key=lambda hp: rank.get(hp["team_id"], len(rank)))
     tot_hiring = round(sum(hp["expected_ral"] or 0 for hp in open_positions), 2)
     # navigazione precedente/prossimo nell'ordine dell'organigramma
-    live = [r for r in all_teams if not r["archived_at"]]
-    by_id = {r["id"]: r for r in live}
-    nav_pool = [by_id[i] for i in org_svc.team_order(live)]
+    nav_live = [r for r in all_teams if not r["archived_at"]]
+    by_id = {r["id"]: r for r in nav_live}
+    nav_pool = [by_id[i] for i in org_svc.team_order(nav_live)]
     prev_t = next_t = None
     for i, row in enumerate(nav_pool):
         if row["id"] == tid:
@@ -755,11 +772,10 @@ def team_card(request: Request, tid: int):
             next_t = nav_pool[i + 1] if i < len(nav_pool) - 1 else None
             break
     return _templates().TemplateResponse(request, "team_card.html", {
-        "t": t, "members": members, "tot": tot, "year": year,
-        "goals": goals, "open_cycle": open_cycle, "subteams": subteams,
+        "t": t, "members": members, "groups": groups, "tot": tot, "direct": direct, "year": year,
+        "goals": goals, "open_cycle": open_cycle,
         "open_positions": open_positions, "tot_hiring": tot_hiring,
         "prev_t": prev_t, "next_t": next_t,
-        "total_people": total_people, "subteam_totals": subteam_totals,
     })
 
 

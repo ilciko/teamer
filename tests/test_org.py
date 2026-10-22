@@ -39,12 +39,26 @@ def test_org_mostra_persone_a_cascata(client):
 
 
 def test_team_card_totale_a_cascata(client):
+    from app import db
+
     a, b, c = _tre_livelli(client)
+    for name, ral in (("Anna Area", 30000), ("Bruno Reparto", 40000), ("Carla Squadra", 50000)):
+        pid = db.one("SELECT id FROM person WHERE full_name=?", (name,))["id"]
+        db.execute("INSERT INTO ral_event (person_id, effective_date, amount, delta, change_type) "
+                   "VALUES (?, '2024-01-01', ?, 0, 'censimento')", (pid, ral))
+    bid = db.execute("INSERT INTO hiring_budget (period, year, total_cap) VALUES ('2026', 2026, 0)")
+    db.execute("INSERT INTO hiring_position (budget_id, title, team_id, expected_ral) VALUES (?, 'Dev squadra', ?, 33000)",
+               (bid, c))
     html = client.get(f"/org/team/{a}").text
-    assert "/ 3</span>" in html and "Persone dirette / con sotto-team" in html
-    assert "· 2</span>" in html                # sotto-team Reparto con il suo totale
-    html_c = client.get(f"/org/team/{c}").text
-    assert "/ 1</span>" not in html_c and ">Persone<" in html_c
+    # gruppi in ordine di organigramma, ciascuno coi suoi membri e il subtotale
+    assert html.index("Anna Area") < html.index(f'href="/org/team/{b}"><strong>Reparto') < html.index("Bruno Reparto") \
+        < html.index(f'href="/org/team/{c}"><strong>Squadra') < html.index("Carla Squadra")
+    assert "Subtotale Reparto" in html and "Subtotale Squadra" in html
+    assert "Totale Area con sotto-team" in html and "€ 120.000" in html          # Monte RAL complessivo
+    assert "Persone con sotto-team · 1 diretta" in html and "diretti € 30.000" in html
+    assert "Dev squadra" in html and "<td class=\"muted\">Squadra</td>" in html  # posizioni dei sotto-team
+    html_c = client.get(f"/org/team/{c}").text                                     # foglia: come prima
+    assert "Subtotale" not in html_c and "con sotto-team" not in html_c and "€ 50.000" in html_c
 
 
 def test_org_chart_riporti_espliciti_posizioni_e_filtro(client):

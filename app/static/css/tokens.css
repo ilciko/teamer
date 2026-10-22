@@ -287,6 +287,10 @@ input[type=checkbox] { width: auto; }
 .cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
 .cmp-grid .oc-wrap { margin-bottom: 0; min-width: 0; overflow: hidden; }
 .tbl tr.row-moved td { background: var(--amber-bg); }
+/* scheda team: gruppi per sotto-team, subtotali e totale */
+.tbl tr.team-group td { background: var(--surface2); border-top: 0.5px solid var(--border2); }
+.tbl tr.team-subtotal td { color: var(--text2); font-size: 12px; }
+.tbl tr.team-total td { border-top: 1.5px solid var(--border2); }
 .tbl tr.row-hidden td { color: var(--text3); }
 .tbl tr.row-hidden td:first-child { text-decoration: line-through; }
 .pos-delta { color: var(--green-dark); font-weight: 600; }
