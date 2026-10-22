@@ -52,7 +52,7 @@ storages_for() {   # contenuto (rootdir|vztmpl) → righe "nome tipo GB_liberi"
 }
 
 bridges() {
-  ip -o link show type bridge 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1 | sort
+  ip -o link show type bridge 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1 | sort -V
 }
 
 pick_default() {   # $1 = preferito, resto = elenco: il preferito se c'è, altrimenti il primo
