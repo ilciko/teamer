@@ -6,27 +6,23 @@
   <div class="spacer"></div>
   <div class="actions" style="margin:0">
     <a class="btn sm {{ 'ghost' if tab != 'general' }}" href="/settings?tab=general">Generale</a>
-    <a class="btn sm {{ 'ghost' if tab != 'lookup' }}" href="/settings?tab=lookup">Liste valori</a>
-    <a class="btn sm {{ 'ghost' if tab != 'benefit' }}" href="/settings?tab=benefit">Benefit</a>
     <a class="btn sm {{ 'ghost' if tab != 'listino' }}" href="/settings?tab=listino">Listino</a>
     <a class="btn sm {{ 'ghost' if tab != 'ninebox' }}" href="/settings?tab=ninebox">9-box</a>
-    <a class="btn sm {{ 'ghost' if tab != 'models' }}" href="/settings?tab=models">Modelli</a>
+    <a class="btn sm {{ 'ghost' if tab != 'premi' }}" href="/settings?tab=premi">Premi</a>
     <a class="btn sm {{ 'ghost' if tab != 'import' }}" href="/settings?tab=import">Import</a>
   </div>
 </div>
 
 {% if saved == '1' %}<div class="flash">Salvato.</div>
 {% elif saved == 'err' %}<div class="flash error">Dati non validi, nulla è stato salvato.</div>
-{% elif saved == 'wrongpw' %}<div class="flash error">Password attuale errata.</div>{% endif %}
+{% endif %}
+{% if errors %}<div class="flash error"><strong>Questionario non salvato:</strong><ul style="margin:4px 0 0 18px">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+{% elif draft %}<div class="flash">Modifiche non ancora salvate: premi «Salva questionario» per renderle effettive.</div>{% endif %}
 
 {% if tab == 'general' %}
 <div class="card" style="max-width:520px">
-  <div class="card-title">Valori predefiniti</div>
+  <div class="card-title">Evidenzia ultima variazione di RAL</div>
   <form method="post" action="/settings/general">
-    <label class="fld">CCNL predefinito</label>
-    <input type="text" name="default_ccnl" value="{{ meta('default_ccnl','') }}">
-    <p class="muted3 small" style="margin-top:6px">Precompilato nei nuovi inserimenti contrattuali e nell'import Excel (se la colonna è vuota). Modificabile caso per caso.</p>
-    <div class="card-title" style="margin-top:18px">Evidenzia ultima variazione di RAL</div>
     <div class="frow">
       <div><label class="fld">Arancio oltre (anni)</label>
         <input type="number" name="ral_stale_amber_years" min="1" step="1" required
@@ -39,99 +35,6 @@
       Con i valori salvati, oggi è <span class="txt-amber">arancio</span> chi è fermo da prima del {{ ral_stale_from.amber | dt }} e <span class="txt-red">rosso</span> da prima del {{ ral_stale_from.red | dt }}.</p>
     <div class="actions"><button class="btn sm">Salva</button></div>
   </form>
-</div>
-
-{% elif tab == 'lookup' %}
-<div class="grid2">
-  <div>
-    {% for cat, rows in categories.items() %}
-    <div class="card">
-      <div class="card-title">{{ cat }}</div>
-      <table class="tbl small">
-        {% for r in rows %}
-        <tr class="{{ 'muted3' if not r.active }}">
-          <td style="width:22%"><code>{{ r.code }}</code></td>
-          <td colspan="2">
-            <form method="post" action="/settings/lookup/{{ r.id }}/update" class="frow" style="gap:6px">
-              <input type="text" name="label" value="{{ r.label }}" style="flex:3">
-              <input type="number" name="sort_order" value="{{ r.sort_order }}" style="flex:0 0 60px;text-align:right">
-              <button class="btn sm ghost" title="Salva modifica">✓</button>
-            </form>
-          </td>
-          <td style="width:1%"><form method="post" action="/settings/lookup/{{ r.id }}/toggle">
-            <button class="btn sm ghost">{{ 'disattiva' if r.active else 'riattiva' }}</button></form></td>
-        </tr>
-        {% endfor %}
-      </table>
-      <p class="muted3 small" style="margin-top:6px">L'etichetta si propaga ovunque (anche sullo storico); il codice resta fisso.</p>
-    </div>
-    {% endfor %}
-  </div>
-  <div class="card" style="align-self:start">
-    <div class="card-title">Aggiungi / modifica voce</div>
-    <p class="muted small" style="margin-bottom:8px">Stessa categoria + codice = la voce viene aggiornata.</p>
-    <form method="post" action="/settings/lookup">
-      <div class="frow">
-        <div><label class="fld">Categoria</label><input type="text" name="category" list="cats" required>
-          <datalist id="cats">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist></div>
-        <div><label class="fld">Codice</label><input type="text" name="code" required></div>
-      </div>
-      <div class="frow">
-        <div><label class="fld">Etichetta</label><input type="text" name="label" required></div>
-        <div><label class="fld">Ordine</label><input type="number" name="sort_order" value="0"></div>
-      </div>
-      <div class="actions"><button class="btn sm">Salva</button></div>
-    </form>
-  </div>
-</div>
-
-{% elif tab == 'benefit' %}
-<div class="grid2">
-  <div class="card">
-    <div class="card-title">Catalogo benefit</div>
-    <table class="tbl">
-      <thead><tr><th>Nome</th><th>Tipo</th><th>Opzioni (enum)</th><th title="concorre al costo totale">Costo</th><th></th></tr></thead>
-      {% for b in benefit_types %}
-      <tr class="{{ 'muted3' if not b.active }}">
-        <td colspan="4">
-          <form method="post" action="/settings/benefit/{{ b.id }}/update" class="frow" style="gap:6px;align-items:center">
-            <input type="text" name="name" value="{{ b.name }}" style="flex:2">
-            <span class="badge" style="flex:0 0 auto">{{ b.value_kind }}</span>
-            {% if b.value_kind == 'enum' %}
-            <input type="text" name="enum_options" value="{{ (b.enum_options | from_json | join(',')) if b.enum_options else '' }}" placeholder="si,no,addebito" style="flex:2">
-            {% endif %}
-            <label style="display:flex;gap:4px;align-items:center;font-size:11px;flex:0 0 auto">
-              <input type="checkbox" name="is_cost" value="1" {{ 'checked' if b.is_cost }}> costo
-            </label>
-            <button class="btn sm ghost" title="Salva modifica">✓</button>
-          </form>
-        </td>
-        <td style="width:1%"><form method="post" action="/settings/benefit/{{ b.id }}/toggle">
-          <button class="btn sm ghost">{{ 'disattiva' if b.active else 'riattiva' }}</button></form></td>
-      </tr>
-      {% else %}<tr><td colspan="5" class="muted">Nessun benefit a catalogo (es. Auto, Rimborso pasto, MLO, Reperibilità H24…).</td></tr>{% endfor %}
-    </table>
-    <p class="muted3 small" style="margin-top:6px">Il nome si propaga a tutte le assegnazioni, anche storiche.</p>
-  </div>
-  <div class="card" style="align-self:start">
-    <div class="card-title">Nuovo benefit</div>
-    <form method="post" action="/settings/benefit">
-      <label class="fld">Nome</label><input type="text" name="name" required>
-      <div class="frow">
-        <div><label class="fld">Tipo valore</label>
-          <select name="value_kind">
-            <option value="boolean">booleano (sì/no)</option>
-            <option value="enum">opzioni (enum)</option>
-            <option value="amount">importo €</option>
-          </select></div>
-        <div><label class="fld">Opzioni (se enum, separate da virgola)</label><input type="text" name="enum_options" placeholder="si,no,addebito"></div>
-      </div>
-      <label style="display:flex;gap:6px;align-items:center;margin-top:10px;font-size:13px">
-        <input type="checkbox" name="is_cost" value="1" checked> concorre al costo totale
-      </label>
-      <div class="actions"><button class="btn sm">Aggiungi</button></div>
-    </form>
-  </div>
 </div>
 
 {% elif tab == 'listino' %}
@@ -177,83 +80,134 @@
 </div>
 
 {% elif tab == 'ninebox' %}
+<form method="post" action="/settings/ninebox-model" id="nb-model">
+  {# Invio in un campo usa il primo pulsante del form: dev'essere «Salva», non «sposta giù» #}
+  <button name="op" value="save" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px">Salva</button>
+  <input type="hidden" name="nq" value="{{ model.questions | length }}">
+  <div class="card">
+    <div class="card-title">Questionario</div>
+    <p class="muted small" style="margin-bottom:10px">Le domande della valutazione 9-box, nell'ordine in cui vengono poste. Ogni domanda vale per la <strong>prestazione</strong> o per il <strong>potenziale</strong>: il punteggio di ciascun asse è la media pesata dei punteggi delle risposte date (da 1 a 3). Ogni valutazione salva il questionario usato: cambiarlo non modifica quelle già fatte.</p>
+    {% for q in model.questions %}{% set i = loop.index0 %}
+    <div class="nb-q">
+      <input type="hidden" name="q{{ i }}_no" value="{{ q.options | length }}">
+      <div class="frow" style="align-items:end">
+        <div style="flex:0 0 140px"><label class="fld">{{ tags[i] }}</label>
+          <select name="q{{ i }}_type">{% for code, name in axes.items() %}<option value="{{ code }}" {{ 'selected' if q.type == code }}>{{ name }}</option>{% endfor %}</select></div>
+        <div><label class="fld">Nome breve (risultato)</label><input type="text" name="q{{ i }}_label" value="{{ q.label }}"></div>
+        <div style="flex:0 0 90px"><label class="fld">Peso</label><input type="number" step="0.1" min="0.1" name="q{{ i }}_weight" value="{{ q.weight }}" style="text-align:right"></div>
+        <div class="actions" style="margin:0;flex:0 0 auto">
+          <button class="btn sm ghost" name="op" value="up_q-{{ i }}" title="Sposta su" {{ 'disabled' if loop.first }}>↑</button>
+          <button class="btn sm ghost" name="op" value="down_q-{{ i }}" title="Sposta giù" {{ 'disabled' if loop.last }}>↓</button>
+          <button class="btn sm ghost" name="op" value="del_q-{{ i }}" title="Elimina la domanda">Elimina</button>
+        </div>
+      </div>
+      <label class="fld">Domanda</label>
+      <textarea name="q{{ i }}_text" style="min-height:44px">{{ q.text }}</textarea>
+      <table class="tbl small" style="margin-top:6px">
+        <thead><tr><th>Risposta</th><th class="num" style="width:90px">Punteggio</th><th style="width:1%"></th></tr></thead>
+        {% for o in q.options %}{% set j = loop.index0 %}
+        <tr>
+          <td><input type="text" name="q{{ i }}_o{{ j }}_text" value="{{ o.text }}"></td>
+          <td class="num"><input type="number" step="0.1" min="1" max="3" name="q{{ i }}_o{{ j }}_value" value="{{ o.value }}" style="width:80px;text-align:right"></td>
+          <td><button class="btn sm ghost" name="op" value="del_o-{{ i }}-{{ j }}" title="Elimina la risposta">×</button></td>
+        </tr>
+        {% endfor %}
+      </table>
+      <div class="actions" style="margin-top:4px"><button class="btn sm ghost" name="op" value="add_o-{{ i }}">+ Risposta</button></div>
+      <details style="margin-top:6px"><summary class="muted small" style="cursor:pointer">Note contestuali ({{ q.ctx_notes | length }}): mostrate durante la valutazione per un ruolo o un'anzianità</summary>
+        <div class="grid2" style="margin-top:6px">
+          {% for code, label in ctx_keys %}
+          <div><label class="fld">{{ label }}</label><input type="text" name="q{{ i }}_ctx_{{ code }}" value="{{ q.ctx_notes.get(code, '') }}"></div>
+          {% endfor %}
+        </div>
+      </details>
+    </div>
+    {% endfor %}
+    <div class="actions"><button class="btn sm ghost" name="op" value="add_q">+ Domanda</button></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Caselle</div>
+    <p class="muted small" style="margin-bottom:8px">Nome e descrizione delle nove caselle della griglia (prestazione × potenziale).</p>
+    <table class="tbl small">
+      <thead><tr><th style="width:1%">N.</th><th style="width:16%">Prestazione / potenziale</th><th style="width:22%">Nome</th><th>Descrizione</th></tr></thead>
+      {% for k in box_keys %}{% set b = model.boxes.get(k, {}) %}
+      <tr>
+        <td class="num">{{ b.n }}</td>
+        <td class="muted">{{ k.split('-')[0] }} / {{ k.split('-')[1] }}</td>
+        <td><input type="text" name="box_{{ k }}_label" value="{{ b.label }}"></td>
+        <td><textarea name="box_{{ k }}_desc" style="min-height:38px">{{ b.desc }}</textarea></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="actions" style="margin-bottom:16px"><button class="btn" name="op" value="save">Salva questionario</button></div>
+</form>
+
 <div class="grid2">
   <div class="card">
     <div class="card-title">Aggiustamenti dinamici (ruolo × anzianità)</div>
-    <p class="muted small" style="margin-bottom:8px">Applicati ai punteggi grezzi: prestazione e potenziale, con segno. Ogni valutazione salva comunque uno snapshot dei pesi usati.</p>
+    <p class="muted small" style="margin-bottom:8px">Si sommano ai punteggi di prestazione e potenziale, con segno. Le righe seguono i ruoli e le anzianità delle liste aziendali. Ogni valutazione salva gli aggiustamenti usati.</p>
     <form method="post" action="/settings/ninebox-weights">
       <table class="tbl small">
         <thead><tr><th>Ruolo</th><th>Anzianità</th><th class="num">Prestazione ±</th><th class="num">Potenziale ±</th></tr></thead>
         {% for w in weights %}
         <tr>
-          <td>{{ lookup_label('role_type', w.role_type) }}</td>
-          <td>{{ lookup_label('seniority', w.seniority) }}</td>
-          <td class="num"><input type="number" step="0.05" name="p|{{ w.role_type }}|{{ w.seniority }}" value="{{ w.perf_adj }}" style="width:80px;text-align:right"></td>
-          <td class="num"><input type="number" step="0.05" name="q|{{ w.role_type }}|{{ w.seniority }}" value="{{ w.pot_adj }}" style="width:80px;text-align:right"></td>
+          <td>{{ w.role.label }}</td>
+          <td>{{ w.sen.label }}</td>
+          <td class="num"><input type="number" step="0.05" name="p|{{ w.role.code }}|{{ w.sen.code }}" value="{{ w.perf }}" style="width:80px;text-align:right"></td>
+          <td class="num"><input type="number" step="0.05" name="q|{{ w.role.code }}|{{ w.sen.code }}" value="{{ w.pot }}" style="width:80px;text-align:right"></td>
         </tr>
         {% endfor %}
       </table>
       <div class="actions"><button class="btn sm">Salva aggiustamenti</button></div>
     </form>
   </div>
-  <div style="align-self:start">
-    <div class="card">
-      <div class="card-title">Peso premio per casella (montepremi)</div>
-      <form method="post" action="/settings/weight-mapping">
-        <table class="tbl small">
-          <thead><tr><th>Box</th><th class="num">Peso</th></tr></thead>
-          {% for m in mapping %}
-          <tr>
-            <td>Box {{ m.box_number }}</td>
-            <td class="num"><input type="number" step="0.1" name="box_{{ m.box_number }}" value="{{ m.weight }}" style="width:80px;text-align:right"></td>
-          </tr>
-          {% endfor %}
-        </table>
-        <div class="actions"><button class="btn sm">Salva pesi</button></div>
-      </form>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Moltiplicatori premio (peso composito)</div>
-      <p class="muted3 small" style="margin-bottom:8px">
-        Peso = casella × ruolo × rating review × obiettivi (punteggio TL professionale ÷ 3, non configurabile).
-        Chi non ha review o 9-box ha fattori neutri ×1.
-      </p>
-      <form method="post" action="/settings/bonus-factors">
-        <div class="frow">
-          <table class="tbl small">
-            <thead><tr><th>Ruolo</th><th class="num">×</th></tr></thead>
-            {% for f in role_factors %}
-            <tr><td>{{ lookup_label('role_type', f.code) }}</td>
-                <td class="num"><input type="number" step="0.05" name="role|{{ f.code }}" value="{{ f.factor }}" style="width:70px;text-align:right"></td></tr>
-            {% endfor %}
-          </table>
-          <table class="tbl small">
-            <thead><tr><th>Rating review</th><th class="num">×</th></tr></thead>
-            {% for f in rating_factors %}
-            <tr><td>{{ f.code }} / 5</td>
-                <td class="num"><input type="number" step="0.05" name="rating|{{ f.code }}" value="{{ f.factor }}" style="width:70px;text-align:right"></td></tr>
-            {% endfor %}
-          </table>
-        </div>
-        <div class="actions"><button class="btn sm">Salva moltiplicatori</button></div>
-      </form>
-    </div>
+  <div class="card" style="align-self:start">
+    <div class="card-title">Peso premio per casella (montepremi)</div>
+    <form method="post" action="/settings/weight-mapping">
+      <table class="tbl small">
+        <thead><tr><th>Casella</th><th class="num">Peso</th></tr></thead>
+        {% for m in mapping %}
+        {% set b = (model.boxes.values() | selectattr('n', 'equalto', m.box_number) | first) or {} %}
+        <tr>
+          <td>{{ m.box_number }} · {{ b.label }}</td>
+          <td class="num"><input type="number" step="0.1" name="box_{{ m.box_number }}" value="{{ m.weight }}" style="width:80px;text-align:right"></td>
+        </tr>
+        {% endfor %}
+      </table>
+      <div class="actions"><button class="btn sm">Salva pesi</button></div>
+    </form>
   </div>
 </div>
 
-{% elif tab == 'models' %}
-{% for m in models %}
-<div class="card">
-  <div class="card-title">{{ m.name }} <span class="badge">{{ m.type }}</span></div>
-  <form method="post" action="/settings/model/{{ m.id }}">
-    <label class="fld">Nome</label><input type="text" name="name" value="{{ m.name }}">
-    <label class="fld">Config (JSON: domande, note contestuali, caselle)</label>
-    <textarea name="config_json" style="min-height:280px;font-family:monospace;font-size:11px">{{ m.config }}</textarea>
-    <div class="actions"><button class="btn sm">Salva modello</button></div>
+{% elif tab == 'premi' %}
+<div class="card" style="max-width:640px">
+  <div class="card-title">Moltiplicatori premio (peso composito)</div>
+  <p class="muted3 small" style="margin-bottom:8px">
+    Peso = casella × ruolo × rating review × obiettivi (punteggio TL professionale ÷ 3, non configurabile).
+    Chi non ha review o 9-box ha fattori neutri ×1. Ruoli e rating seguono le liste aziendali: una voce nuova vale ×1 finché non la cambi.
+  </p>
+  <form method="post" action="/settings/bonus-factors">
+    <div class="frow">
+      <table class="tbl small">
+        <thead><tr><th>Ruolo</th><th class="num">×</th></tr></thead>
+        {% for f in role_factors %}
+        <tr><td>{{ f.label }}</td>
+            <td class="num"><input type="number" step="0.05" name="role|{{ f.code }}" value="{{ f.factor }}" style="width:70px;text-align:right"></td></tr>
+        {% endfor %}
+      </table>
+      <table class="tbl small">
+        <thead><tr><th>Rating review</th><th class="num">×</th></tr></thead>
+        {% for f in rating_factors %}
+        <tr><td>{{ f.label }}</td>
+            <td class="num"><input type="number" step="0.05" name="rating|{{ f.code }}" value="{{ f.factor }}" style="width:70px;text-align:right"></td></tr>
+        {% endfor %}
+      </table>
+    </div>
+    <div class="actions"><button class="btn sm">Salva moltiplicatori</button></div>
   </form>
 </div>
-{% endfor %}
 
 {% elif tab == 'import' %}
 <div class="grid2">

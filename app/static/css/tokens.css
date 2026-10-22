@@ -383,3 +383,5 @@ body.locked .sidebar, body.locked .content { visibility: hidden; }
   .tbl th, .tbl td { padding: 5px 6px; }
   .note-print { break-inside: avoid; }
 }
+/* editor del questionario 9-box (Configurazione) */
+.nb-q { border: 0.5px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; background: var(--surface2); }

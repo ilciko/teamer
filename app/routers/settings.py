@@ -1,13 +1,15 @@
-"""Configurazione: lookup, benefit, pesi 9-box, modelli, listino, import.
+"""Configurazione del director: soglie, listino, 9-box (questionario, aggiustamenti, pesi premio),
+moltiplicatori premio, import.
 
-Sicurezza, backup e aggiornamenti sono del site admin (`app/routers/admin.py`)."""
+Liste valori, catalogo benefit e CCNL sono aziendali (`app/routers/company.py`); sicurezza,
+backup e aggiornamenti sono del site admin (`app/routers/admin.py`)."""
 import json
 
 from fastapi import APIRouter, Form, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 
 from app import db
-from app.services import cost, importer
+from app.services import cost, importer, ninebox_calc
 
 router = APIRouter()
 
@@ -18,110 +20,62 @@ def _templates():
     return templates
 
 
-@router.get("/settings")
-def settings_page(request: Request, tab: str = "lookup", saved: str = ""):
-    lookup_rows = db.query("SELECT * FROM lookup ORDER BY category, sort_order, code")
-    categories: dict[str, list] = {}
-    for r in lookup_rows:
-        categories.setdefault(r["category"], []).append(r)
-    benefit_types = db.query("SELECT * FROM benefit_type ORDER BY name")
-    weights = db.query(
-        "SELECT * FROM ninebox_weight ORDER BY CASE seniority WHEN 'new' THEN 0 WHEN 'mid' THEN 1 ELSE 2 END, role_type")
-    mapping = db.query("SELECT * FROM weight_mapping ORDER BY box_number")
-    models = db.query("SELECT * FROM evaluation_model ORDER BY id")
-    factors = db.query(
-        "SELECT * FROM bonus_factor ORDER BY kind, CASE kind WHEN 'rating' THEN code END, "
-        "CASE code WHEN 'ic' THEN 1 WHEN 'tl' THEN 2 WHEN 'mgr' THEN 3 WHEN 'sr' THEN 4 END")
+def _ninebox_model():
+    row = db.one("SELECT id, config FROM evaluation_model WHERE type='nine_box' AND active=1")
+    return row["id"], ninebox_calc.normalize(json.loads(row["config"]))
+
+
+def _context(tab: str, saved: str = "", draft: dict | None = None, errors: list | None = None) -> dict:
+    roles, seniorities = db.lookups("role_type"), db.lookups("seniority")
+    ratings = db.lookups("overall_rating")
+    # aggiustamenti e moltiplicatori seguono le liste aziendali: una voce nuova compare da sola (neutra)
+    weights = {(r["role_type"], r["seniority"]): r for r in db.query("SELECT * FROM ninebox_weight")}
+    factors = {(r["kind"], r["code"]): r["factor"] for r in db.query("SELECT * FROM bonus_factor")}
     listino_profiles = db.query(
         "SELECT lp.*, (SELECT COUNT(*) FROM person_assignment pa WHERE pa.listino_profile_id=lp.id) AS n_ref "
         "FROM listino_profile lp ORDER BY lp.sort_order, lp.code")
     amber = int(db.get_meta("ral_stale_amber_years", "2"))
     red = int(db.get_meta("ral_stale_red_years", "4"))
     amber_from, red_from = cost.ral_stale_cutoffs(amber, red)
-    return _templates().TemplateResponse(request, "settings.html", {
-        "tab": tab, "saved": saved, "categories": categories,
+    model = draft or _ninebox_model()[1]
+    return {
+        "tab": tab, "saved": saved, "errors": errors or [], "draft": draft is not None,
         "ral_stale_from": {"amber": amber_from.isoformat(), "red": red_from.isoformat()},
-        "benefit_types": benefit_types, "weights": weights, "mapping": mapping,
-        "models": models, "listino_profiles": listino_profiles,
-        "role_factors": [f for f in factors if f["kind"] == "role"],
-        "rating_factors": [f for f in factors if f["kind"] == "rating"],
-    })
+        "listino_profiles": listino_profiles,
+        "roles": roles, "seniorities": seniorities, "ratings": ratings,
+        "weights": [{"role": r, "sen": sn,
+                     "perf": weights[(r["code"], sn["code"])]["perf_adj"] if (r["code"], sn["code"]) in weights else 0,
+                     "pot": weights[(r["code"], sn["code"])]["pot_adj"] if (r["code"], sn["code"]) in weights else 0}
+                    for sn in seniorities for r in roles],
+        "mapping": db.query("SELECT * FROM weight_mapping ORDER BY box_number"),
+        "role_factors": [{"code": r["code"], "label": r["label"], "factor": factors.get(("role", r["code"]), 1.0)}
+                         for r in roles],
+        "rating_factors": [{"code": r["code"], "label": r["label"], "factor": factors.get(("rating", r["code"]), 1.0)}
+                           for r in ratings],
+        "model": model, "axes": ninebox_calc.AXES, "box_keys": ninebox_calc.BOX_KEYS,
+        "ctx_keys": [(r["code"], r["label"]) for r in roles] + [(sn["code"], sn["label"]) for sn in seniorities],
+        "tags": [ninebox_calc.tag(model["questions"], i) for i in range(len(model["questions"]))],
+    }
+
+
+@router.get("/settings")
+def settings_page(request: Request, tab: str = "general", saved: str = ""):
+    return _templates().TemplateResponse(request, "settings.html", _context(tab, saved))
 
 
 # ---- generale ----
 
 @router.post("/settings/general")
-def general_save(default_ccnl: str = Form(""), ral_stale_amber_years: str = Form("2"),
-                 ral_stale_red_years: str = Form("4")):
+def general_save(ral_stale_amber_years: str = Form("2"), ral_stale_red_years: str = Form("4")):
     try:
         amber, red = int(ral_stale_amber_years), int(ral_stale_red_years)
     except ValueError:
         return RedirectResponse("/settings?tab=general&saved=err", status_code=302)
     if amber < 1 or red <= amber:
         return RedirectResponse("/settings?tab=general&saved=err", status_code=302)
-    db.set_meta("default_ccnl", default_ccnl.strip())
     db.set_meta("ral_stale_amber_years", str(amber))
     db.set_meta("ral_stale_red_years", str(red))
     return RedirectResponse("/settings?tab=general&saved=1", status_code=302)
-
-
-# ---- lookup ----
-
-@router.post("/settings/lookup")
-def lookup_save(category: str = Form(...), code: str = Form(...), label: str = Form(...),
-                sort_order: int = Form(0)):
-    db.execute(
-        "INSERT INTO lookup (category, code, label, sort_order) VALUES (?,?,?,?) "
-        "ON CONFLICT(owner_user_id, category, code) DO UPDATE SET label=excluded.label, sort_order=excluded.sort_order",
-        (category.strip(), code.strip(), label.strip(), sort_order))
-    return RedirectResponse("/settings?tab=lookup&saved=1", status_code=302)
-
-
-@router.post("/settings/lookup/{lid}/update")
-def lookup_update(lid: int, label: str = Form(...), sort_order: int = Form(0)):
-    """Rinomina l'etichetta: il codice resta stabile, la modifica si propaga ovunque."""
-    db.execute("UPDATE lookup SET label=?, sort_order=? WHERE id=?",
-               (label.strip(), sort_order, lid))
-    return RedirectResponse("/settings?tab=lookup&saved=1", status_code=302)
-
-
-@router.post("/settings/lookup/{lid}/toggle")
-def lookup_toggle(lid: int):
-    db.execute("UPDATE lookup SET active = 1 - active WHERE id=?", (lid,))
-    return RedirectResponse("/settings?tab=lookup", status_code=302)
-
-
-# ---- benefit ----
-
-@router.post("/settings/benefit")
-def benefit_type_save(name: str = Form(...), value_kind: str = Form(...),
-                      enum_options: str = Form(None), is_cost: str = Form(None)):
-    opts = None
-    if value_kind == "enum" and enum_options:
-        opts = json.dumps([o.strip() for o in enum_options.split(",") if o.strip()])
-    db.execute(
-        "INSERT INTO benefit_type (name, value_kind, enum_options, is_cost) VALUES (?,?,?,?)",
-        (name.strip(), value_kind, opts, 1 if is_cost else 0))
-    return RedirectResponse("/settings?tab=benefit&saved=1", status_code=302)
-
-
-@router.post("/settings/benefit/{bid}/update")
-def benefit_type_update(bid: int, name: str = Form(...), enum_options: str = Form(None),
-                        is_cost: str = Form(None)):
-    """Rinomina il benefit: le assegnazioni puntano all'id, la modifica si propaga."""
-    bt = db.one("SELECT * FROM benefit_type WHERE id=?", (bid,))
-    opts = bt["enum_options"]
-    if bt["value_kind"] == "enum" and enum_options is not None:
-        opts = json.dumps([o.strip() for o in enum_options.split(",") if o.strip()])
-    db.execute("UPDATE benefit_type SET name=?, enum_options=?, is_cost=? WHERE id=?",
-               (name.strip(), opts, 1 if is_cost else 0, bid))
-    return RedirectResponse("/settings?tab=benefit&saved=1", status_code=302)
-
-
-@router.post("/settings/benefit/{bid}/toggle")
-def benefit_type_toggle(bid: int):
-    db.execute("UPDATE benefit_type SET active = 1 - active WHERE id=?", (bid,))
-    return RedirectResponse("/settings?tab=benefit", status_code=302)
 
 
 # ---- listino ----
@@ -177,21 +131,25 @@ def listino_profile_toggle(lid: int):
 
 # ---- 9-box ----
 
+def _form_float(form, key: str, default: float) -> float:
+    try:
+        return float(str(form.get(key, default)).replace(",", "."))
+    except ValueError:
+        return default
+
+
 @router.post("/settings/ninebox-weights")
 async def ninebox_weights_save(request: Request):
+    """Aggiustamenti ruolo × anzianità: una riga per coppia delle liste aziendali (creata se manca)."""
     form = await request.form()
+    pairs = {tuple(k.split("|")[1:]) for k in form if k.startswith(("p|", "q|")) and k.count("|") == 2}
     with db.transaction() as conn:
-        for key, val in form.items():
-            if "|" not in key:
-                continue
-            field, role, sen = key.split("|")
-            try:
-                v = float(val)
-            except ValueError:
-                continue
+        for role, sen in pairs:
             conn.execute(
-                f"UPDATE ninebox_weight SET {'perf_adj' if field == 'p' else 'pot_adj'}=? "
-                "WHERE role_type=? AND seniority=?", (v, role, sen))
+                "INSERT INTO ninebox_weight (role_type, seniority, perf_adj, pot_adj) VALUES (?,?,?,?) "
+                "ON CONFLICT(owner_user_id, role_type, seniority) DO UPDATE SET "
+                "perf_adj=excluded.perf_adj, pot_adj=excluded.pot_adj",
+                (role, sen, _form_float(form, f"p|{role}|{sen}", 0), _form_float(form, f"q|{role}|{sen}", 0)))
     return RedirectResponse("/settings?tab=ninebox&saved=1", status_code=302)
 
 
@@ -213,32 +171,86 @@ async def weight_mapping_save(request: Request):
 
 @router.post("/settings/bonus-factors")
 async def bonus_factors_save(request: Request):
+    """Moltiplicatori per ruolo e rating: seguono le liste aziendali (righe create se mancano)."""
     form = await request.form()
     with db.transaction() as conn:
-        for key, val in form.items():
+        for key in form:
             if "|" not in key:
                 continue
             kind, code = key.split("|", 1)
-            try:
-                conn.execute("UPDATE bonus_factor SET factor=? WHERE kind=? AND code=?",
-                             (float(val), kind, code))
-            except ValueError:
+            if kind not in ("role", "rating"):
                 continue
+            conn.execute(
+                "INSERT INTO bonus_factor (kind, code, factor) VALUES (?,?,?) "
+                "ON CONFLICT(owner_user_id, kind, code) DO UPDATE SET factor=excluded.factor",
+                (kind, code, _form_float(form, key, 1.0)))
+    return RedirectResponse("/settings?tab=premi&saved=1", status_code=302)
+
+
+# ---- questionario 9-box ----
+
+def _model_from_form(form, old: dict) -> dict:
+    """Il questionario come arriva dal form (domande, risposte, note, caselle)."""
+    questions = []
+    for i in range(int(form.get("nq", 0))):
+        p = f"q{i}_"
+        options = [{"text": (form.get(f"{p}o{j}_text") or "").strip(),
+                    "value": _form_float(form, f"{p}o{j}_value", 0)}
+                   for j in range(int(form.get(f"{p}no", 0)))]
+        questions.append({
+            "type": form.get(f"{p}type", "perf"),
+            "label": (form.get(f"{p}label") or "").strip() or f"Domanda {i + 1}",
+            "weight": _form_float(form, f"{p}weight", 1),
+            "text": (form.get(f"{p}text") or "").strip(),
+            "ctx_notes": {k[len(p) + 4:]: v.strip() for k, v in form.items()
+                          if k.startswith(f"{p}ctx_") and v.strip()},
+            "options": options,
+        })
+    boxes = {}
+    for k in ninebox_calc.BOX_KEYS:
+        b = dict(old["boxes"].get(k, {}))
+        b["label"] = (form.get(f"box_{k}_label") or "").strip()
+        b["desc"] = (form.get(f"box_{k}_desc") or "").strip()
+        boxes[k] = b
+    return {"questions": questions, "boxes": boxes}
+
+
+def _apply_op(model: dict, op: str) -> None:
+    """Pulsanti strutturali dell'editor: aggiungi/togli/sposta domande e risposte."""
+    qs = model["questions"]
+    parts = op.split("-")
+    name, idx = parts[0], [int(x) for x in parts[1:] if x.isdigit()]
+    if name == "add_q":
+        qs.append({"type": "perf", "label": f"Domanda {len(qs) + 1}", "weight": 1.0, "text": "", "ctx_notes": {},
+                   "options": [{"text": "", "value": v} for v in (1.0, 2.0, 3.0)]})
+    elif name == "del_q" and idx and idx[0] < len(qs):
+        qs.pop(idx[0])
+    elif name in ("up_q", "down_q") and idx:
+        i, j = idx[0], idx[0] + (-1 if name == "up_q" else 1)
+        if 0 <= i < len(qs) and 0 <= j < len(qs):
+            qs[i], qs[j] = qs[j], qs[i]
+    elif name == "add_o" and idx and idx[0] < len(qs):
+        qs[idx[0]]["options"].append({"text": "", "value": 2.0})
+    elif name == "del_o" and len(idx) == 2 and idx[0] < len(qs) and idx[1] < len(qs[idx[0]]["options"]):
+        qs[idx[0]]["options"].pop(idx[1])
+
+
+@router.post("/settings/ninebox-model")
+async def ninebox_model_save(request: Request):
+    """Salva il questionario; i pulsanti strutturali ridisegnano il form senza salvare."""
+    form = await request.form()
+    mid, old = _ninebox_model()
+    model = _model_from_form(form, old)
+    op = form.get("op", "save")
+    if op != "save":
+        _apply_op(model, op)
+        return _templates().TemplateResponse(request, "settings.html", _context("ninebox", draft=model))
+    errors = ninebox_calc.validate(model)
+    if errors:
+        return _templates().TemplateResponse(request, "settings.html",
+                                             _context("ninebox", draft=model, errors=errors))
+    db.execute("UPDATE evaluation_model SET config=? WHERE id=?", (json.dumps(model, ensure_ascii=False), mid))
     return RedirectResponse("/settings?tab=ninebox&saved=1", status_code=302)
-
-
-# ---- modelli ----
-
-@router.post("/settings/model/{mid}")
-def model_save(mid: int, name: str = Form(...), config_json: str = Form(...)):
-    try:
-        parsed = json.loads(config_json)
-    except json.JSONDecodeError:
-        return RedirectResponse("/settings?tab=models&saved=err", status_code=302)
-    db.execute(
-        "UPDATE evaluation_model SET name=?, config=? WHERE id=?",
-        (name.strip(), json.dumps(parsed, ensure_ascii=False), mid))
-    return RedirectResponse("/settings?tab=models&saved=1", status_code=302)
 
 
 # ---- import excel ----

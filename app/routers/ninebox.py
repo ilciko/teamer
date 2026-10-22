@@ -19,8 +19,9 @@ def _templates():
 
 
 def _model():
+    """Il questionario del director, normalizzato (vedi ninebox_calc.normalize)."""
     row = db.one("SELECT * FROM evaluation_model WHERE type='nine_box' AND active=1")
-    return row, json.loads(row["config"])
+    return row, ninebox_calc.normalize(json.loads(row["config"]))
 
 
 def _weights() -> dict:
@@ -66,9 +67,10 @@ def ninebox_start(request: Request, pid: int):
     role = assignment["role_type"] if assignment else "ic"
     seniority = seniority_from(assignment["start_date"]) if assignment else "mid"
     weights = {f"{k[0]}|{k[1]}": v for k, v in _weights().items()}
+    questions = [{**q, "tag": ninebox_calc.tag(config["questions"], i)} for i, q in enumerate(config["questions"])]
     return _templates().TemplateResponse(request, "ninebox_wizard.html", {
-        "p": p, "initials": initials(p["full_name"]),
-        "config_json": json.dumps(config, ensure_ascii=False),
+        "p": p, "initials": initials(p["full_name"]), "n_questions": len(questions),
+        "config_json": json.dumps({"questions": questions}, ensure_ascii=False),
         "weights_json": json.dumps(weights),
         "role": role, "seniority": seniority,
         "roles": db.lookups("role_type"), "seniorities": db.lookups("seniority"),
@@ -80,18 +82,21 @@ def ninebox_save(person_id: int = Form(...), role_type: str = Form(...),
                  seniority: str = Form(...), answers: str = Form(...),
                  eval_date: str = Form(None)):
     model, config = _model()
-    ans = [int(a) for a in answers.split(",")]
+    choices = [int(a) for a in answers.split(",")]
     w = _weights().get((role_type, seniority), (0.0, 0.0))
-    result = ninebox_calc.compute(ans, w[0], w[1], config["boxes"])
+    result = ninebox_calc.compute(choices, w[0], w[1], config["boxes"], config["questions"])
+    _, _, values = ninebox_calc.score(choices, config["questions"])
+    # la valutazione tiene il questionario com'era: cambiarlo dopo non riscrive la storia
+    snapshot = {**config, "choices": choices}
     aid = db.execute(
         "INSERT INTO ninebox_assessment (person_id, eval_date, role_type, seniority, "
         "raw_perf, raw_pot, adj_perf, adj_pot, perf_level, pot_level, box_number, "
-        "weights_snapshot, answers) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "weights_snapshot, answers, model_snapshot) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (person_id, eval_date or date.today().isoformat(), role_type, seniority,
          result["raw_perf"], result["raw_pot"], result["adj_perf"], result["adj_pot"],
          result["perf_level"], result["pot_level"], result["box_number"],
          json.dumps({"perf_adj": w[0], "pot_adj": w[1]}),
-         json.dumps(ans)))
+         json.dumps(values), json.dumps(snapshot, ensure_ascii=False)))
     return RedirectResponse(f"/ninebox/result/{aid}", status_code=302)
 
 
@@ -102,17 +107,27 @@ def ninebox_result(request: Request, aid: int):
         "WHERE n.id=?", (aid,))
     if not a:
         return RedirectResponse("/ninebox", status_code=302)
-    _, config = _model()
+    if a["model_snapshot"]:  # il questionario usato allora
+        config = json.loads(a["model_snapshot"])
+        choices = config.get("choices", [])
+    else:  # valutazioni di prima della 0.35: il questionario attuale, risposte per punteggio
+        _, config = _model()
+        choices = None
     box = next(b for b in config["boxes"].values() if b["n"] == a["box_number"])
     answers = json.loads(a["answers"])
     snapshot = json.loads(a["weights_snapshot"])
-    labels = config.get("labels", [])
     questions = config["questions"]
     detail = []
     for i, v in enumerate(answers):
-        label = labels[i] if i < len(labels) else f"Domanda {i+1}"
-        opt = next((o["text"] for o in questions[i]["options"] if o["value"] == v), str(v))
-        detail.append({"label": label, "value": v, "text": opt})
+        q = questions[i] if i < len(questions) else None
+        if q is None:
+            detail.append({"label": f"Domanda {i + 1}", "value": v, "text": str(v)})
+            continue
+        if choices is not None and i < len(choices):
+            opt = q["options"][choices[i]]["text"]
+        else:
+            opt = next((o["text"] for o in q["options"] if o["value"] == v), str(v))
+        detail.append({"label": q["label"], "value": v, "text": opt})
     history = db.query(
         "SELECT * FROM ninebox_assessment WHERE person_id=? AND voided=0 "
         "ORDER BY eval_date DESC, id DESC", (a["person_id"],))

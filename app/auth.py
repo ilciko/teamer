@@ -54,6 +54,10 @@ def active_session(request: Request) -> session.Session | None:
 
 
 def allowed(role: str, path: str) -> bool:
+    from app.routers import company
+
+    if path.startswith(company.PREFIX):  # configurazione aziendale: di chi la gestisce (oggi l'admin, poi HR)
+        return role == company.MANAGED_BY
     if role == "admin":
         return path.startswith(ADMIN_PREFIXES)
     return not path.startswith("/admin")

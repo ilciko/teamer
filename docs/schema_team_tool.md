@@ -456,7 +456,9 @@ Configurazione (`lookup`, `ninebox_weight`, `weight_mapping`, `evaluation_model`
 | value | TEXT | |
 | owner_user_id | INTEGER FK→app_user.id | UNIQUE(owner_user_id, key) |
 
-In `app_meta` restano `schema_version` e `instance_id` (identifica l'istanza: un ripristino da un'altra istanza rende i dati «da assegnare»).
+Dalla 0030 `lookup` e `benefit_type` tornano **aziendali** (senza `owner_user_id`, UNIQUE(category, code)) e `default_ccnl` torna in `app_meta`: la migrazione ha fuso le copie per director (vince quella di un director, la più vecchia) ripuntando le assegnazioni dei benefit. `ninebox_assessment.model_snapshot` (0030, JSON): il questionario e le caselle usati in quella valutazione, con gli indici delle risposte scelte; la storia non dipende dal questionario attuale.
+
+In `app_meta` restano `schema_version`, `instance_id` e `default_ccnl` (identifica l'istanza: un ripristino da un'altra istanza rende i dati «da assegnare»).
 
 ## Area 5 — Utenti e audit *(0026)*
 

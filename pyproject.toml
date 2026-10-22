@@ -1,6 +1,6 @@
 [project]
 name = "teamer"
-version = "0.34.0"
+version = "0.35.0"
 description = "Tool di gestione team: organigramma, retribuzione, valutazioni, obiettivi"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]

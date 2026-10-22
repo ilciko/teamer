@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Azienda{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Azienda</h1>
+  <div class="spacer"></div>
+  <div class="actions" style="margin:0">
+    <a class="btn sm {{ 'ghost' if tab != 'liste' }}" href="/azienda?tab=liste">Liste valori</a>
+    <a class="btn sm {{ 'ghost' if tab != 'benefit' }}" href="/azienda?tab=benefit">Catalogo benefit</a>
+    <a class="btn sm {{ 'ghost' if tab != 'default' }}" href="/azienda?tab=default">Valori predefiniti</a>
+  </div>
+</div>
+<p class="muted small" style="margin:-6px 0 12px">Configurazione unica per tutta l'azienda: la usano tutti i director, che non la possono modificare.</p>
+{% if saved == '1' %}<div class="flash">Salvato.</div>
+{% elif saved == 'err' %}<div class="flash error">Dati non validi, nulla è stato salvato.</div>{% endif %}
+
+{% if tab == 'liste' %}
+<div class="grid2">
+  <div>
+    {% for cat, rows in categories.items() %}
+    <div class="card">
+      <div class="card-title">{{ cat }}</div>
+      <table class="tbl small">
+        {% for r in rows %}
+        <tr class="{{ 'muted3' if not r.active }}">
+          <td style="width:22%"><code>{{ r.code }}</code></td>
+          <td colspan="2">
+            <form method="post" action="/azienda/liste/{{ r.id }}/update" class="frow" style="gap:6px">
+              <input type="text" name="label" value="{{ r.label }}" style="flex:3">
+              <input type="number" name="sort_order" value="{{ r.sort_order }}" style="flex:0 0 60px;text-align:right">
+              <button class="btn sm ghost" title="Salva modifica">✓</button>
+            </form>
+          </td>
+          <td style="width:1%"><form method="post" action="/azienda/liste/{{ r.id }}/toggle">
+            <button class="btn sm ghost">{{ 'disattiva' if r.active else 'riattiva' }}</button></form></td>
+        </tr>
+        {% endfor %}
+      </table>
+      <p class="muted3 small" style="margin-top:6px">L'etichetta si propaga ovunque (anche sullo storico); il codice resta fisso.</p>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="card" style="align-self:start">
+    <div class="card-title">Aggiungi / modifica voce</div>
+    <p class="muted small" style="margin-bottom:8px">Stessa categoria + codice = la voce viene aggiornata.</p>
+    <form method="post" action="/azienda/liste">
+      <div class="frow">
+        <div><label class="fld">Categoria</label><input type="text" name="category" list="cats" required>
+          <datalist id="cats">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist></div>
+        <div><label class="fld">Codice</label><input type="text" name="code" required></div>
+      </div>
+      <div class="frow">
+        <div><label class="fld">Etichetta</label><input type="text" name="label" required></div>
+        <div><label class="fld">Ordine</label><input type="number" name="sort_order" value="0"></div>
+      </div>
+      <div class="actions"><button class="btn sm">Salva</button></div>
+    </form>
+  </div>
+</div>
+
+
+{% elif tab == 'benefit' %}
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Catalogo benefit</div>
+    <table class="tbl">
+      <thead><tr><th>Nome</th><th>Tipo</th><th>Opzioni (enum)</th><th title="concorre al costo totale">Costo</th><th></th></tr></thead>
+      {% for b in benefit_types %}
+      <tr class="{{ 'muted3' if not b.active }}">
+        <td colspan="4">
+          <form method="post" action="/azienda/benefit/{{ b.id }}/update" class="frow" style="gap:6px;align-items:center">
+            <input type="text" name="name" value="{{ b.name }}" style="flex:2">
+            <span class="badge" style="flex:0 0 auto">{{ b.value_kind }}</span>
+            {% if b.value_kind == 'enum' %}
+            <input type="text" name="enum_options" value="{{ (b.enum_options | from_json | join(',')) if b.enum_options else '' }}" placeholder="si,no,addebito" style="flex:2">
+            {% endif %}
+            <label style="display:flex;gap:4px;align-items:center;font-size:11px;flex:0 0 auto">
+              <input type="checkbox" name="is_cost" value="1" {{ 'checked' if b.is_cost }}> costo
+            </label>
+            <button class="btn sm ghost" title="Salva modifica">✓</button>
+          </form>
+        </td>
+        <td style="width:1%"><form method="post" action="/azienda/benefit/{{ b.id }}/toggle">
+          <button class="btn sm ghost">{{ 'disattiva' if b.active else 'riattiva' }}</button></form></td>
+      </tr>
+      {% else %}<tr><td colspan="5" class="muted">Nessun benefit a catalogo (es. Auto, Rimborso pasto, MLO, Reperibilità H24…).</td></tr>{% endfor %}
+    </table>
+    <p class="muted3 small" style="margin-top:6px">Il nome si propaga a tutte le assegnazioni, anche storiche.</p>
+  </div>
+  <div class="card" style="align-self:start">
+    <div class="card-title">Nuovo benefit</div>
+    <form method="post" action="/azienda/benefit">
+      <label class="fld">Nome</label><input type="text" name="name" required>
+      <div class="frow">
+        <div><label class="fld">Tipo valore</label>
+          <select name="value_kind">
+            <option value="boolean">booleano (sì/no)</option>
+            <option value="enum">opzioni (enum)</option>
+            <option value="amount">importo €</option>
+          </select></div>
+        <div><label class="fld">Opzioni (se enum, separate da virgola)</label><input type="text" name="enum_options" placeholder="si,no,addebito"></div>
+      </div>
+      <label style="display:flex;gap:6px;align-items:center;margin-top:10px;font-size:13px">
+        <input type="checkbox" name="is_cost" value="1" checked> concorre al costo totale
+      </label>
+      <div class="actions"><button class="btn sm">Aggiungi</button></div>
+    </form>
+  </div>
+</div>
+
+
+{% elif tab == 'default' %}
+<div class="card" style="max-width:520px">
+  <div class="card-title">Valori predefiniti</div>
+  <form method="post" action="/azienda/default">
+    <label class="fld">CCNL predefinito</label>
+    <input type="text" name="default_ccnl" value="{{ default_ccnl }}">
+    <p class="muted3 small" style="margin-top:6px">Precompilato nei nuovi inserimenti contrattuali e nell'import Excel (se la colonna è vuota). Modificabile caso per caso.</p>
+    <div class="actions"><button class="btn sm">Salva</button></div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

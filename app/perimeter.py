@@ -11,6 +11,8 @@ Ogni tabella sta in esattamente una classe (`CLASSES`, verificato da tests/test_
 - `person`: dati di fatto della persona, visibili se la persona è nel perimetro: la sua
   ultima assegnazione valida sta in un team del director, oppure non ne ha nessuna e l'ha
   creata lui (`person.owner_user_id`). Seguono la persona.
+- `company`: configurazione aziendale (liste valori, catalogo benefit): una per l'istanza,
+  la leggono tutti, la scrive solo la gestione aziendale (`app/routers/company.py`).
 - `instance`: utenti, audit, schema — solo connessione di sistema.
 
 Sulla connessione di una sessione `install()` crea, in quest'ordine: le tabelle temporanee
@@ -33,8 +35,8 @@ def bump() -> None:
 # tabelle "del director": (colonna FK, tabella padre) che deve essere visibile
 OWNED = {
     # configurazione
-    "lookup": [], "ninebox_weight": [], "weight_mapping": [], "evaluation_model": [],
-    "bonus_factor": [], "benefit_type": [], "listino_profile": [], "user_meta": [],
+    "ninebox_weight": [], "weight_mapping": [], "evaluation_model": [],
+    "bonus_factor": [], "listino_profile": [], "user_meta": [],
     # contenitori
     "review_cycle": [],
     "ral_budget": [("cycle_id", "review_cycle")],
@@ -61,22 +63,22 @@ CHILD = {
 TEAM = ["team"]
 PERSON = ["person", "person_assignment", "employment", "ral_event", "benefit_assignment", "incentive",
           "ninebox_assessment", "attachment", "listino_person_param", "meeting_note", "action_item"]
+COMPANY = ["lookup", "benefit_type"]
 INSTANCE = ["app_meta", "app_user", "audit_event"]
 
-CLASSES = {"owned": list(OWNED), "child": list(CHILD), "team": TEAM, "person": PERSON, "instance": INSTANCE}
+CLASSES = {"owned": list(OWNED), "child": list(CHILD), "team": TEAM, "person": PERSON,
+           "company": COMPANY, "instance": INSTANCE}
 
 # configurazione: si copia dai default di fabbrica a ogni director nuovo
-CONFIG = ["lookup", "ninebox_weight", "weight_mapping", "evaluation_model", "bonus_factor",
-          "benefit_type", "listino_profile", "user_meta"]
+CONFIG = ["ninebox_weight", "weight_mapping", "evaluation_model", "bonus_factor", "listino_profile", "user_meta"]
 # chiave naturale delle voci di configurazione (per fondere quella esistente in quella del director)
-NATURAL_KEYS = {"lookup": ("category", "code"), "ninebox_weight": ("role_type", "seniority"),
-                "weight_mapping": ("box_number",), "bonus_factor": ("kind", "code"), "user_meta": ("key",),
-                "listino_profile": ("code",), "benefit_type": ("name",), "evaluation_model": ("type", "name")}
+NATURAL_KEYS = {"ninebox_weight": ("role_type", "seniority"), "weight_mapping": ("box_number",),
+                "bonus_factor": ("kind", "code"), "user_meta": ("key",), "listino_profile": ("code",),
+                "evaluation_model": ("type", "name")}
 # chi punta alle voci dei cataloghi per id
-CATALOG_REFS = {"benefit_type": [("benefit_assignment", "benefit_type_id")],
-                "listino_profile": [("person_assignment", "listino_profile_id")]}
-# configurazione che stava in app_meta: dalla 0028 è per director (tabella user_meta)
-SCOPED_META = {"default_ccnl", "ral_stale_amber_years", "ral_stale_red_years"}
+CATALOG_REFS = {"listino_profile": [("person_assignment", "listino_profile_id")]}
+# configurazione per director che stava in app_meta (tabella user_meta); il CCNL predefinito è aziendale
+SCOPED_META = {"ral_stale_amber_years", "ral_stale_red_years"}
 
 
 def scoped_meta(key: str) -> bool:
@@ -213,6 +215,7 @@ def authorizer(h, conn):
     ours = shielded | {r[0] for r in conn.execute("SELECT name FROM temp.sqlite_master WHERE type='trigger'")}
     fk = _fk_columns(conn)
     denied = {"app_user", "audit_event"}
+    company = set(COMPANY)  # la legge il director, la scrive solo la gestione aziendale
     OK, DENY = s.SQLITE_OK, s.SQLITE_DENY
 
     def check(action, a1, a2, dbname, source):
@@ -226,7 +229,8 @@ def authorizer(h, conn):
             if a1 in shielded and a2:
                 return OK if source in ours or a1 == h.write_target else DENY
             return OK
-        if action in (s.SQLITE_INSERT, s.SQLITE_UPDATE, s.SQLITE_DELETE) and dbname == "main" and a1 in denied:
+        if action in (s.SQLITE_INSERT, s.SQLITE_UPDATE, s.SQLITE_DELETE) and dbname == "main" \
+                and (a1 in denied or a1 in company):
             return DENY
         if action in (s.SQLITE_ATTACH, s.SQLITE_DETACH, s.SQLITE_PRAGMA):
             return DENY
@@ -297,7 +301,7 @@ def factory_config() -> dict:
 
 
 def has_config(uid: int) -> bool:
-    return db.sys.one("SELECT 1 FROM lookup WHERE owner_user_id=? LIMIT 1", (uid,)) is not None
+    return db.sys.one("SELECT 1 FROM ninebox_weight WHERE owner_user_id=? LIMIT 1", (uid,)) is not None
 
 
 def ensure_config(uid: int) -> bool:
@@ -465,12 +469,10 @@ def transfer_team(team_id: int, to_uid: int) -> dict:
                   f"OR position_id IN ({positions}))", (src,))
         c.execute(f"DELETE FROM reorg_position WHERE owner_user_id=? AND team_ref IN ({tq})", (src,))
 
-        # cataloghi: benefit e codici listino delle persone sulle voci omonime del nuovo director
+        # codici listino delle persone sulle voci omonime del nuovo director (liste e benefit sono aziendali)
         for table, key, ref_table, ref_col, copy_cols in (
-                ("benefit_type", "name", "benefit_assignment", "benefit_type_id",
-                 "name, value_kind, enum_options, is_cost, active"),
                 ("listino_profile", "code", "person_assignment", "listino_profile_id",
-                 "code, description, active, sort_order, day_rate")):
+                 "code, description, active, sort_order, day_rate"),):
             used = c.execute(
                 f"SELECT DISTINCT x.id, x.{key} FROM {table} x JOIN {ref_table} r ON r.{ref_col} = x.id "
                 f"WHERE r.person_id IN ({pq}) AND x.owner_user_id = ?", (src,)).fetchall()
@@ -481,10 +483,5 @@ def transfer_team(team_id: int, to_uid: int) -> dict:
                     (to_uid, old_id)).lastrowid
                 c.execute(f"UPDATE {ref_table} SET {ref_col}=? WHERE {ref_col}=? AND person_id IN ({pq})",
                           (target, old_id))
-        # codici delle liste valori che il nuovo director non ha: copiati spenti, così le etichette si leggono
-        c.execute("INSERT INTO lookup (category, code, label, sort_order, active, owner_user_id) "
-                  "SELECT f.category, f.code, f.label, f.sort_order, 0, ? FROM lookup f WHERE f.owner_user_id = ? "
-                  "AND NOT EXISTS (SELECT 1 FROM lookup t WHERE t.owner_user_id = ? AND t.category = f.category "
-                  "AND t.code = f.code)", (to_uid, src, to_uid))
     bump()
     return n

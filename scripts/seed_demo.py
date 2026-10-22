@@ -63,9 +63,10 @@ def main() -> None:
     cycle_cur = db.execute(
         "INSERT INTO review_cycle (name, year) VALUES ('Review 2026', 2026)")
 
-    mensa = db.execute(
+    # catalogo benefit: aziendale, lo scrive la connessione di sistema
+    mensa = db.sys.execute(
         "INSERT INTO benefit_type (name, value_kind, is_cost) VALUES ('Rimborso pasto', 'amount', 1)")
-    auto = db.execute(
+    auto = db.sys.execute(
         "INSERT INTO benefit_type (name, value_kind, enum_options, is_cost) "
         "VALUES ('Auto aziendale', 'enum', '[\"si\",\"no\",\"addebito\"]', 1)")
 

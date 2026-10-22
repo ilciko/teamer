@@ -33,6 +33,7 @@
       {% if is_admin %}
       {# il site admin non vede i dati del personale: solo il suo pannello #}
       <a class="nav-link {{ 'active' if path.startswith('/admin') }}" href="/admin">Amministrazione</a>
+      <a class="nav-link {{ 'active' if path.startswith('/azienda') }}" href="/azienda">Azienda</a>
       {% elif me %}
       {% if not pub %}
       <a class="nav-link {{ 'active' if path == '/' }}" href="/">Dashboard</a>

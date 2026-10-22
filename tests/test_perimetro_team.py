@@ -43,7 +43,7 @@ def org(client, client2):
     db.execute("INSERT INTO ninebox_assessment (person_id, eval_date, role_type, seniority, raw_perf, raw_pot, "
                "adj_perf, adj_pot, perf_level, pot_level, box_number, weights_snapshot, answers) "
                "VALUES (?, '2026-01-01', 'ic', 'mid', 2, 2, 2, 2, 'med', 'med', 5, '{}', '{}')", (luca,))
-    bt = db.execute("INSERT INTO benefit_type (name) VALUES ('Auto aziendale')")
+    bt = db.sys.execute("INSERT INTO benefit_type (name) VALUES ('Auto aziendale')")   # catalogo aziendale
     db.execute("INSERT INTO benefit_assignment (person_id, benefit_type_id, value, effective_date) "
                "VALUES (?,?,'1','2025-01-01')", (luca, bt))
     lp = db.execute("INSERT INTO listino_profile (code, description, day_rate) VALUES ('GE040', 'Consultant', 450)")

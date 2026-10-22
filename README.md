@@ -40,8 +40,11 @@ assegna una provvisoria (*Amministrazione → Utenti*, o `python -m app.admin_cl
 - **Audit** (*Amministrazione → Audit*): accessi, errori, blocchi, gestione utenti, backup,
   aggiornamenti e ogni azione che modifica dati (chi, quando, quale indirizzo; mai il contenuto).
 - **Director separati** (`docs/perimetri.md`): ogni director vede solo i suoi team e le persone che
-  ci lavorano, con tutto il loro storico; ha la sua configurazione (parte da quella di default), i
-  suoi cicli, budget, montepremi e simulazioni. Il site admin assegna i team e li trasferisce da un
+  ci lavorano, con tutto il loro storico; ha la sua configurazione (questionario 9-box, aggiustamenti,
+  pesi e moltiplicatori premio, listino, soglie: parte da quella di default), i suoi cicli, budget,
+  montepremi e simulazioni.
+- **Configurazione aziendale** (*Azienda*, oggi del site admin, poi di HR): liste valori, catalogo
+  benefit e CCNL predefinito, uguali per tutti i director. Il site admin assegna i team e li trasferisce da un
   director all'altro (*Amministrazione → Team*, vede solo i nomi): le persone passano con lo storico,
   a chi cede non resta nulla di loro; budget e montepremi non si spostano. La separazione la applica
   il database stesso (viste, guardie e authorizer per sessione), non le singole pagine; resta
@@ -73,6 +76,35 @@ porta). Le stesse impostazioni si passano come variabili d'ambiente, che fanno d
 `NET_IP` (dhcp o CIDR), `GATEWAY`, `APP_PORT`; `NONINTERACTIVE=1` salta le domande, `DRY_RUN=1`
 mostra cosa verrebbe creato senza toccare nulla. Per un fork `GH_REPO=<owner>/teamer` (e `GH_TOKEN`
 solo se il fork è privato).
+
+### Dimensionamento
+
+Teamer è un solo processo (uvicorn) con un DB SQLite: le risorse servono per il sistema, i backup
+e gli allegati, molto meno per gli utenti. Misure su 500 persone (20 director × 25 persone, 5 RAL
+e 10 note a persona):
+
+| Voce | Misura |
+|---|---|
+| Memoria del processo | ~75 MB all'avvio, ~100 MB con un director collegato, ~125 MB con 20 |
+| Memoria per sessione aperta | ~1,5 MB (connessione con viste e guardie del perimetro) |
+| Tempo di risposta | mediana 4 ms, la pagina più lenta (ricerca note) ~50 ms |
+| Database | ~7 KB a persona, **più gli allegati** (salvati dentro il DB) |
+
+Il disco serve soprattutto alle copie: `teamer-update` tiene gli ultimi 5 backup del DB, più i
+backup scaricati e le copie fatte prima di un ripristino. Regola pratica: sistema e runtime ~1,5 GB,
+più **8 volte la dimensione del DB**.
+
+| Uso | vCPU | RAM | Disco |
+|---|---|---|---|
+| fino a 10 director, ~500 persone, pochi allegati (default dello script) | 1 | 1 GB | 4 GB |
+| fino a 30 director, ~2.000 persone | 1–2 | 1 GB | 8 GB |
+| allegati frequenti (review in PDF per tutti, ogni anno) | come sopra | 1 GB | 1,5 GB + 8 × DB (es. DB da 1 GB → 10 GB) |
+
+Più CPU servono poco: le richieste sono brevi e SQLite scrive una volta alla volta. La seconda
+vCPU aiuta solo nelle operazioni lunghe (import Excel, report, aggiornamento) mentre altri lavorano.
+Teamer gira come un solo processo per scelta (le sessioni stanno in memoria): non si scala
+aggiungendo repliche. Il disco di un LXC si allarga anche dopo, da Proxmox (`pct resize <ctid>
+rootfs +4G`), senza fermare Teamer.
 
 ### Aggiornamenti
 

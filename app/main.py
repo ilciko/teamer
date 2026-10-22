@@ -183,6 +183,7 @@ app.include_router(public.router)
 
 from app.routers import (  # noqa: E402
     admin,
+    company,
     compensation,
     interactions,
     listino,
@@ -195,6 +196,7 @@ from app.routers import (  # noqa: E402
 )
 
 app.include_router(admin.router)
+app.include_router(company.router)
 app.include_router(reports.router)
 app.include_router(org.router)
 app.include_router(reorg.router)

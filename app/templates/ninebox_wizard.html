@@ -10,9 +10,9 @@
   <div class="spacer"></div>
   <div style="display:flex;align-items:center;gap:8px">
     <div class="pdots" id="pdots">
-      {% for i in range(6) %}<div class="pd {{ 'cur' if i == 0 }}" id="pd{{ i }}"></div>{% endfor %}
+      {% for i in range(n_questions) %}<div class="pd {{ 'cur' if i == 0 }}" id="pd{{ i }}"></div>{% endfor %}
     </div>
-    <span class="muted small" id="plbl">0 / 6</span>
+    <span class="muted small" id="plbl">0 / {{ n_questions }}</span>
   </div>
 </div>
 
@@ -47,7 +47,8 @@
 <script>
 const CONFIG  = {{ config_json | safe }};
 const WEIGHTS = {{ weights_json | safe }};
-let answers = [], current = -1;
+const N = CONFIG.questions.length;
+let answers = [], current = -1;  // indici delle risposte scelte: il punteggio lo ricava il server
 
 function adjFor() {
   const key = document.getElementById('role-sel').value + '|' + document.getElementById('sen-sel').value;
@@ -64,11 +65,11 @@ document.getElementById('sen-sel').addEventListener('change', updAdjPreview);
 updAdjPreview();
 
 function updProg(n) {
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < N; i++) {
     const d = document.getElementById('pd' + i);
     d.className = 'pd' + (i < n ? ' done' : i === n ? ' cur' : '');
   }
-  document.getElementById('plbl').textContent = Math.min(n, 6) + ' / 6';
+  document.getElementById('plbl').textContent = Math.min(n, N) + ' / ' + N;
 }
 
 function startQs() {
@@ -94,14 +95,14 @@ function renderQ(i) {
       <div style="font-size:14px;line-height:1.6;margin-bottom:12px">${q.text}</div>
       ${note ? `<div class="ctx-note">⚑ ${note}</div>` : ''}
       <div style="display:flex;flex-direction:column;gap:7px">
-        ${q.options.map(o => `
-          <div class="opt" data-val="${o.value}" onclick="selectOpt(this)">
+        ${q.options.map((o, j) => `
+          <div class="opt" data-val="${j}" onclick="selectOpt(this)">
             <div class="opt-icon"></div>
             <div style="font-size:13px;line-height:1.55">${o.text}</div>
           </div>`).join('')}
       </div>
       <div class="actions" style="justify-content:flex-end">
-        <button type="button" class="btn" id="nxtbtn" disabled onclick="nextQ()">${i < 5 ? 'Avanti →' : 'Calcola e salva →'}</button>
+        <button type="button" class="btn" id="nxtbtn" disabled onclick="nextQ()">${i < N - 1 ? 'Avanti →' : 'Calcola e salva →'}</button>
       </div>
     </div>`;
   window.scrollTo(0, 0);
@@ -119,9 +120,9 @@ function nextQ() {
   if (selVal === null) return;
   answers.push(selVal);
   selVal = null;
-  if (current < 5) renderQ(current + 1);
+  if (current < N - 1) renderQ(current + 1);
   else {
-    updProg(6);
+    updProg(N);
     document.getElementById('answers-input').value = answers.join(',');
     document.getElementById('nbform').submit();
   }

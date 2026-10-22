@@ -72,8 +72,9 @@ def _norm(v) -> str | None:
 
 
 def _ensure_lookup(category: str, code: str) -> None:
+    """Un livello nuovo dal foglio entra nella lista aziendale (scritta dalla connessione di sistema)."""
     if not db.one("SELECT 1 FROM lookup WHERE category=? AND code=?", (category, code)):
-        db.execute(
+        db.sys.execute(
             "INSERT INTO lookup (category, code, label, sort_order) VALUES (?,?,?,99)",
             (category, code, code))
 
