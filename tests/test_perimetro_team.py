@@ -228,3 +228,43 @@ def test_tutte_le_pagine_si_aprono_per_entrambi_dopo_un_trasferimento(org, clien
     for t in (org["log"], org["mag"]):
         assert client2.get(f"/org/team/{t}").status_code == 200
     assert client.get(f"/org/team/{org['ven']}").status_code == 200
+
+
+# ---- authorizer (0.34): niente scorciatoie verso le tabelle vere ----
+
+@pytest.mark.parametrize("sql", [
+    "SELECT * FROM main.person",
+    "SELECT full_name FROM main.person WHERE id = 1",
+    "SELECT p.full_name FROM person x JOIN main.person p ON p.id = x.id",
+    "SELECT username FROM app_user",
+    "SELECT detail FROM audit_event",
+    "SELECT name FROM main.team",
+    "SELECT amount FROM main.ral_event",
+    "SELECT body FROM main.meeting_note",
+])
+def test_letture_dirette_negate(org, sql):
+    with as_user("dir2"):
+        with pytest.raises(db.sqlcipher.DatabaseError):
+            db.query(sql)
+
+
+def test_comandi_che_scavalcano_le_viste_negati(org, tmp_path):
+    with as_user("dir2"):
+        for sql in (f"ATTACH DATABASE '{tmp_path / 'x.db'}' AS x", "PRAGMA main.table_info(person)",
+                    f"VACUUM INTO '{tmp_path / 'copia.db'}'"):
+            with pytest.raises(db.sqlcipher.DatabaseError):
+                db.query(sql)
+        # dentro una scrittura una sottoquery su un'altra tabella vera è negata
+        mia = db.execute("INSERT INTO person (full_name) VALUES ('Mia')")
+        with pytest.raises(db.sqlcipher.DatabaseError):
+            db.execute("UPDATE person SET notes=(SELECT name FROM main.team LIMIT 1) WHERE id=?", (mia,))
+        # aggiornare per id una riga altrui: ammesso dall'authorizer, saltato dalla guardia
+        db.execute("UPDATE person SET full_name='Presa' WHERE id=?", (org["luca"],))
+    assert db.sys.one("SELECT full_name FROM person WHERE id=?", (org["luca"],))["full_name"] == "Luca Logistica"
+
+
+def test_limite_dichiarato_conteggio_totale(org):
+    """count(*) non legge colonne: passa. Si sa quante righe ha una tabella, mai quali."""
+    with as_user("dir2"):
+        assert db.one("SELECT COUNT(*) AS n FROM main.person")["n"] >= 5
+        assert db.one("SELECT COUNT(*) AS n FROM person")["n"] == 0

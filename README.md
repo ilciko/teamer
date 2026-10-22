@@ -43,7 +43,9 @@ assegna una provvisoria (*Amministrazione → Utenti*, o `python -m app.admin_cl
   ci lavorano, con tutto il loro storico; ha la sua configurazione (parte da quella di default), i
   suoi cicli, budget, montepremi e simulazioni. Il site admin assegna i team e li trasferisce da un
   director all'altro (*Amministrazione → Team*, vede solo i nomi): le persone passano con lo storico,
-  a chi cede non resta nulla di loro; budget e montepremi non si spostano.
+  a chi cede non resta nulla di loro; budget e montepremi non si spostano. La separazione la applica
+  il database stesso (viste, guardie e authorizer per sessione), non le singole pagine; resta
+  visibile solo quante righe ha una tabella in totale, mai il loro contenuto.
 - **`teamer-admin`** (root, sul container): `init`, `create-admin`, `create-user --role`,
   `reset-password`, `unlock`, `enable`/`disable`, `list-users`, `assign-unassigned`, `list-teams`,
   `transfer-team`, `restore`. Ogni azione finisce nell'audit come `cli`.

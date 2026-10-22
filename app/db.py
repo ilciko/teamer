@@ -43,6 +43,8 @@ class _Handle:
     lock: threading.RLock = field(default_factory=threading.RLock)
     user_id: int | None = None
     rev: int = 0  # revisione del perimetro installato (perimeter.REV)
+    write_target: str | None = None  # tabella che si sta scrivendo (per l'authorizer)
+    system: bool = False             # ricarica del perimetro in corso: letture di sistema
 
 
 _sys: _Handle | None = None
@@ -92,7 +94,11 @@ def _handle() -> _Handle:
         with h.lock:
             if h.rev != perimeter.REV and not h.conn.in_transaction:
                 rev = perimeter.REV
-                perimeter.refresh(h.conn, h.user_id)
+                h.system = True
+                try:
+                    perimeter.refresh(h.conn, h.user_id)
+                finally:
+                    h.system = False
                 h.rev = rev
     return h
 
@@ -108,7 +114,9 @@ def _open_session(s) -> _Handle:
     conn.create_function("teamer_owner", 0, lambda uid=s.user_id: uid)
     rev = perimeter.REV
     perimeter.install(conn, s.user_id)
-    return _Handle(conn, user_id=s.user_id, rev=rev)
+    h = _Handle(conn, user_id=s.user_id, rev=rev)
+    conn.set_authorizer(perimeter.authorizer(h, conn))
+    return h
 
 
 def close_session(s, *, final: bool = False) -> None:
@@ -293,20 +301,31 @@ def backup_to(dest: Path) -> None:
 
 # ---- helper: stessa API per la connessione della richiesta e per quella di sistema ----
 
+def _run(h: _Handle, sql: str, params=(), many: bool = False):
+    """Esegue con la tabella bersaglio dichiarata all'authorizer (le letture non ne hanno)."""
+    h.write_target = write_target(sql)
+    try:
+        if many:
+            return h.conn.executemany(qualify(sql), params)
+        return h.conn.execute(qualify(sql), params)
+    finally:
+        h.write_target = None
+
+
 def _query(h: _Handle, sql: str, params=()) -> list:
     with h.lock:
-        return h.conn.execute(qualify(sql), params).fetchall()
+        return _run(h, sql, params).fetchall()
 
 
 def _one(h: _Handle, sql: str, params=()):
     with h.lock:
-        return h.conn.execute(qualify(sql), params).fetchone()
+        return _run(h, sql, params).fetchone()
 
 
 def _execute(h: _Handle, sql: str, params=()) -> int:
     with h.lock:
         try:
-            cur = h.conn.execute(qualify(sql), params)
+            cur = _run(h, sql, params)
         except Exception:
             # una scrittura fermata (vincolo, guardia del perimetro) non lascia aperta la
             # transazione implicita: terrebbe il lock di scrittura su tutto il file
@@ -319,7 +338,7 @@ def _execute(h: _Handle, sql: str, params=()) -> int:
 def _executemany(h: _Handle, sql: str, seq) -> None:
     with h.lock:
         try:
-            h.conn.executemany(qualify(sql), seq)
+            _run(h, sql, seq, many=True)
         except Exception:
             h.conn.rollback()
             raise
@@ -330,14 +349,14 @@ class _TxConn:
     """Quello che `transaction()` mette in mano al codice: execute/executemany qualificati,
     cursore vero (lastrowid, fetchone)."""
 
-    def __init__(self, conn):
-        self._conn = conn
+    def __init__(self, h):
+        self._h = h
 
     def execute(self, sql: str, params=()):
-        return self._conn.execute(qualify(sql), params)
+        return _run(self._h, sql, params)
 
     def executemany(self, sql: str, seq):
-        return self._conn.executemany(qualify(sql), seq)
+        return _run(self._h, sql, seq, many=True)
 
 
 class _Tx:
@@ -353,7 +372,7 @@ class _Tx:
         except BaseException:
             self.h.lock.release()
             raise
-        return _TxConn(self.h.conn)
+        return _TxConn(self.h)
 
     def __exit__(self, exc_type, exc, tb):
         try:

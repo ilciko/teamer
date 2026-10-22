@@ -30,7 +30,7 @@ def _flag(username="coo") -> bool:
     """Il flag è dell'utente: accenderlo non oscura le pagine degli altri."""
     from app import db
 
-    return bool(db.one("SELECT public_mode FROM app_user WHERE username=?", (username,))["public_mode"])
+    return bool(db.sys.one("SELECT public_mode FROM app_user WHERE username=?", (username,))["public_mode"])
 
 
 def _on(client):

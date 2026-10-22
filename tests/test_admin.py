@@ -69,7 +69,7 @@ def test_disattivazione_e_ultimo_admin(admin_client, client):
 
 def test_audit_registra_chi_ha_fatto_cosa_senza_contenuto(client, admin_client):
     client.post("/people", data={"full_name": "Persona Audit", "ral": "45678"})
-    rows = db.query("SELECT * FROM audit_event ORDER BY id")
+    rows = db.sys.query("SELECT * FROM audit_event ORDER BY id")
     events = [(r["username"], r["event"]) for r in rows]
     assert ("coo", "login_ok") in events and ("it", "login_ok") in events
     azione = [r for r in rows if r["event"] == "azione" and r["username"] == "coo"][-1]
@@ -82,7 +82,7 @@ def test_audit_registra_chi_ha_fatto_cosa_senza_contenuto(client, admin_client):
 
 def test_simulazioni_non_finiscono_nell_audit(client):
     client.post("/comp/salary/simulate", data={})
-    assert db.one("SELECT COUNT(*) AS n FROM audit_event WHERE detail LIKE '%simulate%'")["n"] == 0
+    assert db.sys.one("SELECT COUNT(*) AS n FROM audit_event WHERE detail LIKE '%simulate%'")["n"] == 0
 
 
 def test_login_sbagliato_e_tab_sistema(admin_client):
@@ -133,7 +133,7 @@ def test_migrazione_dalla_versione_mono_utente(tmp_path, monkeypatch):
     u = users.by_username("direttore")
     assert u["role"] == "director" and u["must_change_password"] == 1
     assert u["public_mode"] == 1 and db.get_meta("public_mode", "assente") == "assente"   # il flag passa all'utente
-    assert db.one("SELECT COUNT(*) AS n FROM audit_event WHERE event='migrazione_chiave'")["n"] == 1
+    assert db.sys.one("SELECT COUNT(*) AS n FROM audit_event WHERE event='migrazione_chiave'")["n"] == 1
     db.close_db()
     assert db.startup() == "pronto"                       # ora si apre con la chiave
     db.close_db()
@@ -162,6 +162,6 @@ def test_cli_init_e_reset(tmp_path, monkeypatch, capsys):
     db.startup()
     try:
         assert users.authenticate("coo", nuova)[1] is None
-        assert db.one("SELECT username FROM audit_event WHERE event='password_reset'")["username"] == "cli"
+        assert db.sys.one("SELECT username FROM audit_event WHERE event='password_reset'")["username"] == "cli"
     finally:
         db.close_db()

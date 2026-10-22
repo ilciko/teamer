@@ -188,6 +188,53 @@ def refresh(conn, uid: int) -> None:
     conn.commit()  # niente transazione implicita aperta: terrebbe una vecchia istantanea del file (WAL)
 
 
+# ---- authorizer: niente letture dirette delle tabelle schermate ----
+
+def _fk_columns(conn) -> set:
+    """Le colonne che il motore legge per controllare le chiavi esterne (anche nelle cancellazioni
+    a cascata): le chiavi dei padri e le colonne dei figli. Solo id e riferimenti, mai dati."""
+    out = set()
+    tables = [r[0] for r in conn.execute("SELECT name FROM main.sqlite_master WHERE type='table'")]
+    for child in tables:
+        for fk in conn.execute(f"PRAGMA main.foreign_key_list({child})"):
+            out.add((fk[2], fk[4] or "id"))
+            out.add((child, fk[3]))
+    return out
+
+
+def authorizer(h, conn):
+    """Sulla connessione di un director una colonna di una tabella schermata si legge solo dalle
+    nostre viste e guardie, o dalla tabella che il db sta scrivendo (UPDATE … WHERE id=?) e dalle
+    colonne che il motore controlla per le sue chiavi esterne. Utenti e audit sono della
+    connessione di sistema; ATTACH, VACUUM e PRAGMA sono negati."""
+    import sqlcipher3 as s
+
+    shielded = {*OWNED, *CHILD, *TEAM, *PERSON}
+    ours = shielded | {r[0] for r in conn.execute("SELECT name FROM temp.sqlite_master WHERE type='trigger'")}
+    fk = _fk_columns(conn)
+    denied = {"app_user", "audit_event"}
+    OK, DENY = s.SQLITE_OK, s.SQLITE_DENY
+
+    def check(action, a1, a2, dbname, source):
+        if h.system:  # ricarica del perimetro: lettura di sistema
+            return OK
+        if action == s.SQLITE_READ and dbname == "main":
+            if h.write_target and (a1, a2) in fk:  # controllo delle chiavi esterne durante una scrittura
+                return OK
+            if a1 in denied:
+                return DENY
+            if a1 in shielded and a2:
+                return OK if source in ours or a1 == h.write_target else DENY
+            return OK
+        if action in (s.SQLITE_INSERT, s.SQLITE_UPDATE, s.SQLITE_DELETE) and dbname == "main" and a1 in denied:
+            return DENY
+        if action in (s.SQLITE_ATTACH, s.SQLITE_DETACH, s.SQLITE_PRAGMA):
+            return DENY
+        return OK
+
+    return check
+
+
 def install(conn, uid: int) -> None:
     """Perimetro, guardie e viste del director `uid` sulla sua connessione (prima le guardie, poi le viste)."""
     uid = int(uid)
