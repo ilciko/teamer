@@ -6,7 +6,7 @@ budget, montepremi), valutazioni 9-box con coefficienti dinamici, ciclo annuale
 obiettivi/review/benessere, note 1:1 e azioni.
 
 - **Stack**: FastAPI + Jinja2 + htmx, SQLite cifrato con **SQLCipher** (chiave di sistema su file, nota solo all'IT; gli utenti entrano con la propria password), Python gestito da `uv`.
-- **Schema dati**: 28 tabelle append-only — vedi `docs/schema_team_tool.md` e il diagramma ER.
+- **Schema dati**: tabelle append-only in 5 aree (organigramma, valutazioni, retribuzione, interazioni, utenti e audit) — vedi `docs/schema_team_tool.md` e il diagramma ER.
 - **Nessuna risorsa esterna a runtime**: font, htmx e Chart.js sono vendored in `app/static/`.
 
 ## Sviluppo (Mac)
@@ -80,19 +80,63 @@ schema si applicano al riavvio. Se `uv sync` fallisce, ripristina la versione pr
 
 ### Passaggio dalla versione mono-utente (≤ 0.29) alla 0.30
 
-Fino alla 0.29 la password di login era la chiave del DB. Dopo l'aggiornamento alla 0.30:
+Fino alla 0.29 la password di login era la chiave del DB. Il passaggio richiede un intervento
+dell'IT sul nodo Proxmox e, una volta sola, la password attuale del COO. Fino al passo 4 il DB
+non viene modificato. Comandi dalla shell del nodo:
 
-1. l'app mostra «manca la chiave di sistema»;
-2. sul nodo: `pct exec <ctid> -- /usr/local/bin/teamer-update` una seconda volta (il vecchio
-   updater non installa ancora `teamer-admin`; la seconda passata sì), poi
-   `pct exec <ctid> -- /usr/local/bin/teamer-admin init` → crea `/etc/teamer/db.key`;
-3. il COO apre Teamer: inserisce la password di sempre e sceglie il suo nome utente → il DB viene
-   ricifrato con la chiave e lui diventa il primo *Director*, con la stessa password (da cambiare
-   se è più corta di 12 caratteri);
-4. `pct exec <ctid> -- /usr/local/bin/teamer-admin create-admin <nome>` → site admin con password
-   provvisoria.
+```bash
+# 0. situazione di partenza: versione 0.29.x e data/teamer.db presente
+pct exec <ctid> -- cat /opt/teamer/.version
+pct exec <ctid> -- ls -l /opt/teamer/data/
 
-I backup fatti prima del passaggio (`data/backups/`) restano cifrati con la vecchia password.
+# 1. aggiornamento: backup del DB in data/backups/, installa la 0.30 e riavvia.
+#    Da qui l'app mostra «manca la chiave di sistema» (previsto)
+pct exec <ctid> -- /usr/local/bin/teamer-update
+
+# 2. seconda passata: «già alla versione più recente», ma installa teamer-admin
+#    (il vecchio updater non lo conosceva)
+pct exec <ctid> -- /usr/local/bin/teamer-update
+pct exec <ctid> -- ls -l /usr/local/bin/teamer-admin
+
+# 3. chiave di sistema: /etc/teamer/db.key (root:teamer 0640). Non serve riavviare il servizio
+pct exec <ctid> -- /usr/local/bin/teamer-admin init
+pct exec <ctid> -- ls -l /etc/teamer/
+```
+
+4. **Dal browser**, il COO ricarica Teamer: compare «Aggiornamento della cifratura». Inserisce la
+   password di sempre e sceglie il suo nome utente → il DB viene ricifrato con la chiave e lui
+   diventa il primo *Director*, con la stessa password (da cambiare subito se è più corta di 12
+   caratteri: l'app lo porta su *Account*).
+
+```bash
+# 5. site admin: stampa una password provvisoria, da cambiare al primo accesso.
+#    Verifica: con questo utente si apre solo Amministrazione, Persone dà 403
+pct exec <ctid> -- /usr/local/bin/teamer-admin create-admin <nome>
+
+# 6. copia della chiave fuori dal container (password manager o vault dell'IT)
+pct exec <ctid> -- cat /etc/teamer/db.key
+```
+
+Se qualcosa non torna:
+
+```bash
+pct exec <ctid> -- systemctl status teamer --no-pager
+pct exec <ctid> -- journalctl -u teamer -n 50 --no-pager
+pct exec <ctid> -- /usr/local/bin/teamer-admin list-users
+```
+
+I backup fatti prima del passaggio (`data/backups/`) restano cifrati con la vecchia password;
+quelli successivi si aprono con la chiave.
+
+### Accesso perso
+
+- **Password dimenticata**: il site admin la resetta da *Amministrazione → Utenti* (password
+  provvisoria, mostrata una volta) o da shell con `teamer-admin reset-password <nome>`.
+- **Troppi tentativi errati**: il blocco scade da solo dopo qualche minuto; prima lo toglie
+  *Sblocca* nel pannello o `teamer-admin unlock <nome>`.
+- **Nessun site admin utilizzabile**: `teamer-admin create-admin <nome>` o `reset-password`.
+- **Chiave persa**: non c'è recupero. Servono la copia della chiave salvata fuori dal server
+  oppure un backup vzdump del container che la contenga.
 
 ### Backup
 
@@ -106,8 +150,8 @@ I backup fatti prima del passaggio (`data/backups/`) restano cifrati con la vecc
 app/            FastAPI: routers/ services/ templates/ static/
 migrations/     SQL numerati, applicati all'avvio (schema_version in app_meta)
 scripts/        seed_demo.py (+ app/admin_cli.py: amministrazione da shell)
-tests/          pytest (servizi di calcolo, cifratura, migrazioni)
-deploy/         ct/teamer.sh (Proxmox host) · install/ (container) · systemd
+tests/          pytest (servizi di calcolo, cifratura, migrazioni, utenti e ruoli)
+deploy/         ct/teamer.sh (Proxmox host) · install/ (container: installer, teamer-update, teamer-admin) · systemd
 docs/           schema dati, ER, proposte, modulo review, artefatto 9-box
 ```
 
