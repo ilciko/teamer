@@ -39,11 +39,14 @@ assegna una provvisoria (*Amministrazione → Utenti*, o `python -m app.admin_cl
   sua ultima pagina Teamer e riprende in place con la password. Il blocco di uno non tocca gli altri.
 - **Audit** (*Amministrazione → Audit*): accessi, errori, blocchi, gestione utenti, backup,
   aggiornamenti e ogni azione che modifica dati (chi, quando, quale indirizzo; mai il contenuto).
-- **Director separati** (dalla 0.32, `docs/perimetri.md`): ogni director ha la sua configurazione
-  (parte da quella di default), i suoi cicli, budget, montepremi e simulazioni. Dalla 0.33 vedrà
-  solo le persone dei suoi team.
+- **Director separati** (`docs/perimetri.md`): ogni director vede solo i suoi team e le persone che
+  ci lavorano, con tutto il loro storico; ha la sua configurazione (parte da quella di default), i
+  suoi cicli, budget, montepremi e simulazioni. Il site admin assegna i team e li trasferisce da un
+  director all'altro (*Amministrazione → Team*, vede solo i nomi): le persone passano con lo storico,
+  a chi cede non resta nulla di loro; budget e montepremi non si spostano.
 - **`teamer-admin`** (root, sul container): `init`, `create-admin`, `create-user --role`,
-  `reset-password`, `unlock`, `enable`/`disable`, `list-users`, `assign-unassigned`, `restore`. Ogni azione finisce nell'audit come `cli`.
+  `reset-password`, `unlock`, `enable`/`disable`, `list-users`, `assign-unassigned`, `list-teams`,
+  `transfer-team`, `restore`. Ogni azione finisce nell'audit come `cli`.
 
 ## Produzione (LXC su Proxmox)
 

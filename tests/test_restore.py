@@ -86,10 +86,12 @@ def test_ripristino_dal_pannello(admin_client, client, tmp_path):
     r = admin_client.post("/admin/restore", files=files, data={"password": "sbagliata", "confirm": "SOSTITUISCI"})
     assert "non si apre" in r.text
     r = admin_client.post("/admin/restore", files=files, data={"password": "vecchia-pw", "confirm": "SOSTITUISCI"})
-    assert "Ripristino completato: 1 persona" in r.text and _people() == ["Carla"]
+    assert "Ripristino completato: 1 persona" in r.text
     assert client.get("/people").status_code == 200                # le sessioni restano valide
-    assert "Carla" in client.get("/people").text
-    row = db.one("SELECT * FROM audit_event WHERE event='restore'")
+    assert "Carla" not in client.get("/people").text and _people() == []   # da un'altra istanza: da assegnare
+    admin_client.post("/admin/assign", data={"user_id": users.by_username("coo")["id"], "confirm": "ASSEGNA"})
+    assert "Carla" in client.get("/people").text and _people() == ["Carla"]
+    row = db.sys.one("SELECT * FROM audit_event WHERE event='restore'")
     assert row["username"] == "it" and "password 0.29" in row["detail"]
     assert client.post("/admin/restore", files=files, data={"confirm": "SOSTITUISCI"}).status_code == 403
     assert not list((config.DB_PATH.parent / "restore").glob("*.db"))   # nessun file lasciato in giro

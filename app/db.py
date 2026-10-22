@@ -41,6 +41,8 @@ MIGRATIONS_DIR = config.BASE_DIR / "migrations"
 class _Handle:
     conn: object
     lock: threading.RLock = field(default_factory=threading.RLock)
+    user_id: int | None = None
+    rev: int = 0  # revisione del perimetro installato (perimeter.REV)
 
 
 _sys: _Handle | None = None
@@ -84,6 +86,14 @@ def _handle() -> _Handle:
                 s.db = _open_session(s)
                 _session_handles[s.id] = s
             h = s.db
+    from app import perimeter
+
+    if h.rev != perimeter.REV:  # l'admin ha cambiato le titolarità: perimetro da ricaricare
+        with h.lock:
+            if h.rev != perimeter.REV and not h.conn.in_transaction:
+                rev = perimeter.REV
+                perimeter.refresh(h.conn, h.user_id)
+                h.rev = rev
     return h
 
 
@@ -96,8 +106,9 @@ def _open_session(s) -> _Handle:
     _configure(conn)
     # proprietario delle righe nuove nelle tabelle "del director" (DEFAULT (teamer_owner()))
     conn.create_function("teamer_owner", 0, lambda uid=s.user_id: uid)
+    rev = perimeter.REV
     perimeter.install(conn, s.user_id)
-    return _Handle(conn)
+    return _Handle(conn, user_id=s.user_id, rev=rev)
 
 
 def close_session(s, *, final: bool = False) -> None:
@@ -294,14 +305,24 @@ def _one(h: _Handle, sql: str, params=()):
 
 def _execute(h: _Handle, sql: str, params=()) -> int:
     with h.lock:
-        cur = h.conn.execute(qualify(sql), params)
+        try:
+            cur = h.conn.execute(qualify(sql), params)
+        except Exception:
+            # una scrittura fermata (vincolo, guardia del perimetro) non lascia aperta la
+            # transazione implicita: terrebbe il lock di scrittura su tutto il file
+            h.conn.rollback()
+            raise
         h.conn.commit()
         return cur.lastrowid
 
 
 def _executemany(h: _Handle, sql: str, seq) -> None:
     with h.lock:
-        h.conn.executemany(qualify(sql), seq)
+        try:
+            h.conn.executemany(qualify(sql), seq)
+        except Exception:
+            h.conn.rollback()
+            raise
         h.conn.commit()
 
 
@@ -495,7 +516,7 @@ def restore(src: Path, *, source_key: str | None = None, password: str | None = 
                     # gli utenti del file non sono quelli di qui: i dati tornano «da assegnare»
                     from app import perimeter
 
-                    for table in [*perimeter.OWNED, *perimeter.TEAM]:
+                    for table in [*perimeter.OWNED, *perimeter.TEAM, "person"]:
                         conn.execute(f"UPDATE {table} SET owner_user_id=NULL")
                     conn.execute("INSERT INTO app_meta (key, value) VALUES ('instance_id', ?) "
                                  "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (here[0] if here else "",))

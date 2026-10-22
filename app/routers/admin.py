@@ -58,6 +58,9 @@ def admin_page(request: Request, tab: str = "users", saved: str = "", err: str =
         ctx["now"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ctx["unassigned"] = perimeter.unassigned()
         ctx["directors"] = [u for u in rows if u["role"] == "director" and u["active"]]
+    elif tab == "teams":
+        ctx["teams"] = perimeter.team_tree()
+        ctx["directors"] = [u for u in users.all_users() if u["role"] == "director" and u["active"]]
     elif tab == "audit":
         page = max(page, 1)
         rows, total = _audit_rows(user, event, date_from, date_to, page)
@@ -154,6 +157,24 @@ def assign(user_id: int = Form(...), confirm: str = Form("")):
     users.audit("assign_unassigned", f"a {u['username']}: " + ", ".join(
         f"{label} {counts[t]}" for t, label, _ in perimeter.UNASSIGNED_GROUPS if counts.get(t)) or "solo configurazione")
     return _back(saved="assegnati")
+
+
+@router.post("/admin/teams/{tid}/transfer")
+def team_transfer(tid: int, user_id: int = Form(...), confirm: str = Form("")):
+    """Passa un team (con i sotto-team dello stesso titolare, le persone e il loro storico) a un altro director."""
+    u = users.get(user_id)
+    if u is None or u["role"] != "director" or not u["active"]:
+        return _back("teams", err="Scegli un director attivo.")
+    if confirm != "TRASFERISCI":
+        return _back("teams", err="Per trasferire scrivi TRASFERISCI nel campo di conferma.")
+    name = db.sys.one("SELECT name FROM team WHERE id=?", (tid,))
+    try:
+        n = perimeter.transfer_team(tid, user_id)
+    except perimeter.TransferError as exc:
+        return _back("teams", err=str(exc))
+    summary = ", ".join(f"{k} {v}" for k, v in n.items() if v)
+    users.audit("team_transfer", f"{name['name'] if name else tid} → {u['username']}: {summary}")
+    return _back("teams", restored=f"trasferito a {u['username']} ({summary})")
 
 
 # ---- sistema ----

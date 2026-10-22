@@ -29,6 +29,7 @@ def simulate(teams, people, positions, team_rows, moves, sim_positions, role_ord
     team tolto finisce senza team. I riporti sono tutti ricalcolati.
     """
     out_teams = {t["id"]: dict(t) for t in teams}
+    real_ids = set(out_teams)
     for r in team_rows:
         ref = team_ref(r)
         if r.get("team_id") and r["team_id"] not in out_teams:
@@ -41,6 +42,10 @@ def simulate(teams, people, positions, team_rows, moves, sim_positions, role_ord
                           "new": ref < 0}
     for t in out_teams.values():
         if t.get("parent_team_id") not in out_teams:
+            # padre reale mai visto (di un altro director): sopra c'è un riporto che qui non si calcola
+            parent = t.get("parent_team_id")
+            if parent is not None and parent > 0 and parent not in real_ids:
+                t["outside"] = True
             t["parent_team_id"] = None
 
     move_by = {m["person_id"]: m for m in moves}
@@ -56,7 +61,9 @@ def simulate(teams, people, positions, team_rows, moves, sim_positions, role_ord
             q["team_id"] = None
         out_people.append(q)
     for q in out_people:
-        q["manager_person_id"] = org_tree.expected_manager(q, out_people, list(out_teams.values()), role_order)
+        exp = org_tree.expected_manager(q, out_people, list(out_teams.values()), role_order)
+        q["outside"] = exp is org_tree.OUTSIDE
+        q["manager_person_id"] = None if q["outside"] else exp
 
     pmove_by = {m["position_id"]: m for m in pos_moves}
     out_pos = []

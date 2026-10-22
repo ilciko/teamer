@@ -446,7 +446,7 @@ Prove di organigramma da confrontare, approvare e applicare (`/org/sim`, `app/se
 
 ## Proprietari *(0028)*
 
-Configurazione (`lookup`, `ninebox_weight`, `weight_mapping`, `evaluation_model`, `bonus_factor`, `benefit_type`, `listino_profile`), contenitori (`review_cycle`, `ral_budget`, `bonus_pool`, `hiring_budget`, `hiring_transfer`, `reorg_scenario`), i loro figli senza persona (`hiring_position`, `reorg_team`, `reorg_move`, `reorg_position`, `reorg_position_move`) e `team` hanno `owner_user_id INTEGER DEFAULT (teamer_owner()) FK→app_user.id`: il director a cui appartengono, NULL = da assegnare. Le UNIQUE della configurazione includono il proprietario (`ninebox_weight`, `weight_mapping`, `bonus_factor` hanno ora un `id` e una UNIQUE con il proprietario al posto della chiave primaria naturale). `bonus_allocation.pool_id` è facoltativo (una riga staccata dal montepremi resta nello storico della persona). Vedi `docs/perimetri.md`.
+Configurazione (`lookup`, `ninebox_weight`, `weight_mapping`, `evaluation_model`, `bonus_factor`, `benefit_type`, `listino_profile`), contenitori (`review_cycle`, `ral_budget`, `bonus_pool`, `hiring_budget`, `hiring_transfer`, `reorg_scenario`), i loro figli senza persona (`hiring_position`, `reorg_team`, `reorg_move`, `reorg_position`, `reorg_position_move`) e `team` hanno `owner_user_id INTEGER DEFAULT (teamer_owner()) FK→app_user.id`: il director a cui appartengono, NULL = da assegnare. Le UNIQUE della configurazione includono il proprietario (`ninebox_weight`, `weight_mapping`, `bonus_factor` hanno ora un `id` e una UNIQUE con il proprietario al posto della chiave primaria naturale). `bonus_allocation.pool_id` è facoltativo (una riga staccata dal montepremi resta nello storico della persona). Dalla 0029 anche `person` ha `owner_user_id`: conta solo per chi non ha ancora un'assegnazione (resta del director che l'ha creata); per gli altri il perimetro lo decide il team dell'ultima assegnazione. Vedi `docs/perimetri.md`.
 
 ### `user_meta` — configurazione per director *(0028)*
 | Campo | Tipo | Note |
@@ -484,7 +484,7 @@ In `app_meta` restano `schema_version` e `instance_id` (identifica l'istanza: un
 | at | DATETIME | ora locale |
 | user_id | INTEGER FK→app_user.id | NULL per tentativi con un nome inesistente |
 | username | TEXT | copiato (resta leggibile anche senza utente; `cli` per `teamer-admin`) |
-| event | TEXT | `login_ok`/`login_ko`/`logout`/`lock`/`unlock`, `password_change`/`password_reset`, `user_create`/`user_update`/`user_disable`/`user_enable`/`user_unlock`, `sessions_close`, `backup`, `restore`, `assign_unassigned`, `update_request`, `migrazione_chiave`, `azione` |
+| event | TEXT | `login_ok`/`login_ko`/`logout`/`lock`/`unlock`, `password_change`/`password_reset`, `user_create`/`user_update`/`user_disable`/`user_enable`/`user_unlock`, `sessions_close`, `backup`, `restore`, `assign_unassigned`, `team_transfer`, `update_request`, `migrazione_chiave`, `azione` |
 | detail | TEXT | per `azione`: metodo, path ed esito della richiesta — **mai il contenuto** |
 | ip | TEXT | |
 

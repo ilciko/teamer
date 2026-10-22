@@ -170,9 +170,10 @@ def test_ogni_director_ha_la_sua_connessione(client, admin_client, app_db):
     altro = TestClient(app)
     login(altro, "hr")
     client.post("/people", data={"full_name": "Scritta Da Coo"})
-    assert "Scritta Da Coo" in altro.get("/people").text      # file condiviso, WAL: si vede subito
     altro.post("/people", data={"full_name": "Scritta Da Hr"})
-    assert "Scritta Da Hr" in client.get("/people").text
+    assert "Scritta Da Hr" in altro.get("/people").text and "Scritta Da Coo" not in altro.get("/people").text
+    assert "Scritta Da Coo" in client.get("/people").text and "Scritta Da Hr" not in client.get("/people").text
+    assert db.sys.one("SELECT COUNT(*) AS n FROM person")["n"] == 2   # stesso file, viste diverse
     coo, hr = _sessione_di("coo"), _sessione_di("hr")
     assert coo.db is not None and hr.db is not None and coo.db.conn is not hr.db.conn
     assert coo.db.conn is not db._sys.conn

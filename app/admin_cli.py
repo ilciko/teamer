@@ -11,6 +11,9 @@ come root e poi lancia questi comandi come utente `teamer`. Comandi:
     enable NOME / disable NOME  riattiva / disattiva
     list-users
     assign-unassigned NOME      assegna al director NOME i dati senza proprietario
+    list-teams                  albero dei team con il titolare
+    transfer-team TEAM --to NOME
+                                passa il team (sotto-team, persone e storico) a un altro director
     restore FILE [--source-key | --password]
                                 sostituisce i dati con quelli del file (utenti e audit restano);
                                 chiave dell'altra istanza o password ≤ 0.29 chieste a prompt.
@@ -82,6 +85,23 @@ def _restore(args) -> int:
     return 0
 
 
+def _transfer(team_name: str, to: str) -> int:
+    matches = db.sys.query("SELECT id, name FROM team WHERE name = ? COLLATE NOCASE", (team_name.strip(),))
+    if len(matches) != 1:
+        return _fail(f"team «{team_name}» {'inesistente' if not matches else 'ambiguo: più team con questo nome'}")
+    u = _user(to)
+    if u["role"] != "director" or not u["active"]:
+        return _fail(f"{u['username']} non è un director attivo")
+    try:
+        n = perimeter.transfer_team(matches[0]["id"], u["id"])
+    except perimeter.TransferError as exc:
+        return _fail(str(exc))
+    summary = ", ".join(f"{k} {v}" for k, v in n.items() if v)
+    users.audit("team_transfer", f"{matches[0]['name']} → {u['username']} (da shell): {summary}")
+    print(f"{matches[0]['name']} trasferito a {u['username']}: {summary}.")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="teamer-admin", description="Amministrazione di Teamer da shell (IT).")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -95,6 +115,10 @@ def main(argv=None) -> int:
         sub.add_parser(cmd).add_argument("username")
     sub.add_parser("list-users")
     sub.add_parser("assign-unassigned", help="assegna a un director i dati senza proprietario").add_argument("username")
+    sub.add_parser("list-teams", help="albero dei team con il titolare")
+    p = sub.add_parser("transfer-team", help="passa un team a un altro director")
+    p.add_argument("team")
+    p.add_argument("--to", required=True)
     p = sub.add_parser("restore", help="sostituisce i dati con quelli di un backup o di un DB della 0.29")
     p.add_argument("file", type=Path)
     g = p.add_mutually_exclusive_group()
@@ -129,6 +153,13 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == "restore":
             return _restore(args)
+        if args.cmd == "list-teams":
+            for t in perimeter.team_tree():
+                print(f"{'  ' * t['depth']}{t['name']:<{40 - 2 * t['depth']}} {t['owner'] or '(da assegnare)'}"
+                      f"{'  [archiviato]' if t['archived_at'] else ''}")
+            return 0
+        if args.cmd == "transfer-team":
+            return _transfer(args.team, args.to)
         u = _user(args.username)
         if args.cmd == "assign-unassigned":
             if u["role"] != "director" or not u["active"]:

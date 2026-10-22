@@ -86,8 +86,15 @@ def _derive_manager(pid: int) -> None:
     people, teams = _report_state()
     me = next((p for p in people if p["id"] == pid), None)
     if me and me["assignment_id"]:
-        db.execute("UPDATE person_assignment SET manager_person_id=? WHERE id=?",
-                   (org_svc.expected_manager(me, people, teams, _role_order()), me["assignment_id"]))
+        exp = org_svc.expected_manager(me, people, teams, _role_order())
+        if exp is org_svc.OUTSIDE:
+            # il riporto sta sopra il perimetro: si tiene quello salvato, o quello dell'assegnazione prima
+            if me["manager_person_id"] is not None:
+                return
+            prev = db.one("SELECT manager_person_id FROM person_assignment WHERE person_id=? AND voided=0 "
+                          "AND id<>? ORDER BY start_date DESC, id DESC LIMIT 1", (pid, me["assignment_id"]))
+            exp = prev["manager_person_id"] if prev else None
+        db.execute("UPDATE person_assignment SET manager_person_id=? WHERE id=?", (exp, me["assignment_id"]))
 
 
 def _verify_reports(next_url: str, mode: str = "correzione", on_date: str | None = None) -> RedirectResponse:
@@ -270,8 +277,8 @@ def person_card(request: Request, pid: int):
     if assignment and p["status"] == "attivo":
         r_people, r_teams = _report_state()
         me = next((x for x in r_people if x["id"] == pid), None)
-        report_mismatch = bool(me) and me["manager_person_id"] != org_svc.expected_manager(
-            me, r_people, r_teams, _role_order())
+        exp = org_svc.expected_manager(me, r_people, r_teams, _role_order()) if me else None
+        report_mismatch = bool(me) and exp is not org_svc.OUTSIDE and me["manager_person_id"] != exp
     year = str(date.today().year)
     ral_trend = [
         {"x": str(r["effective_date"]), "y": r["amount"]}
@@ -399,28 +406,32 @@ def person_delete(pid: int, confirm_name: str = Form(...)):
     p = db.one("SELECT * FROM person WHERE id=?", (pid,))
     if not p or confirm_name.strip().lower() != p["full_name"].strip().lower():
         return RedirectResponse(f"/people/{pid}?err=confirm", status_code=302)
-    with db.transaction() as conn:
-        conn.execute("DELETE FROM goal_review WHERE goal_id IN (SELECT id FROM goal WHERE person_id=?)", (pid,))
-        conn.execute("DELETE FROM goal_review WHERE review_id IN (SELECT id FROM performance_review WHERE person_id=?)", (pid,))
-        conn.execute("DELETE FROM wellbeing_entry WHERE review_id IN (SELECT id FROM performance_review WHERE person_id=?)", (pid,))
-        conn.execute("DELETE FROM attachment WHERE person_id=?", (pid,))
-        conn.execute("DELETE FROM performance_review WHERE person_id=?", (pid,))
-        conn.execute("DELETE FROM goal WHERE person_id=?", (pid,))
-        conn.execute("DELETE FROM ninebox_assessment WHERE person_id=?", (pid,))
-        conn.execute("DELETE FROM ral_event WHERE person_id=?", (pid,))
-        conn.execute("DELETE FROM benefit_assignment WHERE person_id=?", (pid,))
-        conn.execute("DELETE FROM incentive WHERE person_id=?", (pid,))
-        conn.execute("DELETE FROM bonus_allocation WHERE person_id=?", (pid,))
-        conn.execute("DELETE FROM action_item WHERE person_id=?", (pid,))
-        conn.execute("DELETE FROM meeting_note WHERE person_id=?", (pid,))
-        conn.execute("DELETE FROM person_assignment WHERE person_id=?", (pid,))
-        conn.execute("DELETE FROM listino_person_param WHERE person_id=?", (pid,))
-        conn.execute("UPDATE person_assignment SET manager_person_id=NULL WHERE manager_person_id=?", (pid,))
-        conn.execute("DELETE FROM employment WHERE person_id=?", (pid,))
-        conn.execute("UPDATE team SET lead_person_id=NULL WHERE lead_person_id=?", (pid,))
-        conn.execute("DELETE FROM reorg_move WHERE person_id=?", (pid,))
-        conn.execute("UPDATE reorg_team SET lead_person_id=NULL WHERE lead_person_id=?", (pid,))
-        conn.execute("DELETE FROM person WHERE id=?", (pid,))
+    try:
+        with db.transaction() as conn:
+            conn.execute("DELETE FROM goal_review WHERE goal_id IN (SELECT id FROM goal WHERE person_id=?)", (pid,))
+            conn.execute("DELETE FROM goal_review WHERE review_id IN (SELECT id FROM performance_review WHERE person_id=?)", (pid,))
+            conn.execute("DELETE FROM wellbeing_entry WHERE review_id IN (SELECT id FROM performance_review WHERE person_id=?)", (pid,))
+            conn.execute("DELETE FROM attachment WHERE person_id=?", (pid,))
+            conn.execute("DELETE FROM performance_review WHERE person_id=?", (pid,))
+            conn.execute("DELETE FROM goal WHERE person_id=?", (pid,))
+            conn.execute("DELETE FROM ninebox_assessment WHERE person_id=?", (pid,))
+            conn.execute("DELETE FROM ral_event WHERE person_id=?", (pid,))
+            conn.execute("DELETE FROM benefit_assignment WHERE person_id=?", (pid,))
+            conn.execute("DELETE FROM incentive WHERE person_id=?", (pid,))
+            conn.execute("DELETE FROM bonus_allocation WHERE person_id=?", (pid,))
+            conn.execute("DELETE FROM action_item WHERE person_id=?", (pid,))
+            conn.execute("DELETE FROM meeting_note WHERE person_id=?", (pid,))
+            conn.execute("DELETE FROM person_assignment WHERE person_id=?", (pid,))
+            conn.execute("DELETE FROM listino_person_param WHERE person_id=?", (pid,))
+            conn.execute("UPDATE person_assignment SET manager_person_id=NULL WHERE manager_person_id=?", (pid,))
+            conn.execute("DELETE FROM employment WHERE person_id=?", (pid,))
+            conn.execute("UPDATE team SET lead_person_id=NULL WHERE lead_person_id=?", (pid,))
+            conn.execute("DELETE FROM reorg_move WHERE person_id=?", (pid,))
+            conn.execute("UPDATE reorg_team SET lead_person_id=NULL WHERE lead_person_id=?", (pid,))
+            conn.execute("DELETE FROM person WHERE id=?", (pid,))
+    except db.sqlcipher.IntegrityError:
+        # altri dati, che da qui non si possono toccare, la indicano ancora: si usa la cessazione
+        return RedirectResponse(f"/people/{pid}?err=linked", status_code=302)
     return RedirectResponse("/people", status_code=302)
 
 
@@ -569,7 +580,8 @@ def team_restore(tid: int):
     t = db.one("SELECT parent_team_id FROM team WHERE id=? AND archived_at IS NOT NULL", (tid,))
     if t:
         parent = t["parent_team_id"]
-        if parent and db.one("SELECT archived_at FROM team WHERE id=?", (parent,))["archived_at"]:
+        row = db.one("SELECT archived_at FROM team WHERE id=?", (parent,)) if parent else None
+        if row is not None and row["archived_at"]:  # padre non visibile: resta dov'era
             parent = None
         db.execute("UPDATE team SET archived_at=NULL, parent_team_id=?, sort_order=? WHERE id=?",
                    (parent, _next_sort_order(parent), tid))
@@ -649,7 +661,10 @@ def org_chart(request: Request, team_id: list[str] = Query([]), pos: str = "1"):
     focus = [int(x) for x in team_id if x.isdigit() and int(x) in known]
     # interruttore posizioni: stesso filtro reparti, posizioni invertite
     toggle_pos_url = "/org/chart?" + urlencode([("team_id", t) for t in focus] + [("pos", "0" if show_pos else "1")])
-    chart = org_svc.build_chart([dict(p) for p in people], teams, positions, role_order, focus)
+    visible = {r["id"] for r in db.query("SELECT id FROM person")}
+    people = [{**dict(p), "outside": p["manager_person_id"] is not None and p["manager_person_id"] not in visible}
+              for p in people]
+    chart = org_svc.build_chart(people, teams, positions, role_order, focus)
     team_opts = []
 
     def walk(nodes):
@@ -815,7 +830,14 @@ def team_update(tid: int, name: str = Form(...), parent_team_id: str = Form(None
         if int(parent_team_id) in org_svc.descendant_ids(all_teams, tid):
             parent_team_id = None
     parent = int(parent_team_id) if parent_team_id else None
-    old = db.one("SELECT parent_team_id, sort_order FROM team WHERE id=?", (tid,))
+    old = db.one("SELECT parent_team_id, lead_person_id, sort_order FROM team WHERE id=?", (tid,))
+    # padre e responsabile che il form non può mostrare (fuori perimetro) restano come sono
+    if old and parent is None and old["parent_team_id"] is not None and \
+            not db.one("SELECT 1 FROM team WHERE id=?", (old["parent_team_id"],)):
+        parent = old["parent_team_id"]
+    if old and not lead_person_id and old["lead_person_id"] is not None and \
+            not db.one("SELECT 1 FROM person WHERE id=?", (old["lead_person_id"],)):
+        lead_person_id = str(old["lead_person_id"])
     order = old["sort_order"] if old and old["parent_team_id"] == parent else _next_sort_order(parent)
     db.execute(
         "UPDATE team SET name=?, parent_team_id=?, lead_person_id=?, description=?, sort_order=? WHERE id=?",

@@ -84,6 +84,7 @@
         <label class="fld" style="color:var(--red-text)">Eliminazione definitiva (solo inserimenti per errore)</label>
         <p class="muted3 small" style="margin-bottom:6px">Cancella la persona e <strong>tutti</strong> i suoi dati (RAL, valutazioni, obiettivi, note…). Per un'uscita reale usa la cessazione. Per confermare riscrivi il nome esatto.</p>
         {% if request.query_params.get('err') == 'confirm' %}<div class="flash error">Il nome non corrisponde: nulla è stato eliminato.</div>{% endif %}
+        {% if request.query_params.get('err') == 'linked' %}<div class="flash error">Questa persona è ancora collegata ad altri dati e non si può eliminare: usa la cessazione.</div>{% endif %}
         <form method="post" action="/people/{{ p.id }}/delete"
               onsubmit="return confirm('Eliminazione irreversibile di {{ p.full_name }} e di tutto il suo storico. Procedere?')">
           <div class="frow">

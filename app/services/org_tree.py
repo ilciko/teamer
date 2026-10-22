@@ -147,6 +147,11 @@ def role_rows(role_order) -> dict[str, int]:
     return {c: (managers.index(c) if c in managers else len(managers)) for c in codes}
 
 
+# riporto atteso fuori perimetro: sopra il team più alto del director c'è un team che lui non
+# vede (è di un altro director). Non si calcola e non si sovrascrive: resta quello salvato.
+OUTSIDE = "fuori-perimetro"
+
+
 def expected_manager(person, people, teams, role_order) -> int | None:
     """Riporto diretto atteso da team e ruolo: Specialist → TL → Manager → Director.
 
@@ -157,7 +162,8 @@ def expected_manager(person, people, teams, role_order) -> int | None:
     della persona e almeno da TL: chi sta sotto il TL (Specialist, Junior…) non è mai
     riporto di nessuno, quindi un Junior va al TL e non allo Specialist. Vince il
     ruolo più vicino (se manca il TL si sale al Manager, e così via); a parità il
-    lead del team, poi il nome. Nessuno sopra → None.
+    lead del team, poi il nome. Nessuno sopra → None. Se la risalita arriva a un team
+    padre non visibile (o a un team marcato `outside` dalla simulazione) → OUTSIDE.
     """
     def rank(p):
         return role_order.get(p.get("role_type"), 0)
@@ -169,6 +175,8 @@ def expected_manager(person, people, teams, role_order) -> int | None:
     while tid is not None and tid not in seen:
         seen.add(tid)
         t = team_by_id.get(tid)
+        if t is None and seen != {person.get("team_id")}:
+            return OUTSIDE  # padre di un altro director
         lead = t.get("lead_person_id") if t else None
         cands = {p["id"]: p for p in people if p.get("team_id") == tid}
         if lead in by_id:
@@ -178,6 +186,8 @@ def expected_manager(person, people, teams, role_order) -> int | None:
             return min(above, key=lambda c: (rank(c), c["id"] != lead, c.get("full_name") or ""))["id"]
         if t is None:
             break
+        if t.get("outside"):
+            return OUTSIDE
         tid = t.get("parent_team_id")
     return None
 
@@ -193,7 +203,7 @@ def report_mismatches(people, teams, role_order) -> list[dict]:
         if p.get("team_id") is None:
             continue
         exp = expected_manager(p, people, teams, role_order)
-        if p.get("manager_person_id") != exp:
+        if exp is not OUTSIDE and p.get("manager_person_id") != exp:
             out.append({"person": p, "current": p.get("manager_person_id"), "expected": exp})
     return out
 
@@ -204,8 +214,9 @@ def _position_parent(pos, by_id, teams, role_order) -> int | None:
     hint = pos.get("manager_hint")
     if hint in by_id:
         return hint
-    return expected_manager({"id": None, "role_type": pos.get("role_type"), "team_id": pos.get("team_id")},
-                            list(by_id.values()), teams, role_order)
+    exp = expected_manager({"id": None, "role_type": pos.get("role_type"), "team_id": pos.get("team_id")},
+                           list(by_id.values()), teams, role_order)
+    return None if exp is OUTSIDE else exp
 
 
 def build_chart(people, teams, positions=(), role_order=None, focus_team_ids=None) -> dict:
@@ -245,7 +256,8 @@ def build_chart(people, teams, positions=(), role_order=None, focus_team_ids=Non
             parent[p["id"]] = mid
         else:
             parent[p["id"]] = None
-            problem[p["id"]] = "inactive" if mid is not None and mid != p["id"] else "missing"
+            if not p.get("outside"):  # chi riporta fuori dal perimetro è una radice, non un'anomalia
+                problem[p["id"]] = "inactive" if mid is not None and mid != p["id"] else "missing"
 
     def reachable():
         kids: dict[int | None, list[int]] = {}

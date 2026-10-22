@@ -164,6 +164,14 @@ async def auth_guard(request: Request, call_next):
     return response
 
 
+@app.exception_handler(db.sqlcipher.IntegrityError)
+async def _out_of_perimeter(request: Request, exc: db.sqlcipher.IntegrityError):
+    """Una guardia del perimetro ha fermato una scrittura (ultima difesa: l'interfaccia non la offre)."""
+    if "fuori perimetro" not in str(exc):
+        raise exc
+    return Response("Operazione non consentita", status_code=403)
+
+
 @app.exception_handler(db.DatabaseLocked)
 async def _db_locked(request: Request, exc: db.DatabaseLocked):
     """Il DB non è aperto (chiave mancante, migrazione da fare, spegnimento)."""
