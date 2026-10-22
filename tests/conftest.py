@@ -30,6 +30,18 @@ def fresh_db(tmp_path):
     db.close_db()
 
 
+def make_legacy_db(path, password: str = "demo1234", people=()):
+    """DB com'era fino alla 0.29: schema fino alla 0025, cifrato con la password del COO."""
+    conn = db._connect(path, f"'{password}'")
+    for f in sorted(db.MIGRATIONS_DIR.glob("*.sql")):
+        if int(f.name[:4]) <= 25:
+            conn.executescript(f.read_text())
+    conn.execute("INSERT OR REPLACE INTO app_meta VALUES ('schema_version', '25'), ('public_mode', '1')")
+    conn.executemany("INSERT INTO person (full_name) VALUES (?)", [(p,) for p in people])
+    conn.commit()
+    conn.close()
+
+
 def login(c, username: str, password: str = PASSWORD):
     r = c.post("/login", data={"username": username, "password": password})
     assert r.status_code == 200, r.text

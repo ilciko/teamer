@@ -11,7 +11,7 @@
     <a class="btn sm {{ 'ghost' if tab != 'update' }}" href="/admin?tab=update">Aggiornamenti{% if update_available() %} ●{% endif %}</a>
   </div>
 </div>
-{% if err %}<div class="flash error">{{ err }}</div>{% elif saved and tab != 'update' %}<div class="flash">Fatto.</div>{% endif %}
+{% if err %}<div class="flash error">{{ err }}</div>{% elif restored %}<div class="flash">Ripristino completato: {{ restored }}.</div>{% elif saved and tab != 'update' %}<div class="flash">Fatto.</div>{% endif %}
 
 {% if tab == 'users' %}
 {% if temp %}{% set tu, tp = temp.split(':', 1) %}
@@ -39,7 +39,7 @@
         <details><summary class="btn sm ghost">Gestisci</summary>
           <div style="padding:8px 0; min-width:280px">
             <form method="post" action="/admin/users/{{ u.id }}/update">
-              <label class="fld">Nome visualizzato</label><input name="display_name" value="{{ u.display_name or '' }}">
+              <label class="fld">Nome visualizzato</label><input type="text" name="display_name" value="{{ u.display_name or '' }}">
               <label class="fld">Ruolo</label>
               <select name="role">{% for code, label in roles.items() %}<option value="{{ code }}" {{ 'selected' if code == u.role }}>{{ label }}</option>{% endfor %}</select>
               <div class="actions"><button class="btn sm">Correggi</button></div>
@@ -66,11 +66,11 @@
   <div class="card-title">Nuovo utente</div>
   <form method="post" action="/admin/users">
     <div class="frow">
-      <div><label class="fld">Nome utente</label><input name="username" required autocomplete="off"></div>
+      <div><label class="fld">Nome utente</label><input type="text" name="username" required autocomplete="off"></div>
       <div><label class="fld">Ruolo</label>
         <select name="role">{% for code, label in roles.items() %}<option value="{{ code }}" {{ 'selected' if code == 'director' }}>{{ label }}</option>{% endfor %}</select></div>
     </div>
-    <label class="fld">Nome visualizzato</label><input name="display_name">
+    <label class="fld">Nome visualizzato</label><input type="text" name="display_name">
     <p class="muted3 small">Nasce con una password provvisoria, mostrata una volta sola: al primo accesso l'utente la cambia.</p>
     <div class="actions"><button class="btn sm">Crea utente</button></div>
   </form>
@@ -80,7 +80,7 @@
 <div class="card">
   <form method="get" action="/admin" class="frow" style="align-items:end">
     <input type="hidden" name="tab" value="audit">
-    <div><label class="fld">Utente</label><input name="user" value="{{ f.user }}"></div>
+    <div><label class="fld">Utente</label><input type="text" name="user" value="{{ f.user }}"></div>
     <div><label class="fld">Evento</label>
       <select name="event"><option value="">tutti</option>{% for e in events %}<option {{ 'selected' if e == f.event }}>{{ e }}</option>{% endfor %}</select></div>
     <div><label class="fld">Dal</label><input type="date" name="date_from" value="{{ f.date_from }}"></div>
@@ -126,6 +126,20 @@
       <div class="actions"><button class="btn sm">Scarica backup cifrato ↓</button></div>
     </form>
   </div>
+</div>
+<div class="card" style="max-width:720px">
+  <div class="card-title">Ripristino e import</div>
+  <p class="small" style="margin-bottom:8px">Sostituisce <strong>tutti i dati</strong> con quelli del file: un backup di questa istanza, di un'altra istanza 0.30 o un database della 0.29 (cifrato con la password di allora). <strong>Utenti e audit restano quelli di questa istanza.</strong> Prima dello scambio il database attuale viene copiato in <code>data/backups/</code>.</p>
+  <form method="post" action="/admin/restore" enctype="multipart/form-data" onsubmit="return confirm('Sostituire tutti i dati con quelli del file?')">
+    <label class="fld">File del database (.db)</label><input type="file" name="file" required>
+    <div class="frow">
+      <div><label class="fld">Chiave dell'istanza di origine</label><input type="password" name="source_key" autocomplete="off" placeholder="vuoto = chiave di questa istanza"></div>
+      <div><label class="fld">oppure password del DB (versioni ≤ 0.29)</label><input type="password" name="password" autocomplete="off"></div>
+    </div>
+    <p class="muted3 small">Lascia vuoti entrambi per un backup di questa stessa istanza. La chiave di un'altra istanza è il contenuto del suo <code>/etc/teamer/db.key</code>.</p>
+    <label class="fld">Conferma: scrivi SOSTITUISCI</label><input type="text" name="confirm" autocomplete="off" required>
+    <div class="actions"><button class="btn sm">Ripristina</button></div>
+  </form>
 </div>
 
 {% elif tab == 'update' %}

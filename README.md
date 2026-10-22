@@ -40,7 +40,7 @@ assegna una provvisoria (*Amministrazione → Utenti*, o `python -m app.admin_cl
 - **Audit** (*Amministrazione → Audit*): accessi, errori, blocchi, gestione utenti, backup,
   aggiornamenti e ogni azione che modifica dati (chi, quando, quale indirizzo; mai il contenuto).
 - **`teamer-admin`** (root, sul container): `init`, `create-admin`, `create-user --role`,
-  `reset-password`, `unlock`, `enable`/`disable`, `list-users`. Ogni azione finisce nell'audit come `cli`.
+  `reset-password`, `unlock`, `enable`/`disable`, `list-users`, `restore`. Ogni azione finisce nell'audit come `cli`.
 
 ## Produzione (LXC su Proxmox)
 
@@ -143,6 +143,36 @@ quelli successivi si aprono con la chiave.
 - In-app (site admin): *Amministrazione → Sistema → Scarica backup cifrato* (copia consistente via `VACUUM INTO`, cifrata con la chiave di sistema).
 - Proxmox: i normali backup vzdump del container coprono tutto (`/opt/teamer/data` e `/etc/teamer/db.key`).
 - La chiave va salvata **anche** fuori dal container: un backup del solo DB senza chiave è illeggibile.
+
+### Ripristino e import da un'altra istanza
+
+*Amministrazione → Sistema → Ripristino e import* (o `teamer-admin restore FILE`) sostituisce
+**tutti i dati** con quelli di un file: un backup di questa istanza, un DB di un'altra istanza 0.30
+(serve la sua chiave) o un DB della 0.29 (serve la password di allora). **Utenti e audit restano
+quelli dell'istanza**: chi ripristina non resta chiuso fuori. Il file viene verificato
+(`integrity_check`, che sia un DB di Teamer, non più recente di questa versione), ricifrato con la
+chiave dell'istanza e migrato; prima dello scambio il DB attuale va in
+`data/backups/teamer-pre-ripristino-*.db`. L'evento finisce nell'audit.
+
+Import una tantum da un'altra istanza, dal nodo Proxmox:
+
+```bash
+# sul nodo di ORIGINE: copia consistente del DB (servizio fermo per un attimo)
+pct exec <ct-origine> -- systemctl stop teamer
+pct pull <ct-origine> /opt/teamer/data/teamer.db /root/teamer-origine.db
+pct exec <ct-origine> -- systemctl start teamer
+# (se i nodi sono diversi: scp /root/teamer-origine.db root@<nodo-destinazione>:/root/)
+
+# sul nodo di DESTINAZIONE: dentro il container e ripristino. Il servizio si ferma e riparte da solo
+pct push <ct-destinazione> /root/teamer-origine.db /root/teamer-origine.db
+pct exec <ct-destinazione> -- /usr/local/bin/teamer-admin restore /root/teamer-origine.db --password
+#   --password    origine 0.29: chiede la password del DB di allora
+#   --source-key  origine 0.30: chiede la chiave dell'origine (cat /etc/teamer/db.key sull'origine)
+pct exec <ct-destinazione> -- rm /root/teamer-origine.db
+rm /root/teamer-origine.db
+```
+
+In alternativa si scarica il file sul proprio computer e lo si carica dal pannello.
 
 ## Struttura
 

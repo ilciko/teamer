@@ -7,9 +7,12 @@ gira: il blocco è per sessione (`app.session`), non del DB.
 
 Una sola connessione globale, serializzata con un lock.
 """
+import os
 import re
 import secrets
+import shutil
 import threading
+from datetime import datetime
 from pathlib import Path
 
 try:
@@ -225,27 +228,127 @@ def schema_version() -> int:
     return int(row["value"]) if row else 0
 
 
+def _schema_version_of(conn) -> int | None:
+    """None se il file non ha `app_meta`: non è un DB di Teamer."""
+    has_meta = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_meta'"
+    ).fetchone()
+    if not has_meta:
+        return None
+    row = conn.execute("SELECT value FROM app_meta WHERE key='schema_version'").fetchone()
+    return int(row[0]) if row else 0
+
+
+def latest_migration() -> int:
+    return max(int(re.match(r"(\d+)", p.name).group(1)) for p in MIGRATIONS_DIR.glob("*.sql"))
+
+
+def _migrate(conn) -> None:
+    current = _schema_version_of(conn) or 0
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        num = int(re.match(r"(\d+)", path.name).group(1))
+        if num <= current:
+            continue
+        conn.executescript(path.read_text())
+        conn.execute(
+            "INSERT INTO app_meta(key,value) VALUES('schema_version',?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(num),),
+        )
+        conn.commit()
+
+
 def migrate() -> None:
     """Applica le migrazioni SQL mancanti, in ordine numerico."""
     with _lock:
-        has_meta = _conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_meta'"
-        ).fetchone()
-        current = 0
-        if has_meta:
-            row = _conn.execute("SELECT value FROM app_meta WHERE key='schema_version'").fetchone()
-            current = int(row[0]) if row else 0
-        for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
-            num = int(re.match(r"(\d+)", path.name).group(1))
-            if num <= current:
-                continue
-            _conn.executescript(path.read_text())
-            _conn.execute(
-                "INSERT INTO app_meta(key,value) VALUES('schema_version',?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                (str(num),),
-            )
-            _conn.commit()
+        _migrate(_conn)
+
+
+# ---- ripristino ----
+#
+# Il file porta i DATI; utenti e audit restano quelli dell'istanza: chi ripristina non
+# resta chiuso fuori, e un DB della 0.29 (senza utenti) si importa tenendo gli account.
+
+INSTANCE_TABLES = ("app_user", "audit_event")
+
+
+class RestoreError(Exception):
+    """Il file non si può ripristinare: il messaggio è per l'utente."""
+
+
+def restore(src: Path, *, source_key: str | None = None, password: str | None = None) -> dict:
+    """Sostituisce il DB aperto con `src` (backup di Teamer, anche di un'altra istanza o della 0.29).
+
+    `src` si apre con la chiave di questa istanza, con `source_key` (chiave di un'altra istanza)
+    o con `password` (DB ≤ 0.29). Viene ricifrato con la chiave di questa istanza e migrato;
+    utenti e audit dell'istanza ci vengono copiati sopra. Prima dello scambio il DB attuale
+    va in `data/backups/` (ritorna il nome). Solleva WrongPassword o RestoreError.
+    """
+    key = load_key()
+    dest = Path(config.DB_PATH)
+    work = dest.parent / "restore"
+    work.mkdir(parents=True, exist_ok=True)
+    tmp = work / "in-ripristino.db"
+    for f in work.glob("in-ripristino.db*"):
+        f.unlink()
+    shutil.copyfile(src, tmp)
+    if password:
+        key_sql = f"'{_quote_key(password)}'"
+    elif source_key:
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", source_key.strip()):
+            raise RestoreError("La chiave di origine deve avere 64 caratteri esadecimali.")
+        key_sql = _raw(source_key.strip().lower())
+    else:
+        key_sql = _raw(key)
+    try:
+        conn = _connect(tmp, key_sql)
+    except sqlcipher.DatabaseError:  # file non cifrato o non SQLite
+        raise WrongPassword()
+    try:
+        if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise RestoreError("Il file è danneggiato (integrity_check non superato).")
+        version = _schema_version_of(conn)
+        if version is None:
+            raise RestoreError("Il file non è un database di Teamer.")
+        if version > latest_migration():
+            raise RestoreError("Il file viene da una versione di Teamer più recente: aggiorna prima questa istanza.")
+        if key_sql != _raw(key):
+            conn.execute(f"PRAGMA rekey = {_raw(key)}")
+        conn.row_factory = sqlcipher.Row
+        _migrate(conn)
+        with _lock:
+            cur = _require()
+            for table in INSTANCE_TABLES:
+                cols = [r[1] for r in cur.execute(f"PRAGMA table_info({table})")]
+                rows = cur.execute(f"SELECT {', '.join(cols)} FROM {table}").fetchall()
+                conn.execute(f"DELETE FROM {table}")
+                conn.executemany(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                                 [tuple(r) for r in rows])
+            conn.execute("DELETE FROM app_meta WHERE key='public_mode'")  # ≤ 0.29: ora è per utente
+            conn.commit()
+            stats = {"from_version": version,
+                     "people": conn.execute("SELECT COUNT(*) FROM person").fetchone()[0],
+                     "teams": conn.execute("SELECT COUNT(*) FROM team").fetchone()[0]}
+            conn.close()
+            conn = None
+            # scambio: copia di sicurezza del DB attuale, poi il file nuovo al suo posto
+            backup = dest.parent / "backups" / f"teamer-pre-ripristino-{datetime.now():%Y%m%d%H%M%S}.db"
+            backup_to(backup)
+            backup.chmod(0o600)
+            close_db()
+            for ext in ("-wal", "-shm", "-journal"):
+                Path(f"{dest}{ext}").unlink(missing_ok=True)
+            os.replace(tmp, dest)
+            open_db(key, dest)
+        stats["backup"] = backup.name
+        stats["summary"] = (f"{stats['people']} {'persona' if stats['people'] == 1 else 'persone'}, "
+                            f"{stats['teams']} team")
+        return stats
+    finally:
+        if conn is not None:
+            conn.close()
+        for f in work.glob("in-ripristino.db*"):
+            f.unlink()
 
 
 def get_meta(key: str, default: str = "") -> str:

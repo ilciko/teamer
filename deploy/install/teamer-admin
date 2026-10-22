@@ -8,6 +8,9 @@
 #   teamer-admin unlock NOME           toglie il blocco per troppi tentativi
 #   teamer-admin enable|disable NOME
 #   teamer-admin list-users
+#   teamer-admin restore FILE [--source-key | --password]
+#                                      sostituisce i dati con quelli del file (backup, altra istanza,
+#                                      DB della 0.29); utenti e audit restano. Ferma e riavvia il servizio.
 #
 # La chiave (predefinita /etc/teamer/db.key, root:teamer 0640) cifra il database: la
 # conosce solo l'IT. PERDERLA = PERDERE I DATI: conservarne una copia fuori dal server.
@@ -32,4 +35,17 @@ if [[ "${1:-}" == "init" && ! -f "$KEY_FILE" ]]; then
 fi
 
 cd "$APP_DIR/src"
+if [[ "${1:-}" == "restore" ]]; then
+  # il file deve essere leggibile da teamer, e lo scambio non deve avvenire sotto il servizio
+  [[ -f "${2:-}" ]] || { echo "uso: teamer-admin restore FILE [--source-key | --password]" >&2; exit 1; }
+  IMPORT="$APP_DIR/data/restore/import-cli.db"
+  install -d -m 750 -o teamer -g teamer "$APP_DIR/data/restore"
+  install -m 600 -o teamer -g teamer "$2" "$IMPORT"
+  shift 2
+  WAS_ACTIVE=0
+  if systemctl is-active --quiet teamer; then WAS_ACTIVE=1; systemctl stop teamer; fi
+  trap 'rm -f "$IMPORT"; (( WAS_ACTIVE )) && systemctl start teamer' EXIT
+  runuser -u teamer -- "$APP_DIR/src/.venv/bin/python" -m app.admin_cli restore "$IMPORT" "$@"
+  exit $?
+fi
 exec runuser -u teamer -- "$APP_DIR/src/.venv/bin/python" -m app.admin_cli "$@"

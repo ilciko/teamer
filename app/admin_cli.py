@@ -10,11 +10,17 @@ come root e poi lancia questi comandi come utente `teamer`. Comandi:
     unlock NOME                 toglie il blocco per troppi tentativi
     enable NOME / disable NOME  riattiva / disattiva
     list-users
+    restore FILE [--source-key | --password]
+                                sostituisce i dati con quelli del file (utenti e audit restano);
+                                chiave dell'altra istanza o password ≤ 0.29 chieste a prompt.
+                                Il wrapper ferma il servizio durante lo scambio.
 
 Ogni azione finisce nell'audit come utente `cli`.
 """
 import argparse
+import getpass
 import sys
+from pathlib import Path
 
 from app import config, db, session, users
 
@@ -56,6 +62,25 @@ def _create(username: str, role: str) -> int:
     return 0
 
 
+def _restore(args) -> int:
+    if not args.file.is_file():
+        return _fail(f"file {args.file} non trovato")
+    source_key = getpass.getpass("Chiave dell'istanza di origine: ") if args.source_key else None
+    password = getpass.getpass("Password del DB (≤ 0.29): ") if args.password else None
+    try:
+        stats = db.restore(args.file, source_key=source_key, password=password)
+    except db.WrongPassword:
+        return _fail("il file non si apre con la chiave o la password indicate")
+    except db.RestoreError as exc:
+        return _fail(str(exc))
+    users.audit("restore", f"{args.file.name} (schema {stats['from_version']}, da shell): "
+                           f"{stats['summary']}; copia precedente {stats['backup']}")
+    print(f"Ripristino completato: {stats['summary']} "
+          f"(schema di origine {stats['from_version']}).\n"
+          f"Il database precedente è in data/backups/{stats['backup']}. Utenti e audit sono quelli di prima.")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="teamer-admin", description="Amministrazione di Teamer da shell (IT).")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -68,6 +93,11 @@ def main(argv=None) -> int:
     for cmd in ("reset-password", "unlock", "enable", "disable"):
         sub.add_parser(cmd).add_argument("username")
     sub.add_parser("list-users")
+    p = sub.add_parser("restore", help="sostituisce i dati con quelli di un backup o di un DB della 0.29")
+    p.add_argument("file", type=Path)
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--source-key", action="store_true", help="chiede la chiave dell'istanza di origine")
+    g.add_argument("--password", action="store_true", help="chiede la password del DB (versioni ≤ 0.29)")
     args = ap.parse_args(argv)
 
     if args.cmd == "init" and not config.DB_KEY_FILE.exists():
@@ -95,6 +125,8 @@ def main(argv=None) -> int:
                 print(f"{u['username']:<20} {users.ROLES[u['role']]:<12} {stato:<12} "
                       f"ultimo accesso: {u['last_login_at'] or 'mai'}")
             return 0
+        if args.cmd == "restore":
+            return _restore(args)
         u = _user(args.username)
         if args.cmd == "reset-password":
             _print_temp(u["username"], users.reset_password(u["id"]))

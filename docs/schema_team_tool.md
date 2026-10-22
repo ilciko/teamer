@@ -507,11 +507,11 @@ Prove di organigramma da confrontare, approvare e applicare (`/org/sim`, `app/se
 | at | DATETIME | ora locale |
 | user_id | INTEGER FK→app_user.id | NULL per tentativi con un nome inesistente |
 | username | TEXT | copiato (resta leggibile anche senza utente; `cli` per `teamer-admin`) |
-| event | TEXT | `login_ok`/`login_ko`/`logout`/`lock`/`unlock`, `password_change`/`password_reset`, `user_create`/`user_update`/`user_disable`/`user_enable`/`user_unlock`, `sessions_close`, `backup`, `update_request`, `migrazione_chiave`, `azione` |
+| event | TEXT | `login_ok`/`login_ko`/`logout`/`lock`/`unlock`, `password_change`/`password_reset`, `user_create`/`user_update`/`user_disable`/`user_enable`/`user_unlock`, `sessions_close`, `backup`, `restore`, `update_request`, `migrazione_chiave`, `azione` |
 | detail | TEXT | per `azione`: metodo, path ed esito della richiesta — **mai il contenuto** |
 | ip | TEXT | |
 
-> Nessuna route aggiorna o cancella righe. Le anteprime htmx (`*/simulate`) non sono azioni e non si registrano.
+> Nessuna route aggiorna o cancella righe. Le anteprime htmx (`*/simulate`) non sono azioni e non si registrano. `app_user` e `audit_event` sono dell'**istanza**: un ripristino sostituisce i dati ma ricopia queste due tabelle da quelle correnti.
 
 ---
 

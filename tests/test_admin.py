@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import config, db, session, users
-from tests.conftest import PASSWORD, login
+from tests.conftest import PASSWORD, login, make_legacy_db
 
 
 def _app():
@@ -122,13 +122,7 @@ def test_migrazione_dalla_versione_mono_utente(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", path)
     session.reset()
     db.close_db()
-    conn = db._connect(path, "'demo1234'")     # com'era la v0.29: schema fino alla 0025, cifrato con la password
-    for f in sorted(db.MIGRATIONS_DIR.glob("*.sql")):
-        if int(f.name[:4]) <= 25:
-            conn.executescript(f.read_text())
-    conn.execute("INSERT OR REPLACE INTO app_meta VALUES ('schema_version', '25'), ('public_mode', '1')")
-    conn.commit()
-    conn.close()
+    make_legacy_db(path)
     assert db.startup() == "legacy"
     c = TestClient(_app())
     assert "Aggiornamento della cifratura" in c.get("/login").text

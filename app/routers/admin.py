@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
 
 from app import config, db, session, users
@@ -45,11 +45,11 @@ def _audit_rows(user: str, event: str, date_from: str, date_to: str, page: int):
 
 
 @router.get("/admin")
-def admin_page(request: Request, tab: str = "users", saved: str = "", err: str = "",
+def admin_page(request: Request, tab: str = "users", saved: str = "", err: str = "", restored: str = "",
                user: str = "", event: str = "", date_from: str = "", date_to: str = "", page: int = 1):
     from app.main import templates
 
-    ctx = {"tab": tab, "saved": saved, "err": err, "min_len": users.MIN_PASSWORD}
+    ctx = {"tab": tab, "saved": saved, "err": err, "restored": restored, "min_len": users.MIN_PASSWORD}
     if tab == "users":
         rows = users.all_users()
         ctx["users"] = rows
@@ -149,6 +149,31 @@ def backup():
     db.backup_to(dest)
     users.audit("backup", dest.name)
     return FileResponse(dest, filename=dest.name, media_type="application/octet-stream")
+
+
+@router.post("/admin/restore")
+async def restore(file: UploadFile, source_key: str = Form(""), password: str = Form(""),
+                  confirm: str = Form("")):
+    """Ripristino o import una tantum: i dati arrivano dal file, utenti e audit restano questi."""
+    if confirm != "SOSTITUISCI":
+        return _back("system", err="Per ripristinare scrivi SOSTITUISCI nel campo di conferma.")
+    upload = Path(config.DB_PATH).parent / "restore" / "upload.db"
+    upload.parent.mkdir(parents=True, exist_ok=True)
+    upload.write_bytes(await file.read())
+    try:
+        stats = db.restore(upload, source_key=source_key or None, password=password or None)
+    except db.WrongPassword:
+        return _back("system", err="Il file non si apre con la chiave o la password indicate "
+                                   "(o non è un database cifrato di Teamer).")
+    except db.RestoreError as exc:
+        return _back("system", err=str(exc))
+    finally:
+        upload.unlink(missing_ok=True)
+    origine = "password 0.29" if password else "chiave di un'altra istanza" if source_key else "chiave di questa istanza"
+    users.audit("restore", f"{file.filename} (schema {stats['from_version']}, {origine}): "
+                           f"{stats['summary']}; copia precedente {stats['backup']}")
+    return _back("system", restored=f"{stats['summary']}; "
+                                     f"il database precedente è in data/backups/{stats['backup']}")
 
 
 @router.post("/admin/update/check")

@@ -24,9 +24,9 @@
       <label class="fld">Password attuale del database</label>
       <input type="password" name="old_password" autofocus required>
       <label class="fld">Il tuo nome utente</label>
-      <input name="username" value="{{ username }}" required autocomplete="username">
+      <input type="text" name="username" value="{{ username }}" required autocomplete="username">
       <label class="fld">Nome visualizzato (facoltativo)</label>
-      <input name="display_name">
+      <input type="text" name="display_name">
       <div class="actions"><button class="btn" style="width:100%">Aggiorna e accedi →</button></div>
     </form>
     {% elif state == 'nessun_utente' %}
@@ -40,7 +40,7 @@
     {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
     <form method="post" action="/login">
       <label class="fld">Nome utente</label>
-      <input name="username" value="{{ username }}" required autocomplete="username" {{ 'autofocus' if not username }}>
+      <input type="text" name="username" value="{{ username }}" required autocomplete="username" {{ 'autofocus' if not username }}>
       <label class="fld">Password</label>
       <input type="password" name="password" required autocomplete="current-password" {{ 'autofocus' if username }}>
       <div class="actions">
