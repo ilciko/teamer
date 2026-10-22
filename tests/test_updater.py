@@ -61,28 +61,26 @@ def test_richiesta_solo_con_la_path_unit(upd_dir, tmp_path, monkeypatch):
     assert updater.pending() and not updater.request_update()             # niente doppie richieste
 
 
-def test_tab_aggiornamenti_e_avviso(client, tmp_path, monkeypatch):
-    from app import config, db
+def test_tab_aggiornamenti_e_avviso(admin_client, client, tmp_path, monkeypatch):
+    """Gli aggiornamenti sono del site admin: il director non vede né la tab né l'avviso."""
+    from app import config
 
     monkeypatch.setattr(config, "APP_VERSION", "0.28.2")
-    html = client.get("/settings?tab=update").text
+    html = admin_client.get("/admin?tab=update").text
     assert "Installata" in html and "0.28.2" in html and "non è disponibile qui" in html
-    assert "update-badge" not in client.get("/org").text
+    assert "update-badge" not in admin_client.get("/admin").text
     updater.check(fetch=lambda url: {"tag_name": "v0.29.0", "html_url": "https://x/rel"})
-    assert "↑ Aggiornamento v0.29.0" in client.get("/org").text
+    assert "↑ Aggiornamento v0.29.0" in admin_client.get("/admin").text
+    assert "update-badge" not in client.get("/org").text                 # il director non lo vede
+    assert client.get("/admin?tab=update").status_code == 403
     unit = tmp_path / "teamer-update.path"
     unit.write_text("[Path]")
     monkeypatch.setattr(updater, "UNIT_FILE", unit)
-    assert "Aggiorna a v0.29.0" in client.get("/settings?tab=update").text
-    r = client.post("/settings/update/run", follow_redirects=False)
-    assert r.headers["location"] == "/settings?tab=update&saved=avviato"
+    assert "Aggiorna a v0.29.0" in admin_client.get("/admin?tab=update").text
+    r = admin_client.post("/admin/update/run", follow_redirects=False)
+    assert r.headers["location"] == "/admin?tab=update&saved=avviato"
     assert (updater.update_dir() / "request").exists()
-    assert 'id="upd-wait"' in client.get("/settings?tab=update").text
-    # modalità pubblica: niente avviso, la tab è chiusa
-    client.post("/public-mode", data={"next": "/org"})
-    assert "update-badge" not in client.get("/org").text
-    assert client.get("/settings?tab=update").status_code == 403
-    assert db.get_meta("public_mode") == "1"
+    assert 'id="upd-wait"' in admin_client.get("/admin?tab=update").text
 
 
 def test_backup_elencati(upd_dir, tmp_path):

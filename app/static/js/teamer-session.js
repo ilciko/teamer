@@ -1,10 +1,10 @@
 /* Teamer — battito di sessione.
  *
- * Finché questa pagina è aperta il database resta sbloccato: nessun timeout di
+ * Finché questa pagina è aperta la sessione resta sbloccata: nessun timeout di
  * inattività può più portarti al login mentre scrivi una nota. Quando l'ultima
- * pagina si chiude, il server chiude davvero la connessione cifrata.
+ * pagina della sessione si chiude, il server la blocca.
  *
- * Se il DB si blocca lo stesso (updater che riavvia il servizio, portatile
+ * Se la sessione si blocca lo stesso (updater che riavvia il servizio, portatile
  * sospeso, rete caduta) NON si naviga via: compare un overlay che chiede la
  * password, e quello che hai scritto resta dov'è.
  */
@@ -18,6 +18,8 @@
 
   var overlay = document.getElementById('lock-overlay');
   var campo = document.getElementById('lock-password');
+  var utente = document.getElementById('lock-username');
+  utente.value = document.body.dataset.username || '';
   var errore = document.getElementById('lock-error');
 
   function corpo() {
@@ -38,7 +40,7 @@
     bloccato = true;
     overlay.hidden = false;
     document.body.classList.add('locked');
-    campo.focus();
+    (utente.value ? campo : utente).focus();
   }
 
   function nascondiLock() {
@@ -55,6 +57,7 @@
 
   function sblocca() {
     var body = new FormData();
+    body.append('username', utente.value);
     body.append('password', campo.value);
     fetch('/unlock', { method: 'POST', body: body, credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
@@ -77,8 +80,10 @@
   }
 
   document.getElementById('lock-submit').addEventListener('click', sblocca);
-  campo.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { e.preventDefault(); sblocca(); }
+  [campo, utente].forEach(function (el) {
+    el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); sblocca(); }
+    });
   });
 
   /* Testo non salvato in un ALTRO riquadro della stessa pagina: salvare questo

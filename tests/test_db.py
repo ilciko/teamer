@@ -2,6 +2,7 @@
 import pytest
 
 from app import db
+from tests.conftest import TEST_KEY
 
 
 def test_migrations_applied(fresh_db):
@@ -28,13 +29,65 @@ def test_seed_config(fresh_db):
     assert db.one("SELECT COUNT(*) AS n FROM lookup")["n"] > 30
 
 
-def test_wrong_password(fresh_db):
+def test_wrong_key(fresh_db):
     db.close_db()
     with pytest.raises(db.WrongPassword):
-        db.open_db("password-sbagliata", db_path=fresh_db)
+        db.open_db(db.generate_key(), db_path=fresh_db)
     # e con quella giusta riapre
-    db.open_db("password-test", db_path=fresh_db)
+    db.open_db(TEST_KEY, db_path=fresh_db)
     assert db.schema_version() >= 2
+
+
+def test_file_cifrato_con_la_chiave_grezza(fresh_db):
+    assert fresh_db.read_bytes()[:16] != b"SQLite format 3\x00"
+
+
+def test_chiave_mancante_o_malformata(tmp_path, monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config, "DB_KEY_FILE", tmp_path / "nessuna.key")
+    with pytest.raises(db.KeyMissing):
+        db.load_key()
+    assert db.startup() == "chiave_mancante" and not db.is_open()
+    (tmp_path / "nessuna.key").write_text("corta")
+    with pytest.raises(db.KeyMissing, match="non valida"):
+        db.load_key()
+
+
+def test_write_key_non_sovrascrive(tmp_path, monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config, "DB_KEY_FILE", tmp_path / "k")
+    key = db.write_key()
+    assert db.load_key() == key and oct((tmp_path / "k").stat().st_mode)[-3:] == "640"
+    with pytest.raises(FileExistsError):
+        db.write_key()
+    assert db.load_key() == key
+
+
+def test_migrazione_dal_db_cifrato_con_la_password(tmp_path, monkeypatch):
+    """Le versioni mono-utente cifravano con la password del COO: si ricifra sulla chiave."""
+    from app import config
+
+    path = tmp_path / "legacy.db"
+    monkeypatch.setattr(config, "DB_PATH", path)
+    db.close_db()
+    conn = db._connect(path, "'vecchia-password'")
+    conn.execute("CREATE TABLE x (a)")
+    conn.execute("INSERT INTO x VALUES (42)")
+    conn.commit()
+    conn.close()
+    assert db.startup() == "legacy" and not db.is_open()
+    with pytest.raises(db.WrongPassword):
+        db.migrate_legacy("sbagliata")
+    db.migrate_legacy("vecchia-password")
+    assert db.state() == "pronto" and db.one("SELECT a FROM x")["a"] == 42
+    assert db.schema_version() >= 26
+    db.close_db()
+    with pytest.raises(db.WrongPassword):
+        db._connect(path, "'vecchia-password'")
+    assert db.startup() == "pronto"
+    db.close_db()
 
 
 def test_fts_search(fresh_db):
@@ -67,9 +120,9 @@ def test_backup_is_encrypted_copy(fresh_db, tmp_path):
     dest = tmp_path / "bck.db"
     db.backup_to(dest)
     assert dest.exists() and dest.stat().st_size > 0
-    # il backup si apre con la stessa password e contiene i dati
+    # il backup si apre con la stessa chiave e contiene i dati
     db.close_db()
-    db.open_db("password-test", db_path=dest)
+    db.open_db(TEST_KEY, db_path=dest)
     assert db.one("SELECT COUNT(*) AS n FROM person")["n"] == 1
 
 

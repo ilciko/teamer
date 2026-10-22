@@ -250,6 +250,27 @@ erDiagram
         blob content
     }
 
+    %% ============ UTENTI E AUDIT ============
+    APP_USER {
+        int id PK
+        string username
+        string role
+        string password_hash
+        bool must_change_password
+        bool active
+        bool public_mode
+        datetime locked_until
+    }
+    AUDIT_EVENT {
+        int id PK
+        int user_id FK
+        datetime at
+        string username
+        string event
+        string detail
+        string ip
+    }
+
     %% ============ RELAZIONI ============
     TEAM ||--o{ TEAM : "sotto-team"
     TEAM ||--o{ PERSON_ASSIGNMENT : contiene
@@ -303,3 +324,5 @@ erDiagram
     PERSON ||--o{ REORG_MOVE : spostata
     REORG_SCENARIO ||--o{ REORG_POSITION_MOVE : sposta
     HIRING_POSITION ||--o{ REORG_POSITION_MOVE : spostata
+
+    APP_USER ||--o{ AUDIT_EVENT : registra

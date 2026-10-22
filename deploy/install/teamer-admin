@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Teamer — amministrazione da shell, per l'IT (root).
+#
+#   teamer-admin init [--admin NOME]   crea la chiave di sistema del DB (se manca) e il primo site admin
+#   teamer-admin create-admin NOME     nuovo site admin (password provvisoria)
+#   teamer-admin create-user NOME --role admin|director
+#   teamer-admin reset-password NOME   password provvisoria, da cambiare al primo accesso
+#   teamer-admin unlock NOME           toglie il blocco per troppi tentativi
+#   teamer-admin enable|disable NOME
+#   teamer-admin list-users
+#
+# La chiave (predefinita /etc/teamer/db.key, root:teamer 0640) cifra il database: la
+# conosce solo l'IT. PERDERLA = PERDERE I DATI: conservarne una copia fuori dal server.
+# teamer-update non la tocca mai. I comandi sul DB girano come utente `teamer`, così
+# journal e wal restano suoi.
+set -euo pipefail
+
+APP_DIR="/opt/teamer"
+[[ $EUID -eq 0 ]] || { echo "teamer-admin va eseguito come root" >&2; exit 1; }
+[[ -f "$APP_DIR/.env" ]] || { echo "manca $APP_DIR/.env: Teamer non è installato qui" >&2; exit 1; }
+set -a; source "$APP_DIR/.env"; set +a
+KEY_FILE="${TEAMER_DB_KEY_FILE:-/etc/teamer/db.key}"
+export TEAMER_DB_KEY_FILE="$KEY_FILE"
+
+if [[ "${1:-}" == "init" && ! -f "$KEY_FILE" ]]; then
+  install -d -m 750 -o root -g teamer "$(dirname "$KEY_FILE")"
+  ( umask 027; head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$KEY_FILE"; echo >> "$KEY_FILE" )
+  chown root:teamer "$KEY_FILE"
+  chmod 640 "$KEY_FILE"
+  echo "Chiave di sistema creata in $KEY_FILE."
+  echo "CONSERVANE UNA COPIA FUORI DAL SERVER: senza chiave il database non si apre più."
+fi
+
+cd "$APP_DIR/src"
+exec runuser -u teamer -- "$APP_DIR/src/.venv/bin/python" -m app.admin_cli "$@"

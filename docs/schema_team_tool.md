@@ -1,6 +1,6 @@
 # Tool Gestione Team — Schema Dati
 
-App web locale mono-utente (COO). Python (FastAPI) + SQLite cifrato via SQLCipher in **modalità passphrase** (`PRAGMA key` dalla password di login; il salt lo gestisce SQLCipher nei primi 16 byte del file, `kdf_iter` alzato — es. 256.000). 29 tabelle in 4 aree.
+App web per il COO (ruolo *director*) con un site admin IT (ruolo *admin*). Python (FastAPI) + SQLite cifrato via SQLCipher con una **chiave di sistema** grezza (`PRAGMA key = "x'…'"`, 32 byte casuali in un file noto solo all'IT, `TEAMER_DB_KEY_FILE`); le password degli utenti non cifrano nulla, ne sta solo l'hash in `app_user`. Fino alla 0.29 la chiave era la password del COO (modalità passphrase): la migrazione la ricifra con `PRAGMA rekey`. Tabelle in 5 aree.
 
 ## Principi di schema
 
@@ -91,7 +91,7 @@ App web locale mono-utente (COO). Python (FastAPI) + SQLite cifrato via SQLCiphe
 | key | TEXT PK | |
 | value | TEXT | schema_version, impostazioni globali |
 
-> Il salt del KDF **non** sta qui: `app_meta` è dentro il file cifrato, non leggibile prima di derivare la chiave. Lo gestisce SQLCipher in testa al file (modalità passphrase).
+> La chiave del DB **non** sta qui (né da nessuna parte nel DB): sta nel file di sistema letto all'avvio. `public_mode` non è più qui dalla 0026: è per utente (`app_user.public_mode`).
 
 Chiavi impostate da Configurazione → Generale: `default_ccnl`, `ral_stale_amber_years` e `ral_stale_red_years` (anni oltre i quali l'analisi salary evidenzia in arancio e in rosso la data dell'ultima variazione di RAL).
 
@@ -478,6 +478,40 @@ Prove di organigramma da confrontare, approvare e applicare (`/org/sim`, `app/se
 | note | TEXT | |
 
 > Caso d'uso principale: il docx/PDF compilato della review annuale accanto ai dati strutturati, senza file sparsi in chiaro sul disco.
+
+---
+
+## Area 5 — Utenti e audit *(0026)*
+
+### `app_user` — utenti dell'app *(config: si corregge in place, si disattiva)*
+| Campo | Tipo | Note |
+|---|---|---|
+| id | INTEGER PK | |
+| username | TEXT UNIQUE NOCASE | si digita al login, niente elenco |
+| display_name | TEXT | |
+| role | TEXT | `admin` (site admin IT: utenti, audit, backup, aggiornamenti; nessun dato del personale) / `director` (il COO: tutto il resto) |
+| password_hash | TEXT | `scrypt$n$r$p$salt$hash` (min 12 caratteri) |
+| must_change_password | BOOLEAN | password provvisoria (creazione, reset): ogni pagina rimanda ad `/account` |
+| active | BOOLEAN | disattivato = sessioni chiuse subito, login rifiutato. Mai cancellato: l'audit punta qui |
+| public_mode | BOOLEAN | modalità pubblica dell'utente (persistente) |
+| failed_logins | INTEGER | errori consecutivi; dopo 5 → `locked_until` crescente |
+| locked_until | DATETIME | blocco per troppi tentativi (lo toglie l'admin) |
+| last_login_at, password_changed_at, created_at | DATETIME | ora locale |
+
+> Deve restare almeno un `admin` attivo. Il ruolo cambia le pagine visibili: cambiarlo chiude le sessioni dell'utente.
+
+### `audit_event` — registro di audit *(append-only)*
+| Campo | Tipo | Note |
+|---|---|---|
+| id | INTEGER PK | |
+| at | DATETIME | ora locale |
+| user_id | INTEGER FK→app_user.id | NULL per tentativi con un nome inesistente |
+| username | TEXT | copiato (resta leggibile anche senza utente; `cli` per `teamer-admin`) |
+| event | TEXT | `login_ok`/`login_ko`/`logout`/`lock`/`unlock`, `password_change`/`password_reset`, `user_create`/`user_update`/`user_disable`/`user_enable`/`user_unlock`, `sessions_close`, `backup`, `update_request`, `migrazione_chiave`, `azione` |
+| detail | TEXT | per `azione`: metodo, path ed esito della richiesta — **mai il contenuto** |
+| ip | TEXT | |
+
+> Nessuna route aggiorna o cancella righe. Le anteprime htmx (`*/simulate`) non sono azioni e non si registrano.
 
 ---
 

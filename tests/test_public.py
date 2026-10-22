@@ -26,11 +26,16 @@ def _setup(client):
     return tid, pid, sid
 
 
-def _on(client):
-    client.post("/public-mode", data={"next": "/org"})
+def _flag(username="coo") -> bool:
+    """Il flag è dell'utente: accenderlo non oscura le pagine degli altri."""
     from app import db
 
-    assert db.get_meta("public_mode") == "1"
+    return bool(db.one("SELECT public_mode FROM app_user WHERE username=?", (username,))["public_mode"])
+
+
+def _on(client):
+    client.post("/public-mode", data={"next": "/org"})
+    assert _flag()
 
 
 def test_switch_accende_e_spegne(client):
@@ -40,11 +45,11 @@ def test_switch_accende_e_spegne(client):
     assert 'action="/public-mode"' in html and 'class="public-switch"' in html
     r = client.post("/public-mode", data={"next": "/comp/salary"}, follow_redirects=False)
     assert r.headers["location"] == "/org"                       # da una pagina riservata si va all'organigramma
-    assert db.get_meta("public_mode") == "1"
+    assert _flag() and not _flag("it")
     html = client.get("/org").text
     assert "public-switch on" in html and "Modalità pubblica: pagine riservate chiuse" in html
     r = client.post("/public-mode", data={"next": "/comp/salary"}, follow_redirects=False)
-    assert r.headers["location"] == "/comp/salary" and db.get_meta("public_mode") == "0"
+    assert r.headers["location"] == "/comp/salary" and not _flag()
     assert client.get("/comp/salary").status_code == 200
 
 
@@ -61,7 +66,7 @@ def test_dashboard_porta_all_organigramma_e_post_bloccati(client):
     r = client.get("/", follow_redirects=False)
     assert r.status_code == 302 and r.headers["location"] == "/org"
     for path in [f"/people/{pid}/ral", f"/people/{pid}/benefit", f"/people/{pid}/incentive",
-                 f"/people/{pid}/attachment", "/settings/backup", "/notes", "/comp/salary/simulate"]:
+                 f"/people/{pid}/attachment", "/settings/import", "/notes", "/comp/salary/simulate"]:
         assert client.post(path, data={}).status_code == 403, path
     assert client.get(f"/people/{pid}/replacement", follow_redirects=False).status_code == 403
     assert client.get("/comp/salary", headers={"HX-Request": "true"}).status_code == 403
@@ -99,7 +104,7 @@ def test_nessuna_cifra_nelle_pagine_condivisibili(client):
 
     # spenta: torna tutto
     client.post("/public-mode", data={"next": "/org"})
-    assert db.get_meta("public_mode") == "0"
+    assert not _flag()
     assert "38.123" in client.get(f"/people/{pid}").text
     assert "41.777" in client.get("/comp/hiring").text
     listino = client.get("/comp/listino").text

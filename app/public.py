@@ -2,9 +2,10 @@
 
 In pubblica le pagine riservate non si aprono (né in lettura né in scrittura, export
 compresi) e le cifre (RAL, costi, budget) delle pagine condivisibili sono oscurate dal
-filtro `|eur`. Il flag sta in `app_meta` (`public_mode`): sopravvive a riavvio e blocco,
-così non si torna in chiaro per sbaglio a metà di una condivisione. Il middleware lo
-legge una volta per richiesta e lo mette in una ContextVar, letta da filtri e template.
+filtro `|eur`. Il flag è dell'utente (`app_user.public_mode`): sopravvive a riavvio e
+blocco, così non si torna in chiaro per sbaglio a metà di una condivisione, e non oscura
+le pagine degli altri utenti. Il middleware lo legge una volta per richiesta e lo mette
+in una ContextVar, letta da filtri e template.
 """
 import re
 from contextvars import ContextVar
@@ -12,9 +13,7 @@ from contextvars import ContextVar
 from fastapi import APIRouter, Form
 from fastapi.responses import RedirectResponse
 
-from app import db
-
-META_KEY = "public_mode"
+from app import session, users
 
 # pagine riservate: bloccate in pubblica, qualunque metodo (anche export e download)
 BLOCKED_PREFIXES = ("/reports", "/comp/salary", "/comp/plan", "/comp/budget", "/comp/bonus",
@@ -26,9 +25,9 @@ HOME = "/org"
 _public: ContextVar[bool] = ContextVar("teamer_public", default=False)
 
 
-def load() -> bool:
-    """Legge il flag dal DB (aperto) e lo fissa per la richiesta corrente."""
-    on = db.get_meta(META_KEY, "0") == "1"
+def load(user) -> bool:
+    """Fissa per la richiesta corrente il flag dell'utente (riga di `app_user`)."""
+    on = bool(user["public_mode"])
     _public.set(on)
     return on
 
@@ -50,8 +49,9 @@ router = APIRouter()
 @router.post("/public-mode")
 def toggle(next: str = Form("/")):
     """Switch della barra laterale: accende o spegne la modalità pubblica."""
-    on = db.get_meta(META_KEY, "0") != "1"
-    db.set_meta(META_KEY, "1" if on else "0")
+    uid = session.current().user_id
+    on = not users.get(uid)["public_mode"]
+    users.set_public_mode(uid, on)
     dest = next if next.startswith("/") and not next.startswith("//") else "/"
     if on and is_blocked(dest.split("?")[0]):
         dest = HOME

@@ -8,12 +8,19 @@ LXC_HOST ?= teamer.lan
 LXC_USER ?= root
 VERSION  := $(shell python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
 
-.PHONY: setup dev seed test release deploy clean
+# chiave di sistema del DB in sviluppo (in produzione /etc/teamer/db.key, vedi teamer-admin)
+export TEAMER_DB_KEY_FILE ?= data/dev.key
+
+.PHONY: setup key dev seed test release deploy clean
 
 setup:
 	uv sync --group dev
 
-dev:
+key:
+	@test -f $(TEAMER_DB_KEY_FILE) && echo "chiave già presente in $(TEAMER_DB_KEY_FILE)" || \
+	  uv run python -c "from app import db; db.write_key(); print('chiave creata in $(TEAMER_DB_KEY_FILE)')"
+
+dev: key
 	uv run uvicorn app.main:app --reload --host $(APP_HOST) --port $(APP_PORT)
 
 seed:

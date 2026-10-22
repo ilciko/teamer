@@ -5,10 +5,10 @@
 #   --no-restart  non riavvia il servizio (usato dall'installer, che lo crea dopo)
 #   --from-app    lanciato da teamer-update.service quando l'app scrive data/update/request
 #
-# Il DB (data/) e la config (.env) non vengono toccati: prima dello swap si fa una copia del
+# Il DB (data/), la config (.env) e la chiave del DB (/etc/teamer) non vengono toccati: prima dello swap si fa una copia del
 # DB in data/backups/ (le ultime 5). Stato e log dell'ultimo aggiornamento stanno in
 # data/update/ (state.json, update.log), dove l'app li legge. Al termine installa le unit
-# systemd e sé stesso dalla release nuova: un container vecchio si converte da solo.
+# systemd, teamer-admin e sé stesso dalla release nuova: un container vecchio si converte da solo.
 set -euo pipefail
 
 APP_DIR="/opt/teamer"
@@ -89,6 +89,10 @@ install_units() {   # dalla cartella deploy/install della versione installata
   if (( changed )); then systemctl daemon-reload; fi
   if [[ -f "$UNIT_DIR/teamer-update.path" ]] && ! systemctl is-enabled --quiet teamer-update.path; then
     systemctl enable --now -q teamer-update.path
+  fi
+  # amministrazione da shell (utenti, chiave del DB): sempre quella della versione installata
+  if [[ -f "$src/teamer-admin" ]] && ! cmp -s "$src/teamer-admin" /usr/local/bin/teamer-admin; then
+    install -m 755 "$src/teamer-admin" /usr/local/bin/teamer-admin
   fi
   # l'updater si sostituisce per ultimo (mv: il processo in corso tiene il file vecchio)
   if [[ -f "$src/teamer-update" ]] && ! cmp -s "$src/teamer-update" /usr/local/bin/teamer-update; then

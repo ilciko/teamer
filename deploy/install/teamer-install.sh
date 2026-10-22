@@ -48,6 +48,7 @@ msg "Configurazione applicativa..."
 if [[ ! -f "$APP_DIR/.env" ]]; then
   cat > "$APP_DIR/.env" <<EOF
 TEAMER_DB_PATH=${APP_DIR}/data/teamer.db
+TEAMER_DB_KEY_FILE=/etc/teamer/db.key
 TEAMER_HOST=0.0.0.0
 TEAMER_PORT=${APP_PORT}
 TEAMER_SECRET=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
@@ -94,6 +95,9 @@ WantedBy=multi-user.target
 EOF
 chown -R teamer:teamer "$APP_DIR"
 chown root:root "$APP_DIR/.deploy.env" && chmod 600 "$APP_DIR/.deploy.env"   # l'app non lo legge
+msg "Chiave di sistema del database e primo site admin..."
+ADMIN_OUT=$(/usr/local/bin/teamer-admin init)   # riportato in fondo, dove si vede
+
 systemctl daemon-reload
 systemctl enable -q --now teamer
 
@@ -102,3 +106,6 @@ apt-get -y -qq autoremove
 apt-get -y -qq clean
 
 echo -e "\e[1;32m[ok]\e[0m Teamer attivo sulla porta ${APP_PORT}."
+echo "$ADMIN_OUT"
+echo "Accedi con il site admin e crea gli utenti da Amministrazione."
+echo "Salva una copia di /etc/teamer/db.key fuori dal container: senza chiave i dati sono persi."

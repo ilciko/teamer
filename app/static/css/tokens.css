@@ -74,6 +74,8 @@ h1, h2.serif { font-family: 'DM Serif Display', serif; font-weight: 400; }
 .sidebar-foot { flex: none; display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 0.5px solid var(--border); }
 .sidebar-sign { text-align: center; font-size: 10px; color: var(--text3); text-decoration: none; letter-spacing: .04em; }
 .sidebar-sign:hover { color: var(--text2); }
+.sidebar-user { font-size: 12px; color: var(--text2); text-decoration: none; padding: 4px 6px; border-radius: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-user:hover, .sidebar-user.active { background: var(--surface2); color: var(--text); }
 .upd-log { max-height: 260px; overflow: auto; font-size: 11px; background: var(--surface2); padding: 8px; border-radius: var(--radius); white-space: pre-wrap; }
 .update-badge { text-align: center; background: var(--green-bg); border-color: var(--green-border); color: var(--green-dark); }
 /* modalità pubblica: switch sopra "Blocca" e banner in testa alla pagina */

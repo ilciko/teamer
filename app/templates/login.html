@@ -10,22 +10,44 @@
 <div class="login-wrap">
   <div class="login-card fade-in">
     <h1>Teamer</h1>
+    {% if state == 'chiave_mancante' %}
+    <div class="flash error">Teamer non è configurato: manca la chiave di sistema del database.</div>
+    <p class="muted small">Chiedi all'IT di eseguire sul server <code>teamer-admin init</code>, poi ricarica questa pagina.</p>
+    {% elif state == 'legacy' %}
     <p class="muted small" style="margin-bottom:16px">
-      {% if first_run %}Primo avvio: scegli la password che cifrerà il database.{% else %}Il database è cifrato: inserisci la password per aprirlo.{% endif %}
+      <strong>Aggiornamento della cifratura.</strong> Il database è ancora cifrato con la password della
+      versione precedente. Inseriscila un'ultima volta: il database passa alla chiave di sistema e tu
+      diventi il primo utente (Director) con questa stessa password.
     </p>
-    {% if bloccato %}<div class="flash">Sessione bloccata: il database è stato chiuso.</div>{% endif %}
+    {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+    <form method="post" action="/login/migrazione">
+      <label class="fld">Password attuale del database</label>
+      <input type="password" name="old_password" autofocus required>
+      <label class="fld">Il tuo nome utente</label>
+      <input name="username" value="{{ username }}" required autocomplete="username">
+      <label class="fld">Nome visualizzato (facoltativo)</label>
+      <input name="display_name">
+      <div class="actions"><button class="btn" style="width:100%">Aggiorna e accedi →</button></div>
+    </form>
+    {% elif state == 'nessun_utente' %}
+    <div class="flash">Nessun utente ancora.</div>
+    <p class="muted small">Il primo site admin lo crea l'IT sul server con <code>teamer-admin create-admin &lt;nome&gt;</code>.</p>
+    {% elif state != 'pronto' %}
+    <div class="flash error">Il database non è disponibile. Ricarica la pagina; se il problema resta, avvisa l'IT.</div>
+    {% else %}
+    <p class="muted small" style="margin-bottom:16px">Accedi con il tuo utente.</p>
+    {% if bloccato %}<div class="flash">Sessione bloccata: accedi di nuovo per continuare.</div>{% endif %}
     {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
     <form method="post" action="/login">
+      <label class="fld">Nome utente</label>
+      <input name="username" value="{{ username }}" required autocomplete="username" {{ 'autofocus' if not username }}>
       <label class="fld">Password</label>
-      <input type="password" name="password" autofocus required>
-      {% if first_run %}
-      <label class="fld">Conferma password</label>
-      <input type="password" name="password_confirm" required>
-      {% endif %}
+      <input type="password" name="password" required autocomplete="current-password" {{ 'autofocus' if username }}>
       <div class="actions">
-        <button class="btn" style="width:100%">{% if first_run %}Crea database →{% else %}Apri →{% endif %}</button>
+        <button class="btn" style="width:100%">Accedi →</button>
       </div>
     </form>
+    {% endif %}
   </div>
 </div>
 </body>

@@ -9,12 +9,14 @@
 <script src="/static/js/teamer-session.js?v={{ asset_v() }}" defer></script>
 {% block head %}{% endblock %}
 </head>
-<body data-heartbeat="{{ heartbeat_seconds() }}"{% if public() %} class="public"{% endif %}>
+<body data-heartbeat="{{ heartbeat_seconds() }}" data-username="{{ current_user().username if current_user() else '' }}"{% if public() %} class="public"{% endif %}>
 <div class="layout">
   <nav class="sidebar">
     <div class="brand">Teamer<small>Gestione team</small></div>
     {% set path = request.url.path %}
     {% set pub = public() %}
+    {% set me = current_user() %}
+    {% set is_admin = me and me.role == 'admin' %}
     {# gruppi del menu: (titolo, [(etichetta, href, prefisso per "attivo", riservato)]).
        Riservato = nascosto in modalità pubblica; un gruppo senza voci visibili non si mostra. #}
     {% set nav_groups = [
@@ -28,6 +30,10 @@
       ('Sistema', [('Configurazione', '/settings', '/settings', true)]),
     ] %}
     <div class="sidebar-nav">
+      {% if is_admin %}
+      {# il site admin non vede i dati del personale: solo il suo pannello #}
+      <a class="nav-link {{ 'active' if path.startswith('/admin') }}" href="/admin">Amministrazione</a>
+      {% elif me %}
       {% if not pub %}
       <a class="nav-link {{ 'active' if path == '/' }}" href="/">Dashboard</a>
       <a class="nav-link {{ 'active' if path.startswith('/reports') }}" href="/reports">Report</a>
@@ -46,10 +52,12 @@
       </details>
       {% endif %}
       {% endfor %}
+      {% endif %}
     </div>
     <div class="sidebar-foot">
-      {% set upd_badge = update_available() if not pub else none %}
-      {% if upd_badge %}<a class="btn sm update-badge" href="/settings?tab=update" title="Controllo del {{ upd_badge.checked_at | dt }}">↑ Aggiornamento {{ upd_badge.tag }}</a>{% endif %}
+      {% set upd_badge = update_available() if is_admin else none %}
+      {% if upd_badge %}<a class="btn sm update-badge" href="/admin?tab=update" title="Controllo del {{ upd_badge.checked_at | dt }}">↑ Aggiornamento {{ upd_badge.tag }}</a>{% endif %}
+      {% if me and not is_admin %}
       {# modalità pubblica: pagine riservate chiuse e cifre oscurate, per lo schermo condiviso #}
       <form method="post" action="/public-mode">
         <input type="hidden" name="next" value="{{ request.url.path }}{{ '?' ~ request.url.query if request.url.query }}">
@@ -57,7 +65,9 @@
           <span class="track"><span class="knob"></span></span> Modalità pubblica
         </button>
       </form>
-      <form method="post" action="/lock" data-no-lock-guard><button class="btn ghost" style="width:100%">🔒 Blocca</button></form>
+      {% endif %}
+      {% if me %}<a class="sidebar-user {{ 'active' if path.startswith('/account') }}" href="/account" title="Account e password">👤 {{ me.username }} · {{ roles[me.role] }}</a>{% endif %}
+      <form method="post" action="/lock" data-no-lock-guard><button class="btn ghost" style="width:100%">Esci</button></form>
       <a class="sidebar-sign" href="https://github.com/ilciko/teamer" target="_blank" rel="noopener">by ilciko.lab @ v{{ asset_v() }}</a>
     </div>
     <script>
@@ -81,10 +91,12 @@
   <div class="login-card">
     <h1>Sessione bloccata</h1>
     <p class="muted small" style="margin-bottom:16px">
-      Il database è stato chiuso. Inserisci la password per riaprirlo: quello che
+      La sessione è stata bloccata. Inserisci la password per riprendere: quello che
       hai scritto in questa pagina resta dov'è.
     </p>
     <div class="flash error" id="lock-error" hidden></div>
+    <label class="fld">Nome utente</label>
+    <input id="lock-username" autocomplete="username">
     <label class="fld">Password</label>
     <input type="password" id="lock-password" autocomplete="current-password">
     <div class="actions">

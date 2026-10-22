@@ -1,4 +1,4 @@
-"""Popola il DB di sviluppo con dati finti. Uso: make seed (password: demo1234)."""
+"""Popola il DB di sviluppo con dati finti. Uso: make seed (utenti coo / admin, password demo12345678)."""
 import json
 import random
 import sys
@@ -7,11 +7,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import config, db  # noqa: E402
+from app import config, db, users  # noqa: E402
 from app.services.ninebox_defaults import DEFAULT_NINEBOX_CONFIG, ensure_default_model  # noqa: E402
 from app.services import ninebox_calc  # noqa: E402
 
 random.seed(42)
+DEMO_PASSWORD = "demo12345678"
 
 # (nome, ruolo, team, RAL, codice di listino: None = fuori listino)
 PEOPLE = [
@@ -35,9 +36,14 @@ def main() -> None:
         print(f"DB già esistente in {config.DB_PATH}: seed annullato per non sporcarlo.")
         print("Cancella il file (rm data/teamer.db) e rilancia.")
         return
-    db.open_db("demo1234")
+    if not config.DB_KEY_FILE.exists():
+        db.write_key()
+        print(f"Chiave di sviluppo creata in {config.DB_KEY_FILE}")
+    db.open_db(db.load_key())
     ensure_default_model()
-    print(f"DB creato in {config.DB_PATH} (password: demo1234)")
+    users.create("coo", "director", DEMO_PASSWORD, "COO demo")
+    users.create("admin", "admin", DEMO_PASSWORD, "Site admin demo")
+    print(f"DB creato in {config.DB_PATH} (utenti: coo = Director, admin = Site admin; password: {DEMO_PASSWORD})")
 
     teams = {}
     for name, parent in [("Operations", None), ("Logistica", "Operations"),

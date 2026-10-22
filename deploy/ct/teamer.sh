@@ -219,4 +219,7 @@ IP=$(pct exec "$CTID" -- hostname -I | awk '{print $1}')
 ok "${APP} installato!"
 echo -e "\n  URL interno:  http://${IP}:${APP_PORT}"
 echo -e "  Reverse proxy: puntare a questo indirizzo (TLS a carico del proxy)"
-echo -e "  Aggiornare:    dall'app (Configurazione → Aggiornamenti) o pct exec ${CTID} -- /usr/local/bin/teamer-update\n"
+echo -e "  Primo accesso: site admin con la password provvisoria stampata sopra dall'installer"
+echo -e "  Chiave del DB: /etc/teamer/db.key nel container — salvane una copia fuori (senza, i dati sono persi)"
+echo -e "  Utenti:        dall'app (Amministrazione → Utenti) o pct exec ${CTID} -- /usr/local/bin/teamer-admin"
+echo -e "  Aggiornare:    dall'app (Amministrazione → Aggiornamenti) o pct exec ${CTID} -- /usr/local/bin/teamer-update\n"

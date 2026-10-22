@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Non disponibile{% endblock %}
+{% block content %}
+<div class="card" style="max-width:560px">
+  <div class="card-title">Pagina non disponibile</div>
+  <p>Questa pagina non è prevista per il tuo ruolo ({{ roles[current_user().role] }}).</p>
+  <div class="actions"><a class="btn" href="{{ home }}">Vai alla tua pagina iniziale →</a></div>
+</div>
+{% endblock %}

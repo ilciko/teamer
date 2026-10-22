@@ -1,13 +1,13 @@
-"""Configurazione: lookup, benefit, pesi 9-box, modelli, sicurezza."""
+"""Configurazione: lookup, benefit, pesi 9-box, modelli, listino, import.
+
+Sicurezza, backup e aggiornamenti sono del site admin (`app/routers/admin.py`)."""
 import json
-from datetime import datetime
-from pathlib import Path
 
 from fastapi import APIRouter, Form, Request, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.responses import RedirectResponse, Response
 
-from app import config, db
-from app.services import cost, importer, updater
+from app import db
+from app.services import cost, importer
 
 router = APIRouter()
 
@@ -45,26 +45,7 @@ def settings_page(request: Request, tab: str = "lookup", saved: str = ""):
         "models": models, "listino_profiles": listino_profiles,
         "role_factors": [f for f in factors if f["kind"] == "role"],
         "rating_factors": [f for f in factors if f["kind"] == "rating"],
-        "upd": {"current": config.APP_VERSION, "latest": updater.latest(), "available": updater.available(),
-                "state": updater.state(), "log": updater.log_tail(), "can_request": updater.can_request(),
-                "pending": updater.pending(), "repo": updater.REPO,
-                "backups": updater.backups()} if tab == "update" else None,
     })
-
-
-# ---- aggiornamenti ----
-
-@router.post("/settings/update/check")
-def update_check():
-    updater.check()
-    return RedirectResponse("/settings?tab=update", status_code=302)
-
-
-@router.post("/settings/update/run")
-def update_run():
-    """Chiede l'aggiornamento all'updater di sistema (path unit, root): l'app non ha i privilegi per farlo."""
-    ok = updater.request_update()
-    return RedirectResponse(f"/settings?tab=update&saved={'avviato' if ok else 'err'}", status_code=302)
 
 
 # ---- generale ----
@@ -280,31 +261,3 @@ async def import_run(request: Request, file: UploadFile, ref_date: str = Form(..
     except Exception as exc:
         result = {"created": [], "skipped": [], "errors": [(0, f"file non leggibile: {exc}")]}
     return templates.TemplateResponse(request, "_import_result.html", {"r": result})
-
-
-# ---- sicurezza ----
-
-@router.post("/settings/password")
-def change_password(current: str = Form(...), new: str = Form(...), confirm: str = Form(...)):
-    if new != confirm or len(new) < 8:
-        return RedirectResponse("/settings?tab=security&saved=err", status_code=302)
-    try:
-        import sqlcipher3
-
-        test = sqlcipher3.connect(str(config.DB_PATH))
-        test.execute(f"PRAGMA key = '{current.replace(chr(39), chr(39)*2)}'")
-        test.execute("PRAGMA kdf_iter = 256000")
-        test.execute("SELECT count(*) FROM sqlite_master").fetchone()
-        test.close()
-    except Exception:
-        return RedirectResponse("/settings?tab=security&saved=wrongpw", status_code=302)
-    db.rekey(new)
-    return RedirectResponse("/settings?tab=security&saved=1", status_code=302)
-
-
-@router.post("/settings/backup")
-def backup():
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    dest = Path(config.DB_PATH).parent / "backup" / f"teamer-{stamp}.db"
-    db.backup_to(dest)
-    return FileResponse(dest, filename=dest.name, media_type="application/octet-stream")

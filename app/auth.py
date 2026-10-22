@@ -1,18 +1,20 @@
-"""Login, blocco e sessione.
+"""Login, blocco, sessione e account.
 
-Il login apre il DB cifrato con la passphrase: nessuna tabella utenti, la
-password giusta è quella che decifra il file. La sessione non ha timeout di
-inattività: il cookie firmato dice solo "questo browser ha fatto il login", e
-il vero cancello è `db.is_open()`. Chi decide quando chiudere il DB è
-`app.session` (battito delle pagine aperte + reaper).
+Il DB è aperto dal servizio con la chiave di sistema; il login verifica la password
+dell'utente (`app.users`) e apre una sessione (`app.session`). Il cookie firmato porta
+solo l'id della sessione: il vero cancello è il registro in memoria, che il reaper
+blocca quando l'ultima pagina di quella sessione si chiude.
+
+Ruoli: l'admin (IT) vede solo il pannello `/admin` e il proprio account; il director
+tutto il resto.
 """
-import time
+from urllib.parse import quote
 
 from fastapi import APIRouter, Form, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from itsdangerous import BadSignature, URLSafeSerializer
 
-from app import config, db, session
+from app import config, db, session, users
 from app.services.ninebox_defaults import ensure_default_model
 
 router = APIRouter()
@@ -20,76 +22,144 @@ router = APIRouter()
 _signer = URLSafeSerializer(config.SECRET, salt="teamer-session")
 COOKIE = "teamer_session"
 
+# pagine dell'admin (oltre a quelle fuori dal guard): niente dati del personale
+ADMIN_PREFIXES = ("/admin", "/account", "/lock")
+HOME = {"admin": "/admin", "director": "/"}
 
-def _make_cookie() -> str:
-    return _signer.dumps({"ts": time.time()})
+
+def client_ip(request: Request) -> str | None:
+    fwd = request.headers.get("X-Forwarded-For")
+    if fwd:
+        return fwd.split(",")[0].strip()[:64]
+    return request.client.host if request.client else None
 
 
-def session_valid(request: Request) -> bool:
-    """Valida finché il DB è aperto e il cookie è nostro. Nessuna scadenza."""
-    if not db.is_open():
-        return False
+def request_session(request: Request) -> session.Session | None:
+    """La sessione del cookie, anche se bloccata."""
     raw = request.cookies.get(COOKIE)
     if not raw:
-        return False
+        return None
     try:
-        _signer.loads(raw)
+        data = _signer.loads(raw)
     except BadSignature:
-        return False
-    return True
+        return None
+    return session.get(data.get("sid") if isinstance(data, dict) else None)
 
 
-def refresh_cookie(response) -> None:
-    response.set_cookie(COOKIE, _make_cookie(), httponly=True, samesite="lax")
+def active_session(request: Request) -> session.Session | None:
+    """Sessione valida: DB aperto, cookie nostro, sessione non bloccata. Nessuna scadenza."""
+    if not db.is_open():
+        return None
+    s = request_session(request)
+    return s if s is not None and not s.locked else None
+
+
+def allowed(role: str, path: str) -> bool:
+    if role == "admin":
+        return path.startswith(ADMIN_PREFIXES)
+    return not path.startswith("/admin")
+
+
+def set_cookie(response, s: session.Session) -> None:
+    response.set_cookie(COOKIE, _signer.dumps({"sid": s.id}), httponly=True, samesite="lax")
+
+
+def _open_session(request: Request, user) -> session.Session:
+    old = request_session(request)
+    if old is not None:
+        session.drop(old)
+    s = session.create(user["id"], user["username"], user["role"], client_ip(request))
+    return s
+
+
+def _landing(user) -> str:
+    return "/account" if user["must_change_password"] else HOME[user["role"]]
+
+
+def _login_ctx(**extra) -> dict:
+    state = db.state()
+    ctx = {"state": state, "error": None, "bloccato": 0, "username": ""}
+    if state == "pronto" and users.count() == 0:
+        ctx["state"] = "nessun_utente"
+    ctx.update(extra)
+    return ctx
 
 
 @router.get("/login")
-def login_page(request: Request, bloccato: int = 0):
+def login_page(request: Request, bloccato: int = 0, u: str = ""):
     from app.main import templates
 
-    if session_valid(request):
+    if active_session(request):
         return RedirectResponse("/", status_code=302)
-    resp = templates.TemplateResponse(
-        request, "login.html",
-        {"first_run": not db.db_exists(), "error": None, "bloccato": bloccato},
-    )
+    if db.state() in ("chiuso", "chiave_mancante"):  # l'IT può aver appena creato la chiave
+        db.startup()
+    resp = templates.TemplateResponse(request, "login.html", _login_ctx(bloccato=bloccato, username=u))
     if bloccato:
         resp.delete_cookie(COOKIE)  # cookie stantio: non serve più a niente
     return resp
 
 
 @router.post("/login")
-def login(request: Request, password: str = Form(...), password_confirm: str = Form(None)):
+def login(request: Request, username: str = Form(""), password: str = Form("")):
     from app.main import templates
 
-    first_run = not db.db_exists()
-    error = None
-    if first_run:
-        if not password or password != password_confirm:
-            error = "Le password non coincidono."
-        elif len(password) < 8:
-            error = "Minimo 8 caratteri."
-    if error is None:
-        try:
-            db.open_db(password)
-            ensure_default_model()
-        except db.WrongPassword:
-            error = "Password errata."
+    if db.state() != "pronto":
+        return RedirectResponse("/login", status_code=302)
+    user, error = users.authenticate(username, password, client_ip(request))
     if error:
-        return templates.TemplateResponse(
-            request, "login.html", {"first_run": first_run, "error": error, "bloccato": 0}
-        )
-    session.reset()
-    resp = RedirectResponse("/", status_code=302)
-    refresh_cookie(resp)
+        return templates.TemplateResponse(request, "login.html", _login_ctx(error=error, username=username))
+    ensure_default_model()
+    s = _open_session(request, user)
+    users.audit("login_ok", user_id=user["id"], username=user["username"], ip=s.ip)
+    resp = RedirectResponse(_landing(user), status_code=302)
+    set_cookie(resp, s)
+    return resp
+
+
+@router.post("/login/migrazione")
+def login_migration(request: Request, old_password: str = Form(...), username: str = Form(...),
+                    display_name: str = Form("")):
+    """DB delle versioni mono-utente: la password attuale lo ricifra sulla chiave di sistema.
+
+    Chi la conosce diventa il primo director, con la stessa password (da cambiare se corta).
+    """
+    from app.main import templates
+
+    if db.state() != "legacy":
+        return RedirectResponse("/login", status_code=302)
+    try:
+        db.migrate_legacy(old_password)
+    except db.WrongPassword:
+        return templates.TemplateResponse(request, "login.html",
+                                          _login_ctx(error="Password del database errata.", username=username))
+    public_on = db.get_meta("public_mode", "0") == "1"
+    db.execute("DELETE FROM app_meta WHERE key='public_mode'")  # ora è per utente
+    try:
+        uid = users.create(username, "director", old_password, display_name,
+                           must_change=users.password_error(old_password) is not None)
+    except users.UserError as exc:
+        return templates.TemplateResponse(request, "login.html", _login_ctx(error=str(exc), username=username))
+    users.set_public_mode(uid, public_on)
+    user = users.get(uid)
+    s = _open_session(request, user)
+    users.audit("migrazione_chiave", "DB ricifrato con la chiave di sistema", user_id=uid,
+                username=user["username"], ip=s.ip)
+    ensure_default_model()
+    resp = RedirectResponse(_landing(user), status_code=302)
+    set_cookie(resp, s)
     return resp
 
 
 @router.post("/lock")
-def lock():
-    session.reset()
-    db.close_db()
-    resp = RedirectResponse("/login", status_code=302)
+def lock(request: Request):
+    """Blocca (chiude) la propria sessione; le altre non se ne accorgono."""
+    s = request_session(request)
+    dest = "/login"
+    if s is not None:
+        users.audit("logout", user_id=s.user_id, username=s.username, ip=s.ip)
+        session.drop(s)
+        dest = f"/login?u={quote(s.username)}"
+    resp = RedirectResponse(dest, status_code=302)
     resp.delete_cookie(COOKIE)
     return resp
 
@@ -97,40 +167,78 @@ def lock():
 # ---- battito delle pagine aperte ----
 #
 # Queste route stanno fuori dal guard di `main` di proposito: devono rispondere
-# sempre 200/JSON, anche a DB bloccato. Con un redirect a /login la fetch del JS
-# riceverebbe l'HTML del login (status 200) e non saprebbe distinguere "bloccato"
+# sempre 200/JSON, anche a sessione bloccata. Con un redirect a /login la fetch del
+# JS riceverebbe l'HTML del login (status 200) e non saprebbe distinguere "bloccato"
 # da "tutto a posto" — e soprattutto una pagina con una nota a metà non deve mai
-# essere trascinata via. L'autenticazione la fanno da sé con session_valid().
+# essere trascinata via. L'autenticazione la fanno da sé con active_session().
 
 
 @router.post("/heartbeat")
 def heartbeat(request: Request, tab: str = Form(...)):
     # la versione serve alla pagina che aspetta la fine di un aggiornamento (cambia al riavvio)
-    if not session_valid(request):
+    s = active_session(request)
+    if s is None:
         return JSONResponse({"stato": "bloccato", "version": config.APP_VERSION})
-    session.touch_tab(tab)
+    session.touch_tab(s, tab)
     return JSONResponse({"stato": "aperto", "version": config.APP_VERSION})
 
 
 @router.post("/heartbeat/chiusa")
 def heartbeat_bye(request: Request, tab: str = Form(...)):
     """Addio via sendBeacon: se era l'ultima scheda il blocco arriva subito."""
-    if session_valid(request):
-        session.drop_tab(tab)
+    s = active_session(request)
+    if s is not None:
+        session.drop_tab(s, tab)
     return Response(status_code=204)
 
 
 @router.post("/unlock")
-def unlock(password: str = Form(...)):
-    """Riapre il DB senza ricaricare la pagina: il testo non salvato resta dov'è."""
-    if db.is_open():
+def unlock(request: Request, username: str = Form(""), password: str = Form(...)):
+    """Sblocca senza ricaricare la pagina: il testo non salvato resta dov'è."""
+    if active_session(request):
         return JSONResponse({"ok": True})
-    try:
-        db.open_db(password)
-        ensure_default_model()
-    except db.WrongPassword:
-        return JSONResponse({"ok": False, "errore": "Password errata."})
-    session.reset()
+    if db.state() != "pronto":
+        return JSONResponse({"ok": False, "errore": "Teamer non è pronto: ricarica la pagina."})
+    old = request_session(request)
+    if not username and old is not None:
+        username = old.username
+    user, error = users.authenticate(username, password, client_ip(request))
+    if error:
+        return JSONResponse({"ok": False, "errore": error})
+    if old is not None and old.user_id == user["id"]:
+        session.unlock(old)
+        s = old
+    else:  # servizio riavviato o un altro utente: sessione nuova
+        s = _open_session(request, user)
+    users.audit("unlock", user_id=user["id"], username=user["username"], ip=s.ip)
     resp = JSONResponse({"ok": True})
-    refresh_cookie(resp)
+    set_cookie(resp, s)
     return resp
+
+
+# ---- account (tutti i ruoli) ----
+
+
+@router.get("/account")
+def account_page(request: Request, saved: str = ""):
+    from app.main import templates
+
+    s = session.current()
+    return templates.TemplateResponse(request, "account.html", {
+        "u": users.get(s.user_id), "saved": saved, "min_len": users.MIN_PASSWORD,
+        "roles": users.ROLES})
+
+
+@router.post("/account/password")
+def account_password(current: str = Form(...), new: str = Form(...), confirm: str = Form(...)):
+    s = session.current()
+    u = users.get(s.user_id)
+    if not users.verify_password(current, u["password_hash"]):
+        users.audit("password_change_ko", "password attuale errata")
+        return RedirectResponse("/account?saved=wrongpw", status_code=302)
+    if users.password_error(new, confirm):
+        return RedirectResponse("/account?saved=err", status_code=302)
+    if new == current:
+        return RedirectResponse("/account?saved=same", status_code=302)
+    users.set_password(u["id"], new)
+    return RedirectResponse("/account?saved=1", status_code=302)

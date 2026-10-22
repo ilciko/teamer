@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}Amministrazione{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Amministrazione</h1>
+  <div class="spacer"></div>
+  <div class="actions" style="margin:0">
+    <a class="btn sm {{ 'ghost' if tab != 'users' }}" href="/admin?tab=users">Utenti</a>
+    <a class="btn sm {{ 'ghost' if tab != 'audit' }}" href="/admin?tab=audit">Audit</a>
+    <a class="btn sm {{ 'ghost' if tab != 'system' }}" href="/admin?tab=system">Sistema</a>
+    <a class="btn sm {{ 'ghost' if tab != 'update' }}" href="/admin?tab=update">Aggiornamenti{% if update_available() %} ●{% endif %}</a>
+  </div>
+</div>
+{% if err %}<div class="flash error">{{ err }}</div>{% elif saved and tab != 'update' %}<div class="flash">Fatto.</div>{% endif %}
+
+{% if tab == 'users' %}
+{% if temp %}{% set tu, tp = temp.split(':', 1) %}
+<div class="flash"><strong>Password provvisoria di {{ tu }}:</strong> <code style="font-size:15px">{{ tp }}</code><br>
+  <span class="small">Comunicala all'utente: la vede solo ora e al primo accesso dovrà cambiarla.</span></div>
+{% endif %}
+<div class="card">
+  <div class="card-title">Utenti</div>
+  <table class="tbl">
+    <tr><th>Utente</th><th>Ruolo</th><th>Stato</th><th>Ultimo accesso</th><th>Password</th><th>Sessioni</th><th></th></tr>
+    {% for u in users %}
+    {% set ss = sessions[u.id] %}
+    <tr{% if not u.active %} class="muted"{% endif %}>
+      <td><strong>{{ u.username }}</strong>{% if u.display_name %}<div class="muted small">{{ u.display_name }}</div>{% endif %}</td>
+      <td>{{ roles[u.role] }}</td>
+      <td>
+        {% if not u.active %}<span class="badge">disattivato</span>
+        {% elif u.locked_until and u.locked_until > now %}<span class="badge red" title="fino alle {{ u.locked_until[11:16] }}">bloccato ({{ u.failed_logins }} errori)</span>
+        {% else %}<span class="badge green">attivo</span>{% if u.failed_logins %} <span class="muted small">{{ u.failed_logins }} errori</span>{% endif %}{% endif %}
+      </td>
+      <td class="small">{{ u.last_login_at[:16] if u.last_login_at else 'mai' }}</td>
+      <td class="small">{% if u.must_change_password %}<span class="badge amber">da cambiare</span>{% else %}{{ u.password_changed_at[:10] if u.password_changed_at else '—' }}{% endif %}</td>
+      <td class="small">{% if ss %}{{ ss | rejectattr('locked') | list | length }} attive{% if ss | selectattr('locked') | list %}, {{ ss | selectattr('locked') | list | length }} bloccate{% endif %}{% else %}—{% endif %}</td>
+      <td>
+        <details><summary class="btn sm ghost">Gestisci</summary>
+          <div style="padding:8px 0; min-width:280px">
+            <form method="post" action="/admin/users/{{ u.id }}/update">
+              <label class="fld">Nome visualizzato</label><input name="display_name" value="{{ u.display_name or '' }}">
+              <label class="fld">Ruolo</label>
+              <select name="role">{% for code, label in roles.items() %}<option value="{{ code }}" {{ 'selected' if code == u.role }}>{{ label }}</option>{% endfor %}</select>
+              <div class="actions"><button class="btn sm">Correggi</button></div>
+            </form>
+            <div class="actions" style="flex-wrap:wrap">
+              <form method="post" action="/admin/users/{{ u.id }}/reset" onsubmit="return confirm('Generare una password provvisoria per {{ u.username }}? Le sue sessioni aperte si chiudono.')"><button class="btn sm ghost">Reset password</button></form>
+              {% if u.locked_until or u.failed_logins %}<form method="post" action="/admin/users/{{ u.id }}/unlock"><button class="btn sm ghost">Sblocca</button></form>{% endif %}
+              {% if ss %}<form method="post" action="/admin/users/{{ u.id }}/sessions/close"><button class="btn sm ghost">Chiudi sessioni</button></form>{% endif %}
+              <form method="post" action="/admin/users/{{ u.id }}/active">
+                <input type="hidden" name="active" value="{{ 0 if u.active else 1 }}">
+                <button class="btn sm ghost"{% if u.active %} onclick="return confirm('Disattivare {{ u.username }}? Le sue sessioni si chiudono subito.')"{% endif %}>{{ 'Disattiva' if u.active else 'Riattiva' }}</button>
+              </form>
+              <a class="btn sm ghost" href="/admin?tab=audit&user={{ u.username | urlencode }}">Audit</a>
+            </div>
+          </div>
+        </details>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted3 small" style="margin-top:6px">Gli utenti non si cancellano: si disattivano (l'audit continua a puntare a loro).</p>
+</div>
+<div class="card" style="max-width:560px">
+  <div class="card-title">Nuovo utente</div>
+  <form method="post" action="/admin/users">
+    <div class="frow">
+      <div><label class="fld">Nome utente</label><input name="username" required autocomplete="off"></div>
+      <div><label class="fld">Ruolo</label>
+        <select name="role">{% for code, label in roles.items() %}<option value="{{ code }}" {{ 'selected' if code == 'director' }}>{{ label }}</option>{% endfor %}</select></div>
+    </div>
+    <label class="fld">Nome visualizzato</label><input name="display_name">
+    <p class="muted3 small">Nasce con una password provvisoria, mostrata una volta sola: al primo accesso l'utente la cambia.</p>
+    <div class="actions"><button class="btn sm">Crea utente</button></div>
+  </form>
+</div>
+
+{% elif tab == 'audit' %}
+<div class="card">
+  <form method="get" action="/admin" class="frow" style="align-items:end">
+    <input type="hidden" name="tab" value="audit">
+    <div><label class="fld">Utente</label><input name="user" value="{{ f.user }}"></div>
+    <div><label class="fld">Evento</label>
+      <select name="event"><option value="">tutti</option>{% for e in events %}<option {{ 'selected' if e == f.event }}>{{ e }}</option>{% endfor %}</select></div>
+    <div><label class="fld">Dal</label><input type="date" name="date_from" value="{{ f.date_from }}"></div>
+    <div><label class="fld">Al</label><input type="date" name="date_to" value="{{ f.date_to }}"></div>
+    <div><button class="btn sm">Filtra</button></div>
+  </form>
+</div>
+<div class="card">
+  <div class="card-title">{{ total }} eventi{% if pages > 1 %} · pagina {{ page }} di {{ pages }}{% endif %}</div>
+  <table class="tbl small">
+    <tr><th>Quando</th><th>Utente</th><th>Evento</th><th>Dettaglio</th><th>IP</th></tr>
+    {% for r in rows %}
+    <tr><td style="white-space:nowrap">{{ r.at }}</td><td>{{ r.username or '—' }}</td><td><code>{{ r.event }}</code></td><td>{{ r.detail or '' }}</td><td class="muted">{{ r.ip or '' }}</td></tr>
+    {% else %}<tr><td colspan="5" class="muted">Nessun evento.</td></tr>{% endfor %}
+  </table>
+  {% if pages > 1 %}
+  {% set qs = 'tab=audit&user=' ~ (f.user | urlencode) ~ '&event=' ~ (f.event | urlencode) ~ '&date_from=' ~ f.date_from ~ '&date_to=' ~ f.date_to %}
+  <div class="actions">
+    {% if page > 1 %}<a class="btn sm ghost" href="/admin?{{ qs }}&page={{ page - 1 }}">← più recenti</a>{% endif %}
+    {% if page < pages %}<a class="btn sm ghost" href="/admin?{{ qs }}&page={{ page + 1 }}">meno recenti →</a>{% endif %}
+  </div>
+  {% endif %}
+  <p class="muted3 small" style="margin-top:6px">Il registro è in sola aggiunta. Le azioni registrano metodo, indirizzo ed esito, mai il contenuto inviato.</p>
+</div>
+
+{% elif tab == 'system' %}
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Installazione</div>
+    <table class="tbl">
+      <tr><td class="muted">Versione</td><td><strong>{{ sys.version }}</strong></td></tr>
+      <tr><td class="muted">Schema DB</td><td>{{ sys.schema }}</td></tr>
+      <tr><td class="muted">Database</td><td><code>{{ sys.db_path }}</code></td></tr>
+      <tr><td class="muted">Chiave di sistema</td><td><code>{{ sys.key_file }}</code></td></tr>
+      <tr><td class="muted">Utenti</td><td>{{ sys.users }}</td></tr>
+    </table>
+    <p class="muted3 small" style="margin-top:6px">La chiave cifra il database e non si legge dall'app. <strong>Perderla significa perdere i dati</strong>: conservane una copia fuori dal server. Per reset d'emergenza da shell: <code>teamer-admin</code>.</p>
+  </div>
+  <div class="card" style="align-self:start">
+    <div class="card-title">Backup</div>
+    <p class="muted small" style="margin-bottom:8px">Scarica una copia consistente e <strong>ancora cifrata</strong> del database (VACUUM INTO). Si apre solo con la chiave di sistema.</p>
+    <form method="post" action="/admin/backup">
+      <div class="actions"><button class="btn sm">Scarica backup cifrato ↓</button></div>
+    </form>
+  </div>
+</div>
+
+{% elif tab == 'update' %}
+
+{% set st = upd.state or {} %}
+{% set lt = upd.latest or {} %}
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Versione</div>
+    <table class="tbl">
+      <tr><td class="muted">Installata</td><td><strong>{{ upd.current }}</strong></td></tr>
+      <tr><td class="muted">Ultima pubblicata</td>
+          <td>{% if lt.tag %}<a href="{{ lt.url }}" target="_blank" rel="noopener">{{ lt.tag }}</a>{% if upd.available %} <span class="badge green">nuova</span>{% else %} <span class="muted small">già installata</span>{% endif %}{% else %}—{% endif %}</td></tr>
+      <tr><td class="muted">Ultimo controllo</td>
+          <td>{{ lt.checked_at | dt if lt.checked_at else 'mai' }}{% if lt.error %} <span class="badge amber" title="{{ lt.error }}">non riuscito</span>{% endif %}</td></tr>
+    </table>
+    <p class="muted3 small" style="margin-top:6px">Il controllo parte da solo una volta al giorno su <code>github.com/{{ upd.repo }}</code> e avvisa soltanto: l'aggiornamento si lancia da qui.</p>
+    <form method="post" action="/admin/update/check"><div class="actions"><button class="btn sm ghost">Controlla ora</button></div></form>
+  </div>
+
+  <div class="card" id="upd-card">
+    <div class="card-title">Aggiorna</div>
+    {% if saved == 'avviato' or upd.pending %}
+    <div class="flash" id="upd-wait" data-version="{{ upd.current }}">Aggiornamento in corso: il servizio si riavvia da solo e questa pagina si ricarica appena è pronto (poi serve rientrare con la propria password).</div>
+    {% elif saved == 'err' %}<div class="flash error">Richiesta non accettata: aggiornamento già in corso o non disponibile su questa installazione.</div>{% endif %}
+    {% if upd.can_request %}
+    <p class="small">Scarica l'ultima release, fa un <strong>backup del database</strong> e riavvia Teamer (circa un minuto). Il database non viene toccato: le eventuali modifiche di schema si applicano al riavvio.</p>
+    <form method="post" action="/admin/update/run" onsubmit="return confirm('Aggiornare Teamer ora? Il servizio si riavvia: salva prima il lavoro aperto nelle altre schede.')">
+      <div class="actions"><button class="btn" {{ 'disabled' if upd.pending or not upd.available }}>Aggiorna{% if upd.available %} a {{ upd.available.tag }}{% endif %}</button></div>
+    </form>
+    {% if not upd.available %}<p class="muted3 small">Nessuna versione più nuova di quella installata.</p>{% endif %}
+    {% else %}
+    <p class="muted small">L'aggiornamento dall'app non è disponibile qui: manca l'updater di sistema (<code>teamer-update.path</code>), che installa l'installer del container. Aggiorna da riga di comando con <code>teamer-update</code>.</p>
+    {% endif %}
+    {% if st.status %}
+    <div class="card-title" style="margin-top:14px">Ultimo aggiornamento</div>
+    <p class="small"><span class="badge {{ 'green' if st.status == 'ok' else 'red' if st.status == 'error' else 'amber' }}">{{ {'ok': 'riuscito', 'error': 'non riuscito', 'running': 'in corso'}.get(st.status, st.status) }}</span>
+      {{ st.get('from', '?') }} → {{ st.get('to', '?') }}{% if st.finished %} · {{ st.finished | dt }}{% endif %}{% if st.message %} · {{ st.message }}{% endif %}</p>
+    {% if upd.log %}<details><summary class="muted small" style="cursor:pointer">Log</summary><pre class="upd-log">{{ upd.log }}</pre></details>{% endif %}
+    {% endif %}
+    {% if upd.backups %}
+    <div class="card-title" style="margin-top:14px">Backup automatici del database</div>
+    <p class="muted3 small">Copie (cifrate) fatte prima di ogni aggiornamento in <code>data/backups/</code>, le ultime 5.</p>
+    <table class="tbl small">
+      {% for b in upd.backups %}<tr><td><code>{{ b.name }}</code></td><td class="muted">{{ b.at | dt }}</td><td class="num muted">{{ b.size_kb }} KB</td></tr>{% endfor %}
+    </table>
+    {% endif %}
+  </div>
+</div>
+<script>
+// Aspetta il riavvio: il battito (fuori dal guard, JSON anche a DB bloccato) riporta la versione.
+(function () {
+  const wait = document.getElementById('upd-wait');
+  if (!wait) return;
+  const from = wait.dataset.version;
+  const tick = function () {
+    const fd = new FormData(); fd.append('tab', 'update-wait');
+    fetch('/heartbeat', { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (j.version && j.version !== from) location.reload(); })
+      .catch(function () { /* servizio in riavvio: si riprova */ });
+  };
+  setInterval(tick, 3000);
+})();
+</script>
+{% endif %}
+{% endblock %}
