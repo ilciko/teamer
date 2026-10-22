@@ -38,8 +38,8 @@ def _audit_rows(user: str, event: str, date_from: str, date_to: str, page: int):
         where.append("at < date(?, '+1 day')")
         params.append(date_to)
     sql_where = f"WHERE {' AND '.join(where)}" if where else ""
-    total = db.one(f"SELECT COUNT(*) AS n FROM audit_event {sql_where}", params)["n"]
-    rows = db.query(f"SELECT * FROM audit_event {sql_where} ORDER BY id DESC LIMIT ? OFFSET ?",
+    total = db.sys.one(f"SELECT COUNT(*) AS n FROM audit_event {sql_where}", params)["n"]
+    rows = db.sys.query(f"SELECT * FROM audit_event {sql_where} ORDER BY id DESC LIMIT ? OFFSET ?",
                     (*params, AUDIT_PAGE, (page - 1) * AUDIT_PAGE))
     return rows, total
 
@@ -61,7 +61,7 @@ def admin_page(request: Request, tab: str = "users", saved: str = "", err: str =
         rows, total = _audit_rows(user, event, date_from, date_to, page)
         ctx.update(rows=rows, total=total, page=page, pages=max(1, -(-total // AUDIT_PAGE)),
                    f={"user": user, "event": event, "date_from": date_from, "date_to": date_to},
-                   events=[r["event"] for r in db.query("SELECT DISTINCT event FROM audit_event ORDER BY event")])
+                   events=[r["event"] for r in db.sys.query("SELECT DISTINCT event FROM audit_event ORDER BY event")])
     elif tab == "system":
         ctx["sys"] = {"version": config.APP_VERSION, "schema": db.schema_version(),
                       "db_path": config.DB_PATH, "key_file": config.DB_KEY_FILE,

@@ -36,30 +36,24 @@ def _note(nid: int):
 def notes_list(request: Request, q: str = "", person_id: OptInt = None, archived: str = ""):
     """Le archiviate restano fuori (anche dalla ricerca) finché il toggle è spento."""
     params: list = []
-    if q:
-        sql = """SELECT mn.*, p.full_name FROM meeting_note_fts f
-                 JOIN meeting_note mn ON mn.id = f.rowid
-                 JOIN person p ON p.id = mn.person_id
-                 WHERE meeting_note_fts MATCH ?"""
-        params.append(q)
-    else:
-        sql = """SELECT mn.*, p.full_name FROM meeting_note mn
-                 JOIN person p ON p.id = mn.person_id WHERE 1=1"""
+    sql = """SELECT mn.*, p.full_name FROM meeting_note mn
+             JOIN person p ON p.id = mn.person_id WHERE 1=1"""
+    # ricerca per parole: ognuna deve comparire nel titolo o nel testo (niente sintassi da imparare)
+    for word in q.split():
+        like = "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        sql += " AND (mn.title LIKE ? ESCAPE '\\' OR mn.body LIKE ? ESCAPE '\\')"
+        params += [like, like]
     if person_id:
         sql += " AND mn.person_id=?"
         params.append(person_id)
     if not archived:
         sql += " AND mn.archived_at IS NULL"
-    sql += " ORDER BY rank LIMIT 100" if q else " ORDER BY mn.note_date DESC LIMIT 100"
-    try:
-        notes = db.query(sql, tuple(params))
-        fts_error = None
-    except Exception:
-        notes, fts_error = [], "Sintassi di ricerca non valida."
+    sql += " ORDER BY mn.note_date DESC, mn.id DESC LIMIT 100"
+    notes = db.query(sql, tuple(params))
     people = db.query("SELECT id, full_name FROM person ORDER BY full_name")
     return _templates().TemplateResponse(request, "notes.html", {
         "notes": notes, "q": q, "person_id": person_id, "people": people,
-        "fts_error": fts_error, "archived": "1" if archived else "",
+        "archived": "1" if archived else "",
         "person_name": next((pp["full_name"] for pp in people if pp["id"] == person_id), None),
     })
 

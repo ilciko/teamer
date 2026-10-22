@@ -111,27 +111,9 @@ erDiagram
         json config
         bool active
     }
-    EVALUATION {
-        int id PK
-        int person_id FK
-        int model_id FK
-        int cycle_id FK
-        date eval_date
-        real overall_score
-        string status
-    }
-    EVALUATION_ITEM {
-        int id PK
-        int evaluation_id FK
-        string competency
-        real self_score
-        real manager_score
-        real weight
-    }
     NINEBOX_ASSESSMENT {
         int id PK
         int person_id FK
-        int evaluation_id FK
         date eval_date
         string role_type
         string seniority
@@ -178,13 +160,6 @@ erDiagram
         string new_livello
         string status
         int ral_event_id FK
-    }
-    RAL_PROJECTION {
-        int id PK
-        int person_id FK
-        string scenario
-        date target_date
-        real projected_amount
     }
     BENEFIT_TYPE {
         int id PK
@@ -281,16 +256,11 @@ erDiagram
     PERSON ||--o{ EMPLOYMENT : "contratto"
     LOOKUP ||..o{ EMPLOYMENT : "tipizza (enum)"
 
-    EVALUATION_MODEL ||--o{ EVALUATION : definisce
-    PERSON ||--o{ EVALUATION : riceve
-    EVALUATION ||--o{ EVALUATION_ITEM : dettaglia
     PERSON ||--o{ NINEBOX_ASSESSMENT : mappato_in
-    EVALUATION ||--o| NINEBOX_ASSESSMENT : include
     WEIGHT_MAPPING ||..o{ BONUS_ALLOCATION : "pesa (da box)"
 
     REVIEW_CYCLE ||--o{ GOAL : "definiti nel ciclo"
     REVIEW_CYCLE ||--o{ PERFORMANCE_REVIEW : contiene
-    REVIEW_CYCLE ||--o{ EVALUATION : inquadra
     REVIEW_CYCLE ||--o{ RAL_BUDGET : aggancia
     REVIEW_CYCLE ||--o{ BONUS_POOL : aggancia
     PERSON ||--o{ GOAL : "ha obiettivi"
@@ -306,7 +276,6 @@ erDiagram
     PERSON ||--o{ RAL_PROPOSAL : "proposta per"
     RAL_BUDGET ||--o{ RAL_PROPOSAL : impegna
     RAL_PROPOSAL ||--o| RAL_EVENT : "applicata genera"
-    PERSON ||--o{ RAL_PROJECTION : proietta
     BENEFIT_TYPE ||--o{ BENEFIT_ASSIGNMENT : tipizza
     PERSON ||--o{ BENEFIT_ASSIGNMENT : gode
     PERSON ||--o{ INCENTIVE : riceve
@@ -326,3 +295,4 @@ erDiagram
     HIRING_POSITION ||--o{ REORG_POSITION_MOVE : spostata
 
     APP_USER ||--o{ AUDIT_EVENT : registra
+

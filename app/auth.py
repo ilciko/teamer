@@ -133,7 +133,7 @@ def login_migration(request: Request, old_password: str = Form(...), username: s
         return templates.TemplateResponse(request, "login.html",
                                           _login_ctx(error="Password del database errata.", username=username))
     public_on = db.get_meta("public_mode", "0") == "1"
-    db.execute("DELETE FROM app_meta WHERE key='public_mode'")  # ora è per utente
+    db.sys.execute("DELETE FROM app_meta WHERE key='public_mode'")  # ora è per utente
     try:
         uid = users.create(username, "director", old_password, display_name,
                            must_change=users.password_error(old_password) is not None)

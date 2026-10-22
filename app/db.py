@@ -5,13 +5,25 @@ conosce solo l'IT, gli utenti entrano con la propria password (`app.users`) e no
 la vedono mai. Si apre all'avvio del servizio e resta aperto finché il servizio
 gira: il blocco è per sessione (`app.session`), non del DB.
 
-Una sola connessione globale, serializzata con un lock.
+Connessioni:
+- **di sistema** (`_sys`, API `db.sys.*`): avvio, migrazioni, utenti e audit, admin,
+  CLI, backup e ripristino. È quella che usano anche gli helper senza una sessione
+  di director (login, test, script);
+- **di sessione**: ogni sessione di un director ha la sua, aperta al primo uso e
+  chiusa al blocco o all'uscita. È qui che i perimetri (`app.perimeter`) installano
+  viste e guardie: la stessa query vede righe diverse a seconda di chi la esegue.
+
+Ogni connessione ha il proprio lock; il file è in WAL e le transazioni partono con
+`BEGIN IMMEDIATE`. Le scritture passano da `qualify()`, che le indirizza a `main.<t>`
+(sotto una vista omonima, scrivere senza schema fallirebbe).
 """
+import functools
 import os
 import re
 import secrets
 import shutil
 import threading
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -20,12 +32,22 @@ try:
 except ImportError:  # wheel linux
     from sqlcipher3 import dbapi2 as sqlcipher  # pragma: no cover
 
-from app import config
+from app import config, session
 
 MIGRATIONS_DIR = config.BASE_DIR / "migrations"
 
-_conn = None
-_lock = threading.RLock()
+
+@dataclass
+class _Handle:
+    conn: object
+    lock: threading.RLock = field(default_factory=threading.RLock)
+
+
+_sys: _Handle | None = None
+_key: str | None = None   # chiave della connessione di sistema, per aprire quelle di sessione
+# apertura/chiusura delle connessioni di sessione e ripristino. Ordine dei lock: _gate → sessione → sistema
+_gate = threading.RLock()
+_session_handles: dict[str, "session.Session"] = {}
 # pronto | chiave_mancante | legacy (DB cifrato con la vecchia password) | chiuso
 _state = "chiuso"
 
@@ -42,10 +64,74 @@ class DatabaseLocked(Exception):
     """Il DB non è aperto: chiave mancante, migrazione da fare o spegnimento in corso."""
 
 
-def _require():
-    if _conn is None:
+def _require() -> _Handle:
+    if _sys is None:
         raise DatabaseLocked()
-    return _conn
+    return _sys
+
+
+def _handle() -> _Handle:
+    """La connessione della richiesta: quella della sessione del director, altrimenti di sistema."""
+    s = session.current()
+    if s is None or s.role != "director":
+        return _require()
+    h = s.db
+    if h is None:
+        with _gate:
+            if s.closed:
+                raise DatabaseLocked()
+            if s.db is None:
+                s.db = _open_session(s)
+                _session_handles[s.id] = s
+            h = s.db
+    return h
+
+
+def _open_session(s) -> _Handle:
+    if _sys is None or _key is None:
+        raise DatabaseLocked()
+    conn = _connect(Path(config.DB_PATH), _raw(_key))
+    _configure(conn)
+    # proprietario delle righe nuove nelle tabelle "del director" (DEFAULT (teamer_owner()))
+    conn.create_function("teamer_owner", 0, lambda uid=s.user_id: uid)
+    return _Handle(conn)
+
+
+def close_session(s, *, final: bool = False) -> None:
+    """Chiude la connessione di una sessione (blocco: si riapre allo sblocco; final: sessione finita)."""
+    with _gate:
+        if final:
+            s.closed = True
+        h = s.db
+        if h is not None:
+            with h.lock:
+                h.conn.close()
+            s.db = None
+        _session_handles.pop(s.id, None)
+
+
+def _close_all_sessions() -> None:
+    with _gate:
+        for s in list(_session_handles.values()):
+            close_session(s)
+
+
+session.on_close = close_session
+
+
+_WRITE = re.compile(r"^(\s*(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|UPDATE(?:\s+OR\s+\w+)?|DELETE\s+FROM)\s+)"
+                    r"(?!main\.|temp\.)([A-Za-z_]\w*)", re.IGNORECASE)
+
+
+@functools.lru_cache(maxsize=2048)
+def qualify(sql: str) -> str:
+    """Le scritture vanno alla tabella vera: `INSERT INTO x` → `INSERT INTO main.x`. Le letture restano."""
+    return _WRITE.sub(r"\1main.\2", sql, count=1)
+
+
+def write_target(sql: str) -> str | None:
+    m = _WRITE.match(sql)
+    return m.group(2) if m else None
 
 
 def _quote_key(password: str) -> str:
@@ -97,13 +183,21 @@ def _raw(key: str) -> str:
     return f"\"x'{key}'\""
 
 
-def _install(conn) -> None:
-    global _conn, _state
+def _configure(conn) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA busy_timeout = 5000")  # convive con teamer-admin, che scrive da un altro processo
+    # più connessioni sullo stesso file (sessioni, teamer-admin da un altro processo)
+    conn.execute("PRAGMA busy_timeout = 10000")
     conn.row_factory = sqlcipher.Row
-    with _lock:
-        _conn = conn
+
+
+def _install(conn, key: str) -> None:
+    global _sys, _state, _key
+    _configure(conn)
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.create_function("teamer_owner", 0, lambda: None)  # il sistema non è proprietario di niente
+    with _gate:
+        _sys = _Handle(conn)
+        _key = key
         _state = "pronto"
     migrate()
 
@@ -111,8 +205,10 @@ def _install(conn) -> None:
 def open_db(key: str, db_path: Path | None = None):
     """Apre (o crea) il DB con la chiave di sistema. Solleva WrongPassword se non è quella."""
     close_db()  # niente connessioni cifrate orfane in memoria
-    conn = _connect(Path(db_path or config.DB_PATH), _raw(key))
-    _install(conn)
+    if db_path is not None:
+        config.DB_PATH = Path(db_path)  # le connessioni di sessione aprono lo stesso file
+    conn = _connect(Path(config.DB_PATH), _raw(key))
+    _install(conn, key)
     return conn
 
 
@@ -139,9 +235,11 @@ def migrate_legacy(old_password: str, db_path: Path | None = None) -> None:
     """
     key = load_key()
     close_db()
-    conn = _connect(Path(db_path or config.DB_PATH), f"'{_quote_key(old_password)}'")
+    if db_path is not None:
+        config.DB_PATH = Path(db_path)
+    conn = _connect(Path(config.DB_PATH), f"'{_quote_key(old_password)}'")
     conn.execute(f"PRAGMA rekey = {_raw(key)}")
-    _install(conn)
+    _install(conn, key)
 
 
 def state() -> str:
@@ -149,16 +247,18 @@ def state() -> str:
 
 
 def close_db() -> None:
-    global _conn, _state
-    with _lock:
-        if _conn is not None:
-            _conn.close()
-            _conn = None
+    global _sys, _state
+    with _gate:
+        _close_all_sessions()
+        if _sys is not None:
+            with _sys.lock:
+                _sys.conn.close()
+            _sys = None
             _state = "chiuso"
 
 
 def is_open() -> bool:
-    return _conn is not None
+    return _sys is not None
 
 
 def db_exists(db_path: Path | None = None) -> bool:
@@ -166,65 +266,116 @@ def db_exists(db_path: Path | None = None) -> bool:
 
 
 def backup_to(dest: Path) -> None:
-    """Copia consistente e ancora cifrata del DB aperto."""
+    """Copia consistente e ancora cifrata del DB aperto (dalla connessione di sistema: senza filtri)."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with _lock:
-        _require().execute("VACUUM INTO ?", (str(dest),))
+    h = _require()
+    with h.lock:
+        h.conn.execute("VACUUM INTO ?", (str(dest),))
+
+
+# ---- helper: stessa API per la connessione della richiesta e per quella di sistema ----
+
+def _query(h: _Handle, sql: str, params=()) -> list:
+    with h.lock:
+        return h.conn.execute(qualify(sql), params).fetchall()
+
+
+def _one(h: _Handle, sql: str, params=()):
+    with h.lock:
+        return h.conn.execute(qualify(sql), params).fetchone()
+
+
+def _execute(h: _Handle, sql: str, params=()) -> int:
+    with h.lock:
+        cur = h.conn.execute(qualify(sql), params)
+        h.conn.commit()
+        return cur.lastrowid
+
+
+def _executemany(h: _Handle, sql: str, seq) -> None:
+    with h.lock:
+        h.conn.executemany(qualify(sql), seq)
+        h.conn.commit()
+
+
+class _TxConn:
+    """Quello che `transaction()` mette in mano al codice: execute/executemany qualificati,
+    cursore vero (lastrowid, fetchone)."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql: str, params=()):
+        return self._conn.execute(qualify(sql), params)
+
+    def executemany(self, sql: str, seq):
+        return self._conn.executemany(qualify(sql), seq)
+
+
+class _Tx:
+    def __init__(self, h_getter):
+        self._h_getter = h_getter
+
+    def __enter__(self):
+        self.h = self._h_getter()
+        self.h.lock.acquire()
+        try:
+            if not self.h.conn.in_transaction:
+                self.h.conn.execute("BEGIN IMMEDIATE")  # il lock di scrittura subito: niente stalli a metà
+        except BaseException:
+            self.h.lock.release()
+            raise
+        return _TxConn(self.h.conn)
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            if exc_type is None:
+                self.h.conn.commit()
+            else:
+                self.h.conn.rollback()
+        finally:
+            self.h.lock.release()
+        return False
 
 
 def query(sql: str, params=()) -> list:
-    with _lock:
-        return _require().execute(sql, params).fetchall()
+    return _query(_handle(), sql, params)
 
 
 def one(sql: str, params=()):
-    with _lock:
-        return _require().execute(sql, params).fetchone()
+    return _one(_handle(), sql, params)
 
 
 def execute(sql: str, params=()) -> int:
     """Esegue e committa; ritorna lastrowid."""
-    with _lock:
-        conn = _require()
-        cur = conn.execute(sql, params)
-        conn.commit()
-        return cur.lastrowid
+    return _execute(_handle(), sql, params)
 
 
 def executemany(sql: str, seq) -> None:
-    with _lock:
-        conn = _require()
-        conn.executemany(sql, seq)
-        conn.commit()
+    _executemany(_handle(), sql, seq)
 
 
 def transaction():
     """Context manager: blocco di statement committati insieme."""
-    class _Tx:
-        def __enter__(self):
-            _lock.acquire()
-            try:
-                self.conn = _require()
-            except DatabaseLocked:
-                _lock.release()
-                raise
-            return self.conn
+    return _Tx(_handle)
 
-        def __exit__(self, exc_type, exc, tb):
-            try:
-                if exc_type is None:
-                    self.conn.commit()
-                else:
-                    self.conn.rollback()
-            finally:
-                _lock.release()
-            return False
 
-    return _Tx()
+class _System:
+    """`db.sys`: la connessione di sistema, qualunque sia la sessione della richiesta.
+    Per utenti, audit e perimetri; mai dentro una transazione di sessione."""
+
+    query = staticmethod(lambda sql, params=(): _query(_require(), sql, params))
+    one = staticmethod(lambda sql, params=(): _one(_require(), sql, params))
+    execute = staticmethod(lambda sql, params=(): _execute(_require(), sql, params))
+    executemany = staticmethod(lambda sql, seq: _executemany(_require(), sql, seq))
+    transaction = staticmethod(lambda: _Tx(_require))
+
+
+sys = _System()
 
 
 def schema_version() -> int:
-    row = one("SELECT value FROM app_meta WHERE key = 'schema_version'")
+    row = sys.one("SELECT value FROM app_meta WHERE key = 'schema_version'")
     return int(row["value"]) if row else 0
 
 
@@ -260,8 +411,9 @@ def _migrate(conn) -> None:
 
 def migrate() -> None:
     """Applica le migrazioni SQL mancanti, in ordine numerico."""
-    with _lock:
-        _migrate(_conn)
+    h = _require()
+    with h.lock:
+        _migrate(h.conn)
 
 
 # ---- ripristino ----
@@ -316,30 +468,34 @@ def restore(src: Path, *, source_key: str | None = None, password: str | None = 
             conn.execute(f"PRAGMA rekey = {_raw(key)}")
         conn.row_factory = sqlcipher.Row
         _migrate(conn)
-        with _lock:
-            cur = _require()
-            for table in INSTANCE_TABLES:
-                cols = [r[1] for r in cur.execute(f"PRAGMA table_info({table})")]
-                rows = cur.execute(f"SELECT {', '.join(cols)} FROM {table}").fetchall()
-                conn.execute(f"DELETE FROM {table}")
-                conn.executemany(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
-                                 [tuple(r) for r in rows])
-            conn.execute("DELETE FROM app_meta WHERE key='public_mode'")  # ≤ 0.29: ora è per utente
-            conn.commit()
-            stats = {"from_version": version,
-                     "people": conn.execute("SELECT COUNT(*) FROM person").fetchone()[0],
-                     "teams": conn.execute("SELECT COUNT(*) FROM team").fetchone()[0]}
-            conn.close()
-            conn = None
-            # scambio: copia di sicurezza del DB attuale, poi il file nuovo al suo posto
-            backup = dest.parent / "backups" / f"teamer-pre-ripristino-{datetime.now():%Y%m%d%H%M%S}.db"
-            backup_to(backup)
-            backup.chmod(0o600)
-            close_db()
-            for ext in ("-wal", "-shm", "-journal"):
-                Path(f"{dest}{ext}").unlink(missing_ok=True)
-            os.replace(tmp, dest)
-            open_db(key, dest)
+        # nessuna sessione apre connessioni finché il file nuovo non è al suo posto
+        with _gate:
+            _close_all_sessions()
+            sys_h = _require()
+            with sys_h.lock:
+                cur = sys_h.conn
+                for table in INSTANCE_TABLES:
+                    cols = [r[1] for r in cur.execute(f"PRAGMA table_info({table})")]
+                    rows = cur.execute(f"SELECT {', '.join(cols)} FROM {table}").fetchall()
+                    conn.execute(f"DELETE FROM {table}")
+                    conn.executemany(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                                     [tuple(r) for r in rows])
+                conn.execute("DELETE FROM app_meta WHERE key='public_mode'")  # ≤ 0.29: ora è per utente
+                conn.commit()
+                stats = {"from_version": version,
+                         "people": conn.execute("SELECT COUNT(*) FROM person").fetchone()[0],
+                         "teams": conn.execute("SELECT COUNT(*) FROM team").fetchone()[0]}
+                conn.close()
+                conn = None
+                # scambio: copia di sicurezza del DB attuale, poi il file nuovo al suo posto
+                backup = dest.parent / "backups" / f"teamer-pre-ripristino-{datetime.now():%Y%m%d%H%M%S}.db"
+                backup_to(backup)
+                backup.chmod(0o600)
+                close_db()
+                for ext in ("-wal", "-shm", "-journal"):
+                    Path(f"{dest}{ext}").unlink(missing_ok=True)
+                os.replace(tmp, dest)
+                open_db(key, dest)
         stats["backup"] = backup.name
         stats["summary"] = (f"{stats['people']} {'persona' if stats['people'] == 1 else 'persone'}, "
                             f"{stats['teams']} team")

@@ -70,23 +70,23 @@ def temporary_password() -> str:
 # ---- lettura ----
 
 def get(uid: int):
-    return db.one("SELECT * FROM app_user WHERE id=?", (uid,))
+    return db.sys.one("SELECT * FROM app_user WHERE id=?", (uid,))
 
 
 def by_username(username: str):
-    return db.one("SELECT * FROM app_user WHERE username=?", ((username or "").strip(),))
+    return db.sys.one("SELECT * FROM app_user WHERE username=?", ((username or "").strip(),))
 
 
 def all_users() -> list:
-    return db.query("SELECT * FROM app_user ORDER BY active DESC, role, username")
+    return db.sys.query("SELECT * FROM app_user ORDER BY active DESC, role, username")
 
 
 def count() -> int:
-    return db.one("SELECT COUNT(*) AS n FROM app_user")["n"]
+    return db.sys.one("SELECT COUNT(*) AS n FROM app_user")["n"]
 
 
 def active_admins() -> int:
-    return db.one("SELECT COUNT(*) AS n FROM app_user WHERE role='admin' AND active=1")["n"]
+    return db.sys.one("SELECT COUNT(*) AS n FROM app_user WHERE role='admin' AND active=1")["n"]
 
 
 # ---- audit ----
@@ -98,7 +98,7 @@ def audit(event: str, detail: str | None = None, *, user_id=None, username=None,
         user_id, username = s.user_id, s.username
     if ip is None and s is not None:
         ip = s.ip
-    db.execute("INSERT INTO audit_event (user_id, username, event, detail, ip) VALUES (?,?,?,?,?)",
+    db.sys.execute("INSERT INTO audit_event (user_id, username, event, detail, ip) VALUES (?,?,?,?,?)",
                (user_id, username, event, detail, ip))
 
 
@@ -123,13 +123,13 @@ def authenticate(username: str, password: str, ip: str | None = None):
         if failed >= MAX_FAILED:
             minutes = min(2 ** (failed - MAX_FAILED), MAX_LOCK_MINUTES)
             locked_until = _ts(_now() + timedelta(minutes=minutes))
-        db.execute("UPDATE app_user SET failed_logins=?, locked_until=? WHERE id=?", (failed, locked_until, u["id"]))
+        db.sys.execute("UPDATE app_user SET failed_logins=?, locked_until=? WHERE id=?", (failed, locked_until, u["id"]))
         audit("login_ko", f"password errata ({failed})", user_id=u["id"], username=u["username"], ip=ip)
         return None, GENERIC_ERROR
     if not u["active"]:
         audit("login_ko", "utente disattivato", user_id=u["id"], username=u["username"], ip=ip)
         return None, "Utente disattivato: rivolgiti all'IT."
-    db.execute("UPDATE app_user SET failed_logins=0, locked_until=NULL, last_login_at=? WHERE id=?",
+    db.sys.execute("UPDATE app_user SET failed_logins=0, locked_until=NULL, last_login_at=? WHERE id=?",
                (_ts(_now()), u["id"]))
     return get(u["id"]), None
 
@@ -145,7 +145,7 @@ def create(username: str, role: str, password: str, display_name: str | None = N
         raise UserError("Ruolo non valido.")
     if by_username(username):
         raise UserError(f"Il nome utente {username} esiste già.")
-    uid = db.execute(
+    uid = db.sys.execute(
         "INSERT INTO app_user (username, display_name, role, password_hash, must_change_password, "
         "password_changed_at) VALUES (?,?,?,?,?,?)",
         (username, (display_name or "").strip() or None, role, hash_password(password),
@@ -160,7 +160,7 @@ def update(uid: int, display_name: str | None, role: str) -> None:
         raise UserError("Ruolo non valido.")
     if u["role"] == "admin" and role != "admin" and u["active"] and active_admins() <= 1:
         raise UserError("Deve restare almeno un site admin attivo.")
-    db.execute("UPDATE app_user SET display_name=?, role=? WHERE id=?",
+    db.sys.execute("UPDATE app_user SET display_name=?, role=? WHERE id=?",
                ((display_name or "").strip() or None, role, uid))
     if role != u["role"]:
         session.drop_user(uid)  # il ruolo decide le pagine: si rientra
@@ -169,7 +169,7 @@ def update(uid: int, display_name: str | None, role: str) -> None:
 
 def set_password(uid: int, new: str) -> None:
     """Cambio della propria password: toglie l'obbligo di cambiarla."""
-    db.execute("UPDATE app_user SET password_hash=?, must_change_password=0, password_changed_at=? WHERE id=?",
+    db.sys.execute("UPDATE app_user SET password_hash=?, must_change_password=0, password_changed_at=? WHERE id=?",
                (hash_password(new), _ts(_now()), uid))
     audit("password_change", _target(get(uid)))
 
@@ -177,7 +177,7 @@ def set_password(uid: int, new: str) -> None:
 def reset_password(uid: int) -> str:
     """Reset dall'IT: password provvisoria da cambiare al primo accesso. Le sessioni aperte finiscono."""
     temp = temporary_password()
-    db.execute("UPDATE app_user SET password_hash=?, must_change_password=1, failed_logins=0, "
+    db.sys.execute("UPDATE app_user SET password_hash=?, must_change_password=1, failed_logins=0, "
                "locked_until=NULL, password_changed_at=? WHERE id=?",
                (hash_password(temp), _ts(_now()), uid))
     session.drop_user(uid)
@@ -189,7 +189,7 @@ def set_active(uid: int, active: bool) -> None:
     u = get(uid)
     if not active and u["role"] == "admin" and u["active"] and active_admins() <= 1:
         raise UserError("Deve restare almeno un site admin attivo.")
-    db.execute("UPDATE app_user SET active=? WHERE id=?", (1 if active else 0, uid))
+    db.sys.execute("UPDATE app_user SET active=? WHERE id=?", (1 if active else 0, uid))
     if not active:
         session.drop_user(uid)
     audit("user_enable" if active else "user_disable", _target(u))
@@ -197,9 +197,9 @@ def set_active(uid: int, active: bool) -> None:
 
 def unlock(uid: int) -> None:
     """Toglie il blocco per troppi tentativi."""
-    db.execute("UPDATE app_user SET failed_logins=0, locked_until=NULL WHERE id=?", (uid,))
+    db.sys.execute("UPDATE app_user SET failed_logins=0, locked_until=NULL WHERE id=?", (uid,))
     audit("user_unlock", _target(get(uid)))
 
 
 def set_public_mode(uid: int, on: bool) -> None:
-    db.execute("UPDATE app_user SET public_mode=? WHERE id=?", (1 if on else 0, uid))
+    db.sys.execute("UPDATE app_user SET public_mode=? WHERE id=?", (1 if on else 0, uid))

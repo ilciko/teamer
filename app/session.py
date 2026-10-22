@@ -7,7 +7,10 @@ del tab o silenzio oltre la grazia — il reaper **blocca quella sessione**: l'o
 chiede di nuovo la password. Il DB resta aperto per gli altri utenti (la chiave è
 di sistema, non dell'utente): il blocco di uno non tocca nessun altro.
 
-Il registro vive in memoria: un riavvio del servizio blocca tutti.
+Il registro vive in memoria: un riavvio del servizio blocca tutti. Ogni sessione di
+un director ha la sua connessione al DB (`db._handle`): bloccarla la chiude (si riapre
+allo sblocco), chiuderla o disattivare l'utente la chiude per sempre. `db` registra
+`on_close` all'import: questo modulo non importa `db`.
 """
 import asyncio
 import secrets
@@ -42,6 +45,17 @@ class Session:
     bye: bool = False                           # l'ultima scheda ha detto addio: grazia corta
     locked: bool = False
     locked_at: float = 0.0
+    db: object = None                           # connessione della sessione (app.db._Handle)
+    closed: bool = False                        # sessione finita: niente più connessioni
+
+
+# chiude la connessione di una sessione: (sessione, final=bool) -> None. La imposta app.db.
+on_close = None
+
+
+def _closed(s: "Session", final: bool) -> None:
+    if on_close is not None:
+        on_close(s, final=final)
 
 
 _sessions: dict[str, Session] = {}
@@ -67,15 +81,18 @@ def get(sid: str | None) -> Session | None:
 def drop(s: Session) -> None:
     with _lock:
         _sessions.pop(s.id, None)
+    _closed(s, final=True)
 
 
 def drop_user(user_id: int) -> int:
     """Utente disattivato o password resettata: le sue sessioni finiscono subito."""
     with _lock:
-        ids = [sid for sid, s in _sessions.items() if s.user_id == user_id]
-        for sid in ids:
-            del _sessions[sid]
-    return len(ids)
+        gone = [s for s in _sessions.values() if s.user_id == user_id]
+        for s in gone:
+            del _sessions[s.id]
+    for s in gone:
+        _closed(s, final=True)
+    return len(gone)
 
 
 def of_user(user_id: int) -> list[Session]:
@@ -86,7 +103,10 @@ def of_user(user_id: int) -> list[Session]:
 def reset() -> None:
     """Tutte le sessioni via (test, spegnimento)."""
     with _lock:
+        gone = list(_sessions.values())
         _sessions.clear()
+    for s in gone:
+        _closed(s, final=True)
 
 
 # ---- sessione corrente (fissata dal middleware per la richiesta) ----
@@ -142,6 +162,7 @@ def lock(s: Session) -> None:
         s.locked = True
         s.locked_at = _now()
         s.tabs.clear()
+    _closed(s, final=False)  # niente connessione aperta per chi non c'è
 
 
 def unlock(s: Session) -> None:
@@ -187,7 +208,8 @@ async def reaper() -> None:
     while True:
         await asyncio.sleep(config.REAPER_TICK_SECONDS)
         try:
-            for s in maybe_lock():
+            # chiudere una connessione aspetta la sua richiesta in corso: fuori dall'event loop
+            for s in await asyncio.to_thread(maybe_lock):
                 await asyncio.to_thread(
                     users.audit, "lock", user_id=s.user_id, username=s.username,
                     detail="ultima pagina chiusa", ip=s.ip)

@@ -8,19 +8,20 @@ from tests.conftest import TEST_KEY
 def test_migrations_applied(fresh_db):
     assert db.schema_version() >= 2
     tables = {r["name"] for r in db.query(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' "
-        "AND name NOT LIKE 'meeting_note_fts%'")}
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
     expected = {
         "person", "team", "person_assignment", "employment", "lookup", "app_meta",
-        "review_cycle", "evaluation_model", "evaluation", "evaluation_item",
+        "review_cycle", "evaluation_model",
         "ninebox_assessment", "ninebox_weight", "weight_mapping",
         "goal", "goal_review", "performance_review", "wellbeing_entry",
-        "ral_budget", "ral_event", "ral_projection", "benefit_type",
+        "ral_budget", "ral_event", "benefit_type",
         "benefit_assignment", "incentive", "bonus_pool", "bonus_allocation",
         "meeting_note", "action_item", "attachment",
     }
     assert expected <= tables
-    assert len(expected) == 28
+    # 0027: tabelle mai usate e indice full-text (non filtrabile per perimetro) eliminati
+    assert not tables & {"evaluation", "evaluation_item", "ral_projection", "meeting_note_fts"}
+    assert db.query("SELECT name FROM sqlite_master WHERE type='trigger'") == []
 
 
 def test_seed_config(fresh_db):
@@ -90,15 +91,19 @@ def test_migrazione_dal_db_cifrato_con_la_password(tmp_path, monkeypatch):
     db.close_db()
 
 
-def test_fts_search(fresh_db):
+def test_ricerca_note_per_parole(client):
     pid = db.execute("INSERT INTO person (full_name) VALUES ('Test Persona')")
-    db.execute(
-        "INSERT INTO meeting_note (person_id, note_date, title, body) "
-        "VALUES (?, '2026-01-01', 'Registro Rentri', 'gestione del magazzino a Rubiera')",
-        (pid,))
-    hits = db.query(
-        "SELECT rowid FROM meeting_note_fts WHERE meeting_note_fts MATCH 'rubiera'")
-    assert len(hits) == 1
+    for title, body in [("Registro Rentri", "gestione del magazzino a Rubiera"),
+                        ("Nota Percentuale", "100% di sconto_finale")]:
+        db.execute("INSERT INTO meeting_note (person_id, note_date, title, body) VALUES (?, '2026-01-01', ?, ?)",
+                   (pid, title, body))
+    assert "Registro Rentri" in client.get("/notes?q=rubiera").text           # maiuscole indifferenti
+    assert "Registro Rentri" in client.get("/notes?q=magazzino rentri").text  # titolo + testo, tutte le parole
+    assert "Registro Rentri" not in client.get("/notes?q=magazzino sassuolo").text
+    html = client.get("/notes?q=100%25").text
+    assert "Nota Percentuale" in html and "Registro Rentri" not in html                  # % è un carattere, non un jolly
+    assert "Nota Percentuale" not in client.get("/notes?q=sconto%25finale").text
+    assert client.get('/notes?q="AND OR(').status_code == 200                 # nessuna sintassi che possa rompersi
 
 
 def test_voided_excluded_from_current_ral(fresh_db):
@@ -172,8 +177,10 @@ def test_migrazione_censimento_allinea_alla_assunzione(fresh_db):
     db.execute("INSERT INTO ral_event (person_id, effective_date, amount, delta, change_type) "
                "VALUES (?, '2020-01-01', 38000, 0, 'aumento')", (neo,))
 
-    with db.transaction() as conn:
-        conn.executescript((db.MIGRATIONS_DIR / "0013_ral_censimento_assunzione.sql").read_text())
+    h = db._require()   # come fa _migrate: lo script sulla connessione di sistema
+    with h.lock:
+        h.conn.executescript((db.MIGRATIONS_DIR / "0013_ral_censimento_assunzione.sql").read_text())
+        h.conn.commit()
 
     def eff(pid, tipo):
         return db.one("SELECT effective_date FROM ral_event WHERE person_id=? AND change_type=?",

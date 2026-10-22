@@ -24,7 +24,7 @@ def test_form_di_modifica_precompilato(client):
 
 
 def test_modifica_riallinea_la_ricerca(client):
-    """Il trigger FTS meeting_note_au deve seguire la correzione."""
+    """La ricerca trova il testo corretto, non quello vecchio."""
     pid = _persona()
     nid = _crea_nota(client, pid, "Giro", "parlato di rubiera")
     client.post(f"/notes/{nid}", data={
@@ -33,8 +33,7 @@ def test_modifica_riallinea_la_ricerca(client):
 
     assert db.one("SELECT updated_at FROM meeting_note WHERE id=?", (nid,))["updated_at"]
     assert "sassuolo" in client.get("/notes?q=sassuolo").text
-    trovate = db.query("SELECT rowid FROM meeting_note_fts WHERE meeting_note_fts MATCH 'rubiera'")
-    assert trovate == []
+    assert "Giro" not in client.get("/notes?q=rubiera").text
 
 
 def test_eliminazione_lascia_vivere_gli_impegni(client):
@@ -47,7 +46,6 @@ def test_eliminazione_lascia_vivere_gli_impegni(client):
     assert r.status_code == 200
 
     assert db.one("SELECT id FROM meeting_note WHERE id=?", (nid,)) is None
-    assert db.query("SELECT rowid FROM meeting_note_fts WHERE meeting_note_fts MATCH 'testo'") == []
     azione = db.one("SELECT * FROM action_item WHERE id=?", (aid,))
     assert azione is not None and azione["meeting_note_id"] is None
 

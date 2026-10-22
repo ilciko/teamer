@@ -83,9 +83,9 @@ def test_open_db_non_lascia_connessioni_orfane(tmp_path):
     path = tmp_path / "doppio.db"
     db.close_db()
     db.open_db(TEST_KEY, db_path=path)
-    prima = db._conn
+    prima = db._sys.conn
     db.open_db(TEST_KEY, db_path=path)
-    assert db._conn is not prima
+    assert db._sys.conn is not prima
     assert db.one("SELECT 1 AS n")["n"] == 1
     db.close_db()
 
@@ -152,3 +152,67 @@ def test_htmx_a_sessione_chiusa_sa_dove_mandare(client):
     client.post("/lock")
     r = client.get("/notes", headers={"HX-Request": "true"}, follow_redirects=False)
     assert r.headers.get("HX-Redirect") == "/login"
+
+
+# ---- una connessione per sessione ----
+
+def _sessione_di(username):
+    return next(s for s in session._sessions.values() if s.username == username)
+
+
+def test_ogni_director_ha_la_sua_connessione(client, admin_client, app_db):
+    from fastapi.testclient import TestClient
+
+    from app import users
+    from app.main import app
+
+    users.create("hr", "director", PASSWORD)
+    altro = TestClient(app)
+    login(altro, "hr")
+    client.post("/people", data={"full_name": "Scritta Da Coo"})
+    assert "Scritta Da Coo" in altro.get("/people").text      # file condiviso, WAL: si vede subito
+    altro.post("/people", data={"full_name": "Scritta Da Hr"})
+    assert "Scritta Da Hr" in client.get("/people").text
+    coo, hr = _sessione_di("coo"), _sessione_di("hr")
+    assert coo.db is not None and hr.db is not None and coo.db.conn is not hr.db.conn
+    assert coo.db.conn is not db._sys.conn
+    admin_client.get("/admin")
+    assert _sessione_di("it").db is None                       # l'admin usa la connessione di sistema
+
+
+def test_blocco_e_uscita_chiudono_la_connessione(client):
+    client.get("/people")
+    s = _sessione_di("coo")
+    session.lock(s)
+    assert s.db is None and not s.closed
+    assert client.post("/unlock", data={"password": PASSWORD}).json()["ok"]
+    assert client.get("/people").status_code == 200 and s.db is not None   # riaperta allo sblocco
+    client.post("/lock")
+    assert s.db is None and s.closed
+
+
+def test_ripristino_con_sessioni_aperte(client, admin_client, tmp_path):
+    client.post("/people", data={"full_name": "Prima Del Backup"})
+    bk = tmp_path / "bk.db"
+    db.backup_to(bk)
+    client.post("/people", data={"full_name": "Dopo Il Backup"})
+    s = _sessione_di("coo")
+    assert s.db is not None
+    db.restore(bk)
+    assert s.db is None                                         # chiusa: si riapre sul file nuovo
+    html = client.get("/people").text
+    assert "Prima Del Backup" in html and "Dopo Il Backup" not in html
+
+
+def test_transazione_parte_con_lock_di_scrittura(client):
+    """BEGIN IMMEDIATE: due sessioni non si bloccano a metà transazione (SQLITE_BUSY_SNAPSHOT)."""
+    client.get("/people")
+    s = _sessione_di("coo")
+    tok = session.bind(s)
+    try:
+        with db.transaction() as conn:
+            assert s.db.conn.in_transaction
+            conn.execute("INSERT INTO person (full_name) VALUES ('In Transazione')")
+    finally:
+        session.unbind(tok)
+    assert db.sys.one("SELECT 1 FROM person WHERE full_name='In Transazione'")

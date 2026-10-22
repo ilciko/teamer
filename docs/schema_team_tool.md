@@ -136,38 +136,11 @@ Prove di organigramma da confrontare, approvare e applicare (`/org/sim`, `app/se
 
 > Per il modello `nine_box`, `config` contiene le 6 domande con opzioni di risposta, le note contestuali per ruolo/anzianità e le etichette/descrizioni delle 9 caselle: modificare una domanda = editare il modello dalla UI, senza toccare il codice.
 
-### `evaluation` — valutazione svolta *(storicizzata)*
-| Campo | Tipo | Note |
-|---|---|---|
-| id | INTEGER PK | |
-| person_id | INTEGER FK→person.id | |
-| model_id | INTEGER FK→evaluation_model.id | |
-| cycle_id | INTEGER FK→review_cycle.id | NULL ammesso — aggancio al ciclo |
-| eval_date | DATE | |
-| overall_score | REAL | punteggio complessivo calcolato sui `manager_score` pesati |
-| status | TEXT | `bozza` / `finalizzata` |
-| note | TEXT | |
-
-### `evaluation_item` — dettaglio per competenza
-| Campo | Tipo | Note |
-|---|---|---|
-| id | INTEGER PK | |
-| evaluation_id | INTEGER FK→evaluation.id | |
-| competency | TEXT | |
-| self_score | REAL | autovalutazione; NULL se il modello non la prevede |
-| manager_score | REAL | valutazione del responsabile — è quella che pesa nel totale |
-| weight | REAL | peso della competenza nel totale |
-| self_note | TEXT | |
-| manager_note | TEXT | |
-
-> Doppia prospettiva come nel modulo annuale: il gap `self_score` vs `manager_score` nel tempo è un report (self-awareness), non un secondo totale.
-
 ### `ninebox_assessment` — esito 9-box *(storicizzato)*
 | Campo | Tipo | Note |
 |---|---|---|
 | id | INTEGER PK | |
 | person_id | INTEGER FK→person.id | |
-| evaluation_id | INTEGER FK→evaluation.id | NULL se strumento usato da solo |
 | eval_date | DATE | |
 | role_type | TEXT | contesto: `ic`/`tl`/`mgr`/`sr` |
 | seniority | TEXT | contesto: `new`/`mid`/`sen` |
@@ -309,16 +282,6 @@ Prove di organigramma da confrontare, approvare e applicare (`/org/sim`, `app/se
 
 > **Budget applicato vs impegnato**: `applicato` = Σ delta degli `ral_event` legati al budget; `impegnato` = Σ `amount` delle proposte in `bozza`/`proposta`/`approvata`; residuo = tetto − applicato − impegnato. Così il secondo step non riusa denaro già promesso.
 
-### `ral_projection` — proiezioni di crescita *(ipotetiche)*
-| Campo | Tipo | Note |
-|---|---|---|
-| id | INTEGER PK | |
-| person_id | INTEGER FK→person.id | |
-| scenario | TEXT | etichetta scenario |
-| target_date | DATE | |
-| projected_amount | REAL | |
-| note | TEXT | assunzioni |
-
 ### `hiring_budget` — tetto budget assunzioni *(top-down)*
 | Campo | Tipo | Note |
 |---|---|---|
@@ -449,9 +412,9 @@ Prove di organigramma da confrontare, approvare e applicare (`/org/sim`, `app/se
 | updated_at | DATETIME | NULL = mai modificata |
 | archived_at | DATETIME | NULL = attiva; valorizzata = archiviata |
 
-> Tabella virtuale FTS5 su `title` + `body` per la ricerca full-text: con anni di note 1:1 è la funzione più usata dell'area.
+> La ricerca è per parole (`LIKE` su titolo e testo, tutte le parole devono comparire). Fino alla 0.30 c'era un indice FTS5: eliminato nella 0027 perché un indice full-text non si filtra per perimetro (chi lo interroga legge le note di tutti).
 
-> Unica eccezione all'append-only: la nota è un **documento**, non un evento — nessuna query di stato la legge. Il "cambiamento reale" è una nota nuova, la "correzione" è la modifica in place (il trigger `meeting_note_au` riallinea l'indice FTS). Si cancella davvero, e cancellandola le `action_item` collegate sopravvivono con `meeting_note_id = NULL`: l'impegno preso non muore col testo.
+> Unica eccezione all'append-only: la nota è un **documento**, non un evento — nessuna query di stato la legge. Il "cambiamento reale" è una nota nuova, la "correzione" è la modifica in place. Si cancella davvero, e cancellandola le `action_item` collegate sopravvivono con `meeting_note_id = NULL`: l'impegno preso non muore col testo.
 
 > Archiviare (`archived_at`) toglie la nota di mezzo — lista, ricerca, dashboard, scheda persona — senza cancellarla: in Note un toggle la fa ricomparire e da lì si ripristina. È uno stato reversibile, non una correzione, quindi non tocca `updated_at`. Il report stampabile (`/notes/report`, globale o per persona) segue lo stesso toggle e marca le archiviate.
 
@@ -527,3 +490,5 @@ Prove di organigramma da confrontare, approvare e applicare (`/org/sim`, `app/se
 Lo stile UI dell'app segue i design token dell'artefatto 9-box (palette, font, componenti): vedi la sezione "Design System" in `proposte_integrazioni_schema.md`.
 
 Il diagramma ER completo è nel file `schema_team_tool_ER.mermaid`.
+
+Tabelle eliminate nella 0027 perché mai usate dall'app: `evaluation`, `evaluation_item` (valutazioni per competenza) e `ral_projection` (proiezioni di crescita); `ninebox_assessment` ha perso `evaluation_id`.
