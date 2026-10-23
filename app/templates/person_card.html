@@ -106,7 +106,7 @@
       <tr><td class="muted">Ruolo</td><td>{{ lookup_label('role_type', assignment.role_type) }}</td>
           <td class="muted">Riporto diretto</td>
           <td>{% if assignment.manager_person_id %}<a href="/people/{{ assignment.manager_person_id }}">{{ assignment.manager_name }}</a>{% else %}—{% endif %}
-            {% if report_mismatch %}<a class="badge amber" href="/org/riporti?next=/people/{{ p.id }}" title="Non corrisponde a team e ruolo">da verificare</a>{% endif %}</td></tr>
+            {% if report_mismatch and is_hr() %}<span class="badge amber" title="Non corrisponde a team e ruolo">da verificare</span>{% elif report_mismatch %}<a class="badge amber" href="/org/riporti?next=/people/{{ p.id }}" title="Non corrisponde a team e ruolo">da verificare</a>{% endif %}</td></tr>
       {% endif %}
       {% if employment %}
       <tr><td class="muted">Livello</td><td>{{ lookup_label('livello', employment.livello) }}</td>

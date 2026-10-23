@@ -26,13 +26,15 @@
   <a class="btn ghost sm no-print" href="{{ toggle_pos_url }}">{{ 'Nascondi posizioni aperte' if show_pos else 'Mostra posizioni aperte' }}</a>
   <button class="btn ghost sm no-print" type="button" data-fit-toggle>Zoom 100%</button>
   <button class="btn sm no-print" type="button" onclick="window.print()">Esporta PDF</button>
+  {% if not is_hr() %}
   <a class="btn ghost sm no-print" href="/org/sim">Simulazioni</a>
   <a class="btn ghost sm no-print" href="/org/riporti?next=/org/chart">Verifica riporti</a>
+  {% endif %}
   <a class="btn ghost sm no-print" href="/org">← Organigramma</a>
 </div>
 
 {% if chart.warnings %}
-<p class="ctx-note no-print">Riporto da sistemare (<a href="/org/riporti?next=/org/chart">verifica riporti</a>):
+<p class="ctx-note no-print">Riporto da sistemare{% if not is_hr() %} (<a href="/org/riporti?next=/org/chart">verifica riporti</a>){% endif %}:
   {% for w in chart.warnings %}<a href="/people/{{ w.person.id }}">{{ w.person.full_name }}</a> <span class="muted">({{ problem_label[w.problem] }})</span>{{ ', ' if not loop.last }}{% endfor %}.</p>
 {% endif %}
 

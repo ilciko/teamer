@@ -104,6 +104,19 @@ def client2(client):
     yield c
 
 
+@pytest.fixture()
+def hr_client(client):
+    """Utente HR «hr1», con la sua sessione: vede le persone di tutti i director, in sola lettura."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    users.create("hr1", "hr", PASSWORD)
+    c = TestClient(app)
+    assert login(c, "hr1").url.path == "/org"
+    yield c
+
+
 class as_user:
     """Esegue le query del test nella sessione di un utente già loggato (stesse viste)."""
 

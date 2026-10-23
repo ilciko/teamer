@@ -124,7 +124,7 @@
       <button class="btn ghost sm">Riapri</button>
     </form>
     {% endif %}
-    <span class="muted3 small">I moltiplicatori si configurano in <a href="/settings?tab=premi">Configurazione → Premi</a>.</span>
+    {% if not is_hr() %}<span class="muted3 small">I moltiplicatori si configurano in <a href="/settings?tab=premi">Configurazione → Premi</a>.</span>{% endif %}
   </div>
   {% endif %}
 </div>

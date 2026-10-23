@@ -76,9 +76,9 @@
   <p class="muted small" style="margin-bottom:10px;line-height:1.6">
     Il codice è la categoria d'offerta, non il ruolo: entra nel listino chi ne ha uno sull'assegnazione corrente.
     Qui si compila o si corregge; il cambio reale si registra con una nuova assegnazione dalla scheda persona.
-    I codici si gestiscono in <a href="/settings?tab=listino">Configurazione → Listino</a>.
+    {% if not is_hr() %}I codici si gestiscono in <a href="/settings?tab=listino">Configurazione → Listino</a>.{% endif %}
   </p>
-  {% if not profiles %}<div class="flash error">Nessun codice di listino attivo: creane uno in <a href="/settings?tab=listino">Configurazione → Listino</a>.</div>{% endif %}
+  {% if not profiles %}<div class="flash error">Nessun codice di listino attivo{% if not is_hr() %}: creane uno in <a href="/settings?tab=listino">Configurazione → Listino</a>{% endif %}.</div>{% endif %}
   {% macro prod(r, name, label) -%}
   <td class="num"><input type="number" name="pp_{{ name }}" step="0.5" min="0" max="{{ 200 if name == 'saturazione_pct' else 100 }}" aria-label="{{ label }}"
          value="{{ '%g' % r.override[name] if r.override[name] is not none else '' }}" placeholder="{{ '%g' % p[name] }}"

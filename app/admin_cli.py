@@ -5,7 +5,7 @@ come root e poi lancia questi comandi come utente `teamer`. Comandi:
 
     init [--admin NOME]         chiave di sistema (se manca) + primo site admin
     create-admin NOME           nuovo site admin con password provvisoria
-    create-user NOME --role R   nuovo utente (admin | director) con password provvisoria
+    create-user NOME --role R   nuovo utente (admin | director | hr) con password provvisoria
     reset-password NOME         password provvisoria, da cambiare al primo accesso
     unlock NOME                 toglie il blocco per troppi tentativi
     enable NOME / disable NOME  riattiva / disattiva

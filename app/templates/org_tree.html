@@ -46,8 +46,10 @@
 <div class="page-head">
   <h1>Organigramma</h1>
   <div class="spacer"></div>
+  {% if not is_hr() %}
   <a class="btn ghost sm" href="/org/sim">Simulazioni</a>
   <a class="btn ghost sm" href="/org/riporti?next=/org">Verifica riporti</a>
+  {% endif %}
   <a class="btn ghost sm" href="/org/chart">Linee di riporto →</a>
 </div>
 

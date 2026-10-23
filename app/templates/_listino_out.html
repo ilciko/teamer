@@ -49,7 +49,7 @@
     {% set righe = per_codice + ([dict(totale, key='__tot__', listino_rate=none, scost=none, max_sopra=false)] if totale and per_codice|length > 1 else []) %}
     {% call(r) gruppo(righe, 'Codice', listino=true) %}{% if r.key == '__tot__' %}Tutta la platea{% else %}<code>{{ r.key }}</code> <span class="muted">{{ r.label }}</span>{% endif %}{% endcall %}
     {% if per_codice and per_codice | rejectattr('listino_rate') | list | length %}
-    <p class="muted3 small" style="margin-top:6px">Per i codici senza tariffa non c'è confronto: impostala in <a href="/settings?tab=listino">Configurazione → Listino</a>.</p>
+    <p class="muted3 small" style="margin-top:6px">Per i codici senza tariffa non c'è confronto{% if not is_hr() %}: impostala in <a href="/settings?tab=listino">Configurazione → Listino</a>{% endif %}.</p>
     {% endif %}
   </div>
 

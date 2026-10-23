@@ -21,8 +21,17 @@ tabelle reali), poi le viste temporanee omonime con il filtro. Le guardie vanno 
 dopo, il nome risolverebbe sulla vista. Trigger AFTER INSERT allargano il perimetro quando
 il director crea un team o una persona; i cambi fatti dall'admin (assegnazioni,
 trasferimenti) fanno salire `REV` e ogni connessione ricarica il perimetro alla richiesta dopo.
+
+**HR** (0.36): la connessione di sessione di HR vede tutto (viste senza filtro su team, persone,
+contenitori e figli) ma in sola lettura: l'authorizer nega ogni scrittura su `main`, niente
+guardie, niente perimetro da ricaricare. La configurazione (classe `owned`, `CONFIG` senza i
+cataloghi) è la sua, di default: le pagine che la leggono trovano una voce sola. Le scritture
+di HR, per tabella e colonna, arrivano nelle tappe successive (`HR_WRITABLE`).
 """
 from app import db
+
+# ruoli con una connessione di sessione e una configurazione propria
+SESSION_ROLES = ("director", "hr")
 
 # sale a ogni cambio di titolarità fatto dall'admin: le connessioni di sessione ricaricano il perimetro
 REV = 0
@@ -83,6 +92,16 @@ SCOPED_META = {"ral_stale_amber_years", "ral_stale_red_years"}
 
 def scoped_meta(key: str) -> bool:
     return key in SCOPED_META or key.startswith("listino_")
+
+
+# ---- HR ----
+
+# configurazione che HR legge come propria (di default); i cataloghi puntati per id dalle
+# righe di persona (codici listino) restano quelli dei director
+HR_OWN = [t for t in CONFIG if t not in CATALOG_REFS]
+# scritture consentite a HR: {tabella: {colonna, ...}} (vuoto = sola lettura; INSERT e DELETE
+# vogliono la tabella con "*"). Si riempie nelle tappe successive.
+HR_WRITABLE: dict[str, set] = {}
 
 
 # ---- viste e guardie sulla connessione di una sessione ----
@@ -173,9 +192,11 @@ def _guards_team(uid: int) -> list[str]:
     ]
 
 
-def refresh(conn, uid: int) -> None:
+def refresh(conn, uid: int, role: str = "director") -> None:
     """Ricalcola il perimetro: i team del director, e le persone la cui ultima assegnazione
-    valida (conclusa o no) sta in uno di quei team."""
+    valida (conclusa o no) sta in uno di quei team. HR vede tutto: niente da ricalcolare."""
+    if role == "hr":
+        return
     conn.execute("DELETE FROM temp.perim_team")
     conn.execute("DELETE FROM temp.perim_person")
     conn.execute("INSERT INTO temp.perim_team SELECT id FROM main.team WHERE owner_user_id = ?", (int(uid),))
@@ -208,7 +229,8 @@ def authorizer(h, conn):
     """Sulla connessione di un director una colonna di una tabella schermata si legge solo dalle
     nostre viste e guardie, o dalla tabella che il db sta scrivendo (UPDATE … WHERE id=?) e dalle
     colonne che il motore controlla per le sue chiavi esterne. Utenti e audit sono della
-    connessione di sistema; ATTACH, VACUUM e PRAGMA sono negati."""
+    connessione di sistema; ATTACH, VACUUM e PRAGMA sono negati. Su quella di HR le scritture
+    passano solo per le colonne in `HR_WRITABLE`."""
     import sqlcipher3 as s
 
     shielded = {*OWNED, *CHILD, *TEAM, *PERSON}
@@ -216,6 +238,7 @@ def authorizer(h, conn):
     fk = _fk_columns(conn)
     denied = {"app_user", "audit_event"}
     company = set(COMPANY)  # la legge il director, la scrive solo la gestione aziendale
+    writable = HR_WRITABLE if h.role == "hr" else None  # None = tutto (dentro le guardie)
     OK, DENY = s.SQLITE_OK, s.SQLITE_DENY
 
     def check(action, a1, a2, dbname, source):
@@ -229,9 +252,12 @@ def authorizer(h, conn):
             if a1 in shielded and a2:
                 return OK if source in ours or a1 == h.write_target else DENY
             return OK
-        if action in (s.SQLITE_INSERT, s.SQLITE_UPDATE, s.SQLITE_DELETE) and dbname == "main" \
-                and (a1 in denied or a1 in company):
-            return DENY
+        if action in (s.SQLITE_INSERT, s.SQLITE_UPDATE, s.SQLITE_DELETE) and dbname == "main":
+            if a1 in denied or a1 in company:
+                return DENY
+            if writable is not None:
+                cols = writable.get(a1, ())
+                return OK if "*" in cols or (action == s.SQLITE_UPDATE and a2 in cols) else DENY
         if action in (s.SQLITE_ATTACH, s.SQLITE_DETACH, s.SQLITE_PRAGMA):
             return DENY
         return OK
@@ -239,9 +265,11 @@ def authorizer(h, conn):
     return check
 
 
-def install(conn, uid: int) -> None:
+def install(conn, uid: int, role: str = "director") -> None:
     """Perimetro, guardie e viste del director `uid` sulla sua connessione (prima le guardie, poi le viste)."""
     uid = int(uid)
+    if role == "hr":
+        return _install_hr(conn, uid)
     conn.execute("CREATE TEMP TABLE perim_team (team_id INTEGER PRIMARY KEY)")
     conn.execute("CREATE TEMP TABLE perim_person (person_id INTEGER PRIMARY KEY)")
     refresh(conn, uid)
@@ -270,6 +298,14 @@ def install(conn, uid: int) -> None:
         stmts.append(f"CREATE TEMP VIEW {t} AS SELECT {', '.join(_cols(conn, t))} FROM main.{t} WHERE {visible}")
     for sql in stmts:
         conn.execute(sql)
+
+
+def _install_hr(conn, uid: int) -> None:
+    """Viste di HR: tutto senza filtro, tranne la configurazione propria. Nessuna guardia: le
+    scritture le decide l'authorizer (`HR_WRITABLE`)."""
+    for t in [*TEAM, *PERSON, *OWNED, *CHILD]:
+        where = f" WHERE owner_user_id = {uid}" if t in HR_OWN else ""
+        conn.execute(f"CREATE TEMP VIEW {t} AS SELECT {', '.join(_cols(conn, t))} FROM main.{t}{where}")
 
 
 # ---- configurazione di default ----
@@ -305,7 +341,7 @@ def has_config(uid: int) -> bool:
 
 
 def ensure_config(uid: int) -> bool:
-    """Un director senza configurazione riceve quella di default. Idempotente."""
+    """Un director (o HR) senza configurazione riceve quella di default. Idempotente."""
     if has_config(uid):
         return False
     with db.sys.transaction() as c:

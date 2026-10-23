@@ -6,7 +6,8 @@ solo l'id della sessione: il vero cancello è il registro in memoria, che il rea
 blocca quando l'ultima pagina di quella sessione si chiude.
 
 Ruoli: l'admin (IT) vede solo il pannello `/admin` e il proprio account; il director
-tutto il resto.
+tutto il resto; HR tutto il resto tranne dashboard, report, simulazioni, verifica dei
+riporti e configurazione, e in questa versione solo in lettura (`allowed`).
 """
 from urllib.parse import quote
 
@@ -23,7 +24,12 @@ COOKIE = "teamer_session"
 
 # pagine dell'admin (oltre a quelle fuori dal guard): niente dati del personale
 ADMIN_PREFIXES = ("/admin", "/account", "/lock")
-HOME = {"admin": "/admin", "director": "/"}
+HOME = {"admin": "/admin", "director": "/", "hr": "/org"}
+# HR (0.36): niente dashboard, report, simulazioni, verifica riporti, configurazione
+HR_DENIED = ("/reports", "/org/sim", "/org/riporti", "/settings")
+# le sole scritture di HR in questa versione: il suo account, uscita, modalità pubblica e le
+# anteprime htmx (`*/simulate`), che calcolano e basta
+HR_WRITE_OK = ("/lock", "/account", "/public-mode")
 
 
 def client_ip(request: Request) -> str | None:
@@ -53,14 +59,20 @@ def active_session(request: Request) -> session.Session | None:
     return s if s is not None and not s.locked else None
 
 
-def allowed(role: str, path: str) -> bool:
+def allowed(role: str, path: str, method: str = "GET") -> bool:
     from app.routers import company
 
     if path.startswith(company.PREFIX):  # configurazione aziendale: di chi la gestisce (oggi l'admin, poi HR)
         return role == company.MANAGED_BY
     if role == "admin":
         return path.startswith(ADMIN_PREFIXES)
-    return not path.startswith("/admin")
+    if path.startswith("/admin"):
+        return False
+    if role == "hr":
+        if path == "/" or path.startswith(HR_DENIED):
+            return False
+        return method == "GET" or path.startswith(HR_WRITE_OK) or path.endswith("/simulate")
+    return True
 
 
 def set_cookie(response, s: session.Session) -> None:
@@ -111,7 +123,7 @@ def login(request: Request, username: str = Form(""), password: str = Form("")):
     user, error = users.authenticate(username, password, client_ip(request))
     if error:
         return templates.TemplateResponse(request, "login.html", _login_ctx(error=error, username=username))
-    if user["role"] == "director":
+    if user["role"] in perimeter.SESSION_ROLES:
         perimeter.ensure_config(user["id"])  # director di prima della 0.32: configurazione di default
     s = _open_session(request, user)
     users.audit("login_ok", user_id=user["id"], username=user["username"], ip=s.ip)

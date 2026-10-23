@@ -9,7 +9,7 @@ Connessioni:
 - **di sistema** (`_sys`, API `db.sys.*`): avvio, migrazioni, utenti e audit, admin,
   CLI, backup e ripristino. È quella che usano anche gli helper senza una sessione
   di director (login, test, script);
-- **di sessione**: ogni sessione di un director ha la sua, aperta al primo uso e
+- **di sessione**: ogni sessione di un director o di HR ha la sua, aperta al primo uso e
   chiusa al blocco o all'uscita. È qui che i perimetri (`app.perimeter`) installano
   viste e guardie: la stessa query vede righe diverse a seconda di chi la esegue.
 
@@ -42,6 +42,7 @@ class _Handle:
     conn: object
     lock: threading.RLock = field(default_factory=threading.RLock)
     user_id: int | None = None
+    role: str = "director"
     rev: int = 0  # revisione del perimetro installato (perimeter.REV)
     write_target: str | None = None  # tabella che si sta scrivendo (per l'authorizer)
     system: bool = False             # ricarica del perimetro in corso: letture di sistema
@@ -75,9 +76,11 @@ def _require() -> _Handle:
 
 
 def _handle() -> _Handle:
-    """La connessione della richiesta: quella della sessione del director, altrimenti di sistema."""
+    """La connessione della richiesta: quella della sessione del director (o di HR), altrimenti di sistema."""
+    from app import perimeter
+
     s = session.current()
-    if s is None or s.role != "director":
+    if s is None or s.role not in perimeter.SESSION_ROLES:
         return _require()
     h = s.db
     if h is None:
@@ -88,15 +91,13 @@ def _handle() -> _Handle:
                 s.db = _open_session(s)
                 _session_handles[s.id] = s
             h = s.db
-    from app import perimeter
-
     if h.rev != perimeter.REV:  # l'admin ha cambiato le titolarità: perimetro da ricaricare
         with h.lock:
             if h.rev != perimeter.REV and not h.conn.in_transaction:
                 rev = perimeter.REV
                 h.system = True
                 try:
-                    perimeter.refresh(h.conn, h.user_id)
+                    perimeter.refresh(h.conn, h.user_id, h.role)
                 finally:
                     h.system = False
                 h.rev = rev
@@ -113,8 +114,8 @@ def _open_session(s) -> _Handle:
     # proprietario delle righe nuove nelle tabelle "del director" (DEFAULT (teamer_owner()))
     conn.create_function("teamer_owner", 0, lambda uid=s.user_id: uid)
     rev = perimeter.REV
-    perimeter.install(conn, s.user_id)
-    h = _Handle(conn, user_id=s.user_id, rev=rev)
+    perimeter.install(conn, s.user_id, s.role)
+    h = _Handle(conn, user_id=s.user_id, role=s.role, rev=rev)
     conn.set_authorizer(perimeter.authorizer(h, conn))
     return h
 

@@ -468,7 +468,7 @@ In `app_meta` restano `schema_version`, `instance_id` e `default_ccnl` (identifi
 | id | INTEGER PK | |
 | username | TEXT UNIQUE NOCASE | si digita al login, niente elenco |
 | display_name | TEXT | |
-| role | TEXT | `admin` (site admin IT: utenti, audit, backup, aggiornamenti; nessun dato del personale) / `director` (il COO: tutto il resto) |
+| role | TEXT | `admin` (site admin IT: utenti, audit, backup, aggiornamenti; nessun dato del personale) / `director` (i suoi team e le loro persone) / `hr` (0031: vede le persone di tutti i director; 0.36 in sola lettura, vedi `docs/perimetri.md`) |
 | password_hash | TEXT | `scrypt$n$r$p$salt$hash` (min 12 caratteri) |
 | must_change_password | BOOLEAN | password provvisoria (creazione, reset): ogni pagina rimanda ad `/account` |
 | active | BOOLEAN | disattivato = sessioni chiuse subito, login rifiutato. Mai cancellato: l'audit punta qui |

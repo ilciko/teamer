@@ -9,7 +9,7 @@
 <script src="/static/js/teamer-session.js?v={{ asset_v() }}" defer></script>
 {% block head %}{% endblock %}
 </head>
-<body data-heartbeat="{{ heartbeat_seconds() }}" data-username="{{ current_user().username if current_user() else '' }}"{% if public() %} class="public"{% endif %}>
+<body data-heartbeat="{{ heartbeat_seconds() }}" data-username="{{ current_user().username if current_user() else '' }}" class="{{ 'public' if public() }}{{ ' hr-readonly' if is_hr() }}">
 <div class="layout">
   <nav class="sidebar">
     <div class="brand">Teamer<small>Gestione team</small></div>
@@ -17,6 +17,7 @@
     {% set pub = public() %}
     {% set me = current_user() %}
     {% set is_admin = me and me.role == 'admin' %}
+    {% set hr_nav = me and me.role == 'hr' %}
     {# gruppi del menu: (titolo, [(etichetta, href, prefisso per "attivo", riservato)]).
        Riservato = nascosto in modalità pubblica; un gruppo senza voci visibili non si mostra. #}
     {% set nav_groups = [
@@ -35,11 +36,12 @@
       <a class="nav-link {{ 'active' if path.startswith('/admin') }}" href="/admin">Amministrazione</a>
       <a class="nav-link {{ 'active' if path.startswith('/azienda') }}" href="/azienda">Azienda</a>
       {% elif me %}
-      {% if not pub %}
+      {% if not pub and not hr_nav %}
       <a class="nav-link {{ 'active' if path == '/' }}" href="/">Dashboard</a>
       <a class="nav-link {{ 'active' if path.startswith('/reports') }}" href="/reports">Report</a>
       {% endif %}
-      {% for title, links in nav_groups %}
+      {# HR (0.36): niente dashboard, report né configurazione #}
+      {% for title, links in nav_groups if not (hr_nav and title == 'Sistema') %}
       {% set visible = links | rejectattr(3) | list if pub else links %}
       {% if visible %}
       {% set here = namespace(open=false) %}
@@ -83,6 +85,7 @@
   </nav>
   <main class="content{% block content_class %}{% endblock %}">
     {% if public() %}<div class="public-banner no-print">👁 Modalità pubblica: pagine riservate chiuse, cifre oscurate.</div>{% endif %}
+    {% if is_hr() %}<div class="public-banner no-print">Profilo HR: in questa versione i dati si consultano e basta, le modifiche arrivano nelle prossime.</div>{% endif %}
     {% block content %}{% endblock %}
   </main>
 </div>

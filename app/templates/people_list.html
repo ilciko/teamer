@@ -5,13 +5,24 @@
   <h1>Persone</h1>
   <span class="badge">{{ people|length }}</span>
   <div class="spacer"></div>
-  {% if show == 'attivi' %}<a class="btn ghost sm" href="/people?show=tutti">Mostra cessati</a>
-  {% else %}<a class="btn ghost sm" href="/people">Solo attivi</a>{% endif %}
+  {% if hr %}
+  {# HR vede le persone di tutti i director: filtro per titolare #}
+  <form method="get" action="/people" class="frow" style="align-items:center;gap:6px">
+    <input type="hidden" name="show" value="{{ show }}">
+    <select name="director" onchange="this.form.submit()" aria-label="Director">
+      <option value="">Tutti i director</option>
+      {% for did, name in directors.items() %}<option value="{{ did }}" {{ 'selected' if director == did|string }}>{{ name }}</option>{% endfor %}
+    </select>
+  </form>
+  {% endif %}
+  {% set qs = '&director=' ~ director if director else '' %}
+  {% if show == 'attivi' %}<a class="btn ghost sm" href="/people?show=tutti{{ qs }}">Mostra cessati</a>
+  {% else %}<a class="btn ghost sm" href="/people?{{ qs[1:] }}">Solo attivi</a>{% endif %}
 </div>
 
 <div class="card">
   <table class="tbl">
-    <thead><tr><th></th><th>Nome</th><th>Team</th><th>Ruolo</th><th>Assunzione</th><th class="num">RAL</th><th></th></tr></thead>
+    <thead><tr><th></th><th>Nome</th><th>Team</th>{% if hr %}<th>Director</th>{% endif %}<th>Ruolo</th><th>Assunzione</th><th class="num">RAL</th><th></th></tr></thead>
     <tbody>
     {% for p in people %}
       <tr>
@@ -21,18 +32,20 @@
         <td><a href="/people/{{ p.id }}"><strong>{{ p.full_name }}</strong></a>
           {% if p.status != 'attivo' %} <span class="badge red">cessato</span>{% endif %}</td>
         <td>{{ p.team_name or '—' }}</td>
+        {% if hr %}<td>{{ p.director or '—' }}</td>{% endif %}
         <td>{{ lookup_label('role_type', p.role_type) if p.role_type else '—' }}</td>
         <td>{{ p.hire_date | dt }}</td>
         <td class="num">{{ p.ral | eur }}</td>
         <td><a class="btn ghost sm" href="/people/{{ p.id }}">Apri</a></td>
       </tr>
     {% else %}
-      <tr><td colspan="7" class="muted">Nessuna persona. Aggiungi la prima qui sotto.</td></tr>
+      <tr><td colspan="{{ 8 if hr else 7 }}" class="muted">Nessuna persona{% if not hr %}. Aggiungi la prima qui sotto{% endif %}.</td></tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
 
+{% if not hr %}
 <div class="card" style="max-width:680px">
   <div class="card-title">Nuova persona — censimento dello stato attuale</div>
   <form method="post" action="/people">
@@ -70,4 +83,5 @@
     <div class="actions"><button class="btn">Censisci →</button></div>
   </form>
 </div>
+{% endif %}
 {% endblock %}

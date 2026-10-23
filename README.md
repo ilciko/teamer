@@ -32,9 +32,11 @@ assegna una provvisoria (*Amministrazione → Utenti*, o `python -m app.admin_cl
   32 byte casuali che cifrano `data/teamer.db`. La conosce solo l'IT, l'app non la mostra mai.
   **Perderla = perdere i dati**: conservane una copia fuori dal server. I backup del DB si aprono
   solo con questa chiave.
-- **Ruoli**: *Site admin* (IT: utenti, audit, backup, aggiornamenti; nessun dato del personale) e
-  *Director* (il COO: tutto il resto). Password di almeno 12 caratteri, hash scrypt; dopo 5 errori
-  l'utente è bloccato per qualche minuto (lo sblocca l'admin).
+- **Ruoli**: *Site admin* (IT: utenti, audit, backup, aggiornamenti; nessun dato del personale),
+  *Director* (i suoi team e le loro persone) e *HR* (dalla 0.36: vede le persone di tutti i
+  director; per ora in sola lettura, le modifiche di HR arrivano nelle versioni successive).
+  Password di almeno 12 caratteri, hash scrypt; dopo 5 errori l'utente è bloccato per qualche
+  minuto (lo sblocca l'admin).
 - **Sessioni**: il DB resta aperto finché gira il servizio; ogni utente si blocca quando chiude la
   sua ultima pagina Teamer e riprende in place con la password. Il blocco di uno non tocca gli altri.
 - **Audit** (*Amministrazione → Audit*): accessi, errori, blocchi, gestione utenti, backup,

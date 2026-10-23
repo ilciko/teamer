@@ -4,7 +4,9 @@ La password di un utente non apre il DB (lo apre la chiave di sistema, vedi `db`
 qui ne sta solo l'hash scrypt. Ruoli:
 
 - `admin`: site admin (IT). Utenti, audit, backup, aggiornamenti; nessun dato del personale.
-- `director`: il COO. Tutto il resto, come nella versione mono-utente.
+- `director`: vede e gestisce i suoi team (perimetri, `app.perimeter`).
+- `hr`: profilo aziendale trasversale, vede le persone di tutti i director (0.36: in sola
+  lettura; le scritture di HR arrivano nelle tappe successive, vedi docs/perimetri.md).
 
 Gli utenti si correggono in place e si disattivano, non si cancellano: l'audit punta a
 loro. `audit_event` è append-only.
@@ -16,7 +18,7 @@ from datetime import datetime, timedelta
 
 from app import db, perimeter, session
 
-ROLES = {"admin": "Site admin", "director": "Director"}
+ROLES = {"admin": "Site admin", "director": "Director", "hr": "HR"}
 MIN_PASSWORD = 12
 MAX_FAILED = 5            # errori consecutivi prima del blocco temporaneo
 MAX_LOCK_MINUTES = 60
@@ -151,7 +153,7 @@ def create(username: str, role: str, password: str, display_name: str | None = N
         (username, (display_name or "").strip() or None, role, hash_password(password),
          1 if must_change else 0, _ts(_now())))
     audit("user_create", f"utente {username} ({ROLES[role]})")
-    if role == "director":
+    if role in perimeter.SESSION_ROLES:
         perimeter.ensure_config(uid)  # parte dalla configurazione di default
     return uid
 
@@ -166,7 +168,7 @@ def update(uid: int, display_name: str | None, role: str) -> None:
                ((display_name or "").strip() or None, role, uid))
     if role != u["role"]:
         session.drop_user(uid)  # il ruolo decide le pagine: si rientra
-        if role == "director":
+        if role in perimeter.SESSION_ROLES:
             perimeter.ensure_config(uid)
     audit("user_update", f"{_target(u)}: ruolo {ROLES[role]}")
 

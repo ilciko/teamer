@@ -77,6 +77,7 @@ templates.env.filters["eur"] = fmt_eur_masked
 templates.env.filters["eur_plain"] = fmt_eur  # cifre mostrabili anche in pubblica (tariffe di listino)
 templates.env.globals["public"] = public.active
 templates.env.globals["current_user"] = session.current
+templates.env.globals["is_hr"] = lambda: (s := session.current()) is not None and s.role == "hr"
 templates.env.globals["roles"] = users.ROLES
 templates.env.globals["update_available"] = updater.available
 templates.env.filters["dt"] = fmt_date
@@ -142,7 +143,7 @@ async def auth_guard(request: Request, call_next):
             return _to_login(request)
         if user["must_change_password"] and not path.startswith(("/account", "/lock")):
             return _redirect(request, "/account")
-        if not auth.allowed(s.role, path):
+        if not auth.allowed(s.role, path, request.method):
             return _forbidden(request, s.role)
         if public.load(user) and public.is_blocked(path):
             return _public_blocked(request)

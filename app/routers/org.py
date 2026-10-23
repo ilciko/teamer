@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Form, Query, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 
-from app import db
+from app import db, session, users
 from app.services import budget as budget_svc
 from app.services import org_tree as org_svc
 from app.services import cost
@@ -155,25 +155,38 @@ async def reports_apply(request: Request):
 
 
 @router.get("/people")
-def people_list(request: Request, show: str = "attivi"):
+def people_list(request: Request, show: str = "attivi", director: str = ""):
+    """Per HR, che vede le persone di tutti, c'è anche il director titolare (quello del team
+    dell'assegnazione corrente, o chi l'ha creata) con un filtro; i nomi degli utenti si leggono
+    con `db.sys` (la connessione di sessione non legge `app_user`)."""
     where = "WHERE p.status = 'attivo'" if show == "attivi" else ""
     rows = db.query(
-        f"""SELECT p.*, pa.role_type, t.name AS team_name
+        f"""SELECT p.*, pa.role_type, t.name AS team_name,
+               COALESCE(t.owner_user_id, p.owner_user_id) AS director_id
         FROM person p
         LEFT JOIN person_assignment pa ON pa.person_id = p.id AND pa.voided=0 AND pa.end_date IS NULL
         LEFT JOIN team t ON t.id = pa.team_id
         {where} ORDER BY p.full_name"""
     )
+    hr = session.current().role == "hr"
+    directors = {}
+    if hr:
+        directors = {u["id"]: u["display_name"] or u["username"] for u in users.all_users()
+                     if u["role"] == "director"}
+        if director.isdigit():
+            rows = [r for r in rows if r["director_id"] == int(director)]
     people = []
     for r in rows:
         ral = cost.current_ral(r["id"])
         people.append({**dict(r), "ral": ral["amount"] if ral else None,
+                       "director": directors.get(r["director_id"]),
                        "initials": initials(r["full_name"]), "avatar_uri": avatar_data(r)})
     teams = db.query("SELECT * FROM team WHERE archived_at IS NULL ORDER BY name")
     listino_profiles = db.query("SELECT * FROM listino_profile WHERE active=1 ORDER BY sort_order, code")
     return _templates().TemplateResponse(request, "people_list.html",
                                          {"people": people, "show": show, "teams": teams,
-                                          "listino_profiles": listino_profiles})
+                                          "listino_profiles": listino_profiles, "hr": hr,
+                                          "directors": directors, "director": director})
 
 
 @router.post("/people")
