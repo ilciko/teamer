@@ -411,10 +411,13 @@ Prove di organigramma da confrontare, approvare e applicare (`/org/sim`, `app/se
 | created_at | DATETIME | |
 | updated_at | DATETIME | NULL = mai modificata |
 | archived_at | DATETIME | NULL = attiva; valorizzata = archiviata |
+| author_user_id | INTEGER FK→app_user.id | chi l'ha scritta (0032, default `teamer_owner()`); NULL = da assegnare |
 
 > La ricerca è per parole (`LIKE` su titolo e testo, tutte le parole devono comparire). Fino alla 0.30 c'era un indice FTS5: eliminato nella 0027 perché un indice full-text non si filtra per perimetro (chi lo interroga legge le note di tutti).
 
 > Unica eccezione all'append-only: la nota è un **documento**, non un evento — nessuna query di stato la legge. Il "cambiamento reale" è una nota nuova, la "correzione" è la modifica in place. Si cancella davvero, e cancellandola le `action_item` collegate sopravvivono con `meeting_note_id = NULL`: l'impegno preso non muore col testo.
+
+> **Di chi la scrive** (classe `authored`, `docs/perimetri.md`): ognuno vede e modifica solo le proprie note, a prescindere dal perimetro della persona; director e HR non si leggono a vicenda. Se la persona passa a un altro director la nota resta all'autore, in sola lettura, e non passa a nessuno.
 
 > Archiviare (`archived_at`) toglie la nota di mezzo — lista, ricerca, dashboard, scheda persona — senza cancellarla: in Note un toggle la fa ricomparire e da lì si ripristina. È uno stato reversibile, non una correzione, quindi non tocca `updated_at`. Il report stampabile (`/notes/report`, globale o per persona) segue lo stesso toggle e marca le archiviate.
 
@@ -428,6 +431,7 @@ Prove di organigramma da confrontare, approvare e applicare (`/org/sim`, `app/se
 | due_date | DATE | scadenza |
 | status | TEXT | `aperto`/`in corso`/`chiuso` |
 | closed_date | DATE | |
+| author_user_id | INTEGER FK→app_user.id | chi l'ha presa (0032, default `teamer_owner()`); fuori perimetro cambia solo lo stato |
 
 ### `attachment` — allegati documentali
 | Campo | Tipo | Note |

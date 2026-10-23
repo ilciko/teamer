@@ -28,7 +28,7 @@
        Così nessun form si annida col frammento di modifica e i bottoni non
        stanno dentro righe che htmx rigenera (trappola nota, vedi CLAUDE.md). #}
     {% if notes %}
-    <form id="note-sel" method="post" action="/notes/archivia"
+    <form id="note-sel" method="post" action="/notes/archivia" class="hr-ok"
           style="display:flex;gap:8px;align-items:center;padding-bottom:6px;border-bottom:0.5px solid var(--border)">
       <input type="hidden" name="f_q" value="{{ q }}">
       <input type="hidden" name="f_person_id" value="{{ person_id or '' }}">
@@ -43,11 +43,17 @@
     {% for n in notes %}
     {% with f_q = q, f_person_id = person_id, f_archived = archived %}{% include "_note_row.html" %}{% endwith %}
     {% else %}<p class="muted small">Nessuna nota{{ ' per questa ricerca' if q }}.</p>{% endfor %}
+    {% if outside_notes %}
+    {# le note restano a chi le ha scritte anche quando la persona passa a un altro director: qui in sola lettura #}
+    <div class="card-title" style="margin-top:16px">Persone non più nel tuo perimetro ({{ outside_notes|length }})</div>
+    <p class="muted3 small">Note tue su persone passate a un altro director: si leggono, non si modificano.</p>
+    {% for n in outside_notes %}{% include "_note_row.html" %}{% endfor %}
+    {% endif %}
   </div>
 
   <div class="card" style="align-self:start">
     <div class="card-title">Nuova nota</div>
-    <form method="post" action="/notes">
+    <form method="post" action="/notes" class="hr-ok">
       <div class="frow">
         <div><label class="fld">Persona</label>
           <select name="person_id" required>

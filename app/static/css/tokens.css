@@ -91,8 +91,9 @@ h1, h2.serif { font-family: 'DM Serif Display', serif; font-weight: 400; }
 .public-switch.on .knob { left: 14px; }
 /* HR in sola lettura (0.36): i pulsanti di invio dei form POST spariscono e i controlli htmx che
    salvano (non le anteprime */simulate) non rispondono; il server rifiuta comunque (403). */
-body.hr-readonly main form[method="post" i] button:not([type="button"]),
-body.hr-readonly main form[method="post" i] input[type="submit"] { display: none !important; }
+/* HR (0.36): i form che HR non può inviare perdono il pulsante; .hr-ok = form suoi (note e azioni) */
+body.hr-readonly main form[method="post" i]:not(.hr-ok) button:not([type="button"]),
+body.hr-readonly main form[method="post" i]:not(.hr-ok) input[type="submit"] { display: none !important; }
 body.hr-readonly main [hx-post]:not([hx-post$="/simulate"]),
 body.hr-readonly main [hx-post]:not([hx-post$="/simulate"]) :is(input, select, textarea, button) { pointer-events: none; opacity: .7; }
 .public-banner { margin-bottom: 14px; padding: 7px 12px; border-radius: var(--radius); background: var(--amber-bg); border-left: 2px solid var(--amber-border); font-size: 12px; color: var(--text2); }

@@ -85,7 +85,7 @@
   </nav>
   <main class="content{% block content_class %}{% endblock %}">
     {% if public() %}<div class="public-banner no-print">👁 Modalità pubblica: pagine riservate chiuse, cifre oscurate.</div>{% endif %}
-    {% if is_hr() %}<div class="public-banner no-print">Profilo HR: in questa versione i dati si consultano e basta, le modifiche arrivano nelle prossime.</div>{% endif %}
+    {% if is_hr() %}<div class="public-banner no-print">Profilo HR: i dati si consultano; note e azioni sono le tue. Le altre modifiche arrivano nelle prossime versioni.</div>{% endif %}
     {% block content %}{% endblock %}
   </main>
 </div>

@@ -11,6 +11,10 @@ Ogni tabella sta in esattamente una classe (`CLASSES`, verificato da tests/test_
 - `person`: dati di fatto della persona, visibili se la persona è nel perimetro: la sua
   ultima assegnazione valida sta in un team del director, oppure non ne ha nessuna e l'ha
   creata lui (`person.owner_user_id`). Seguono la persona.
+- `authored`: note 1:1 e azioni (`author_user_id`, default `teamer_owner()`): ognuno vede e
+  scrive solo le proprie, a prescindere dal perimetro della persona. Se la persona esce dal
+  perimetro restano a chi le ha scritte, in sola lettura (un'azione si può ancora chiudere);
+  il nome della persona arriva dalla vista `perim_note_person`.
 - `company`: configurazione aziendale (liste valori, catalogo benefit): una per l'istanza,
   la leggono tutti, la scrive solo la gestione aziendale (`app/routers/company.py`).
 - `instance`: utenti, audit, schema — solo connessione di sistema.
@@ -23,10 +27,10 @@ il director crea un team o una persona; i cambi fatti dall'admin (assegnazioni,
 trasferimenti) fanno salire `REV` e ogni connessione ricarica il perimetro alla richiesta dopo.
 
 **HR** (0.36): la connessione di sessione di HR vede tutto (viste senza filtro su team, persone,
-contenitori e figli) ma in sola lettura: l'authorizer nega ogni scrittura su `main`, niente
-guardie, niente perimetro da ricaricare. La configurazione (classe `owned`, `CONFIG` senza i
-cataloghi) è la sua, di default: le pagine che la leggono trovano una voce sola. Le scritture
-di HR, per tabella e colonna, arrivano nelle tappe successive (`HR_WRITABLE`).
+contenitori e figli) ma in sola lettura: l'authorizer nega ogni scrittura su `main` fuori da
+`HR_WRITABLE`, niente perimetro da ricaricare. La configurazione (classe `owned`, `CONFIG` senza i
+cataloghi) è la sua, di default: le pagine che la leggono trovano una voce sola. Dalla 0.37 HR ha
+note e azioni proprie (classe `authored`, con le stesse guardie dei director sull'autore).
 """
 from app import db
 
@@ -71,12 +75,16 @@ CHILD = {
 }
 TEAM = ["team"]
 PERSON = ["person", "person_assignment", "employment", "ral_event", "benefit_assignment", "incentive",
-          "ninebox_assessment", "attachment", "listino_person_param", "meeting_note", "action_item"]
+          "ninebox_assessment", "attachment", "listino_person_param"]
+# note e azioni: di chi le scrive (`author_user_id`); per le azioni, fuori perimetro si tocca solo lo stato
+AUTHORED = {"meeting_note": (), "action_item": ("status", "closed_date")}
 COMPANY = ["lookup", "benefit_type"]
 INSTANCE = ["app_meta", "app_user", "audit_event"]
 
 CLASSES = {"owned": list(OWNED), "child": list(CHILD), "team": TEAM, "person": PERSON,
-           "company": COMPANY, "instance": INSTANCE}
+           "authored": list(AUTHORED), "company": COMPANY, "instance": INSTANCE}
+# colonna del proprietario (NULL = da assegnare) nelle tabelle che ne hanno una
+OWNER_COL = {t: "author_user_id" for t in AUTHORED} | {t: "owner_user_id" for t in [*OWNED, *TEAM, "person"]}
 
 # configurazione: si copia dai default di fabbrica a ogni director nuovo
 CONFIG = ["ninebox_weight", "weight_mapping", "evaluation_model", "bonus_factor", "listino_profile", "user_meta"]
@@ -99,9 +107,9 @@ def scoped_meta(key: str) -> bool:
 # configurazione che HR legge come propria (di default); i cataloghi puntati per id dalle
 # righe di persona (codici listino) restano quelli dei director
 HR_OWN = [t for t in CONFIG if t not in CATALOG_REFS]
-# scritture consentite a HR: {tabella: {colonna, ...}} (vuoto = sola lettura; INSERT e DELETE
-# vogliono la tabella con "*"). Si riempie nelle tappe successive.
-HR_WRITABLE: dict[str, set] = {}
+# scritture consentite a HR: {tabella: {colonna, ...}} ("*" = tutte, anche INSERT e DELETE;
+# altrimenti solo UPDATE di quelle colonne). Le altre arrivano nelle tappe successive.
+HR_WRITABLE: dict[str, set] = {t: {"*"} for t in AUTHORED}
 
 
 # ---- viste e guardie sulla connessione di una sessione ----
@@ -169,6 +177,43 @@ def _guards_person(t: str) -> list[str]:
     return out
 
 
+def _guards_authored(conn, t: str, uid: int, in_person: str | None = IN_PERSON) -> list[str]:
+    """Note e azioni: solo le proprie, e nuove solo su persone del perimetro. Per una persona uscita
+    dal perimetro la nota è in sola lettura, l'azione cambia solo di stato (`AUTHORED[t]`).
+    HR (`in_person=None`) non ha perimetro di persone: contano solo le regole sull'autore."""
+    mine = f"NEW.author_user_id IS NOT {uid}"
+    ins = mine
+    upd_abort = mine
+    outside = ""
+    if in_person:
+        ins += f" OR NEW.person_id NOT {in_person}"
+        upd_abort += f" OR (NEW.person_id IS NOT OLD.person_id AND NEW.person_id NOT {in_person})"
+        cols = [c for c in _cols(conn, t) if c not in ("id", "author_user_id", *AUTHORED[t])]
+        changed = " OR ".join(f"NEW.{c} IS NOT OLD.{c}" for c in cols)
+        outside = f"SELECT RAISE(IGNORE) WHERE OLD.person_id NOT {in_person} AND ({changed}); "
+    return [
+        f"CREATE TEMP TRIGGER _p_{t}_ins BEFORE INSERT ON main.{t} BEGIN "
+        f"SELECT RAISE(ABORT, 'fuori perimetro: {t}') WHERE {ins}; END",
+        f"CREATE TEMP TRIGGER _p_{t}_upd BEFORE UPDATE ON main.{t} BEGIN "
+        f"SELECT RAISE(IGNORE) WHERE OLD.author_user_id IS NOT {uid}; {outside}"
+        f"SELECT RAISE(ABORT, 'fuori perimetro: {t}') WHERE {upd_abort}; END",
+        f"CREATE TEMP TRIGGER _p_{t}_del BEFORE DELETE ON main.{t} BEGIN "
+        f"SELECT RAISE(IGNORE) WHERE OLD.author_user_id IS NOT {uid}"
+        f"{f' OR OLD.person_id NOT {in_person}' if in_person else ''}; END",
+    ]
+
+
+def _authored_views(conn, uid: int, in_person: str | None) -> list[str]:
+    """Viste di note e azioni (solo le proprie) e `perim_note_person`: id e nome delle persone
+    fuori perimetro su cui l'utente ha note o azioni, perché la vista `person` non le mostra."""
+    stmts = [f"CREATE TEMP VIEW {t} AS SELECT {', '.join(_cols(conn, t))} FROM main.{t} "
+             f"WHERE author_user_id = {uid}" for t in AUTHORED]
+    mine = " UNION ".join(f"SELECT person_id FROM main.{t} WHERE author_user_id = {uid}" for t in AUTHORED)
+    where = f"id NOT {in_person} AND id IN ({mine})" if in_person else "0"
+    stmts.append(f"CREATE TEMP VIEW perim_note_person AS SELECT id, full_name FROM main.person WHERE {where}")
+    return stmts
+
+
 def _guards_team(uid: int) -> list[str]:
     bad_parent = f"(NEW.parent_team_id IS NOT NULL AND NEW.parent_team_id NOT {IN_TEAM})"
     bad_lead = f"(NEW.lead_person_id IS NOT NULL AND NEW.lead_person_id NOT {IN_PERSON})"
@@ -233,8 +278,9 @@ def authorizer(h, conn):
     passano solo per le colonne in `HR_WRITABLE`."""
     import sqlcipher3 as s
 
-    shielded = {*OWNED, *CHILD, *TEAM, *PERSON}
-    ours = shielded | {r[0] for r in conn.execute("SELECT name FROM temp.sqlite_master WHERE type='trigger'")}
+    shielded = {*OWNED, *CHILD, *TEAM, *PERSON, *AUTHORED}
+    ours = shielded | {"perim_note_person"} | {
+        r[0] for r in conn.execute("SELECT name FROM temp.sqlite_master WHERE type='trigger'")}
     fk = _fk_columns(conn)
     denied = {"app_user", "audit_event"}
     company = set(COMPANY)  # la legge il director, la scrive solo la gestione aziendale
@@ -276,6 +322,8 @@ def install(conn, uid: int, role: str = "director") -> None:
     stmts = _guards_team(uid)
     for t in PERSON:
         stmts += _guards_person(t)
+    for t in AUTHORED:
+        stmts += _guards_authored(conn, t, uid)
     for t, refs in OWNED.items():
         stmts += _guards_owned(t, uid, refs)
     for t, refs in CHILD.items():
@@ -296,16 +344,23 @@ def install(conn, uid: int, role: str = "director") -> None:
         if "person_id" in _cols(conn, t):
             visible += f" AND person_id {IN_PERSON}"
         stmts.append(f"CREATE TEMP VIEW {t} AS SELECT {', '.join(_cols(conn, t))} FROM main.{t} WHERE {visible}")
+    stmts += _authored_views(conn, uid, IN_PERSON)
     for sql in stmts:
         conn.execute(sql)
 
 
 def _install_hr(conn, uid: int) -> None:
-    """Viste di HR: tutto senza filtro, tranne la configurazione propria. Nessuna guardia: le
-    scritture le decide l'authorizer (`HR_WRITABLE`)."""
+    """Viste di HR: tutto senza filtro, tranne la configurazione propria e le note e azioni (le sue,
+    con le guardie sull'autore). Il resto delle scritture lo decide l'authorizer (`HR_WRITABLE`)."""
+    stmts = []
+    for t in AUTHORED:
+        stmts += _guards_authored(conn, t, uid, None)
     for t in [*TEAM, *PERSON, *OWNED, *CHILD]:
         where = f" WHERE owner_user_id = {uid}" if t in HR_OWN else ""
-        conn.execute(f"CREATE TEMP VIEW {t} AS SELECT {', '.join(_cols(conn, t))} FROM main.{t}{where}")
+        stmts.append(f"CREATE TEMP VIEW {t} AS SELECT {', '.join(_cols(conn, t))} FROM main.{t}{where}")
+    stmts += _authored_views(conn, uid, None)
+    for sql in stmts:
+        conn.execute(sql)
 
 
 # ---- configurazione di default ----
@@ -361,13 +416,15 @@ UNASSIGNED_GROUPS = [
     ("hiring_budget", "budget assunzioni", "budget assunzioni"),
     ("bonus_pool", "montepremi", "montepremi"),
     ("reorg_scenario", "simulazioni", "simulazioni"),
+    ("meeting_note", "note 1:1", "note"),
+    ("action_item", "azioni", "azioni"),
 ]
 
 
 def unassigned() -> dict:
     """Conteggi dei dati senza proprietario (mai nomi: l'admin non vede dati del personale)."""
     groups = [{"table": t, "label": label,
-               "n": db.sys.one(f"SELECT COUNT(*) AS n FROM {t} WHERE owner_user_id IS NULL")["n"]}
+               "n": db.sys.one(f"SELECT COUNT(*) AS n FROM {t} WHERE {OWNER_COL[t]} IS NULL")["n"]}
               for t, label, _ in UNASSIGNED_GROUPS]
     config = sum(db.sys.one(f"SELECT COUNT(*) AS n FROM {t} WHERE owner_user_id IS NULL")["n"] for t in CONFIG)
     data = sum(g["n"] for g in groups)
@@ -397,8 +454,8 @@ def assign_unassigned(uid: int) -> dict:
                 for ref_table, col in CATALOG_REFS.get(t, []):
                     c.execute(f"UPDATE {ref_table} SET {col}=? WHERE {col}=?", (inc, mine))
                 c.execute(f"DELETE FROM {t} WHERE id=?", (mine,))
-        for t in [*OWNED, *TEAM, "person"]:
-            counts[t] = c.execute(f"UPDATE {t} SET owner_user_id=? WHERE owner_user_id IS NULL", (uid,)).rowcount
+        for t, col in OWNER_COL.items():
+            counts[t] = c.execute(f"UPDATE {t} SET {col}=? WHERE {col} IS NULL", (uid,)).rowcount
     bump()
     return counts
 
@@ -406,8 +463,8 @@ def assign_unassigned(uid: int) -> dict:
 def disown_all() -> None:
     """Ripristino da un'altra istanza: i proprietari del file non esistono qui, tutto torna da assegnare."""
     with db.sys.transaction() as c:
-        for t in [*OWNED, *TEAM, "person"]:
-            c.execute(f"UPDATE {t} SET owner_user_id=NULL")
+        for t, col in OWNER_COL.items():
+            c.execute(f"UPDATE {t} SET {col}=NULL")
     bump()
 
 
@@ -437,7 +494,8 @@ def team_tree() -> list[dict]:
 
 def transfer_team(team_id: int, to_uid: int) -> dict:
     """Passa il team (e i sotto-team dello stesso titolare) a un altro director, con le persone e
-    tutto il loro storico. A chi cede non resta nulla di quelle persone: le righe nei suoi cicli
+    tutto il loro storico. A chi cede non resta nulla di quelle persone (salvo le sue note e azioni,
+    che restano sue in sola lettura): le righe nei suoi cicli
     passano a un ciclo del nuovo director con lo stesso nome e anno; quelle nei suoi budget e
     montepremi si staccano (le proposte pendenti si annullano); le sue posizioni aperte in quei
     team si annullano; le sue simulazioni li dimenticano. Nessuna quota o tetto si sposta."""

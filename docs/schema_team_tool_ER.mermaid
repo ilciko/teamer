@@ -207,6 +207,7 @@ erDiagram
         string type
         string title
         string body
+        int author_user_id FK
     }
     ACTION_ITEM {
         int id PK
@@ -215,6 +216,7 @@ erDiagram
         string description
         date due_date
         string status
+        int author_user_id FK
     }
     ATTACHMENT {
         int id PK

@@ -6,7 +6,7 @@ qui ne sta solo l'hash scrypt. Ruoli:
 - `admin`: site admin (IT). Utenti, audit, backup, aggiornamenti; nessun dato del personale.
 - `director`: vede e gestisce i suoi team (perimetri, `app.perimeter`).
 - `hr`: profilo aziendale trasversale, vede le persone di tutti i director (0.36: in sola
-  lettura; le scritture di HR arrivano nelle tappe successive, vedi docs/perimetri.md).
+  lettura; 0.37: note e azioni proprie; il resto arriva nelle tappe successive, docs/perimetri.md).
 
 Gli utenti si correggono in place e si disattivano, non si cancellano: l'audit punta a
 loro. `audit_event` è append-only.

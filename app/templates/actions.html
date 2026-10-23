@@ -13,13 +13,14 @@
     <thead><tr><th>Persona</th><th>Impegno</th><th>Scadenza</th><th>Stato</th><th></th></tr></thead>
     {% for a in actions %}
     <tr>
-      <td><a href="/people/{{ a.person_id }}">{{ a.full_name }}</a></td>
+      <td>{% if a.outside %}{{ a.full_name }} <span class="muted3 small">(altro director)</span>
+          {% else %}<a href="/people/{{ a.person_id }}">{{ a.full_name }}</a>{% endif %}</td>
       <td>{{ a.description }}</td>
       <td class="{{ 'neg' if a.due_date and a.due_date < today and a.status != 'chiuso' }}">{{ a.due_date | dt }}</td>
       <td><span class="badge {{ 'green' if a.status == 'chiuso' else 'amber' if a.status == 'in corso' else '' }}">{{ a.status }}</span></td>
       <td>
         {% if a.status != 'chiuso' %}
-        <form method="post" action="/actions/{{ a.id }}/status" style="display:inline">
+        <form method="post" action="/actions/{{ a.id }}/status" class="hr-ok" style="display:inline">
           {% if a.status == 'aperto' %}<button class="btn sm ghost" name="status" value="in corso">Avvia</button>{% endif %}
           <button class="btn sm green" name="status" value="chiuso">Chiudi</button>
         </form>
@@ -32,7 +33,7 @@
 
 <div class="card" style="max-width:620px">
   <div class="card-title">Nuova azione</div>
-  <form method="post" action="/actions">
+  <form method="post" action="/actions" class="hr-ok">
     <div class="frow">
       <div><label class="fld">Persona</label>
         <select name="person_id" required>{% for pp in people %}<option value="{{ pp.id }}">{{ pp.full_name }}</option>{% endfor %}</select></div>

@@ -2,7 +2,7 @@
    nessun hx-trigger qui dentro, così nessuno swap può distruggere il bottone
    di submit mentre lo si clicca (trappola nota, vedi CLAUDE.md). #}
 <div id="nota-{{ n.id }}" style="padding:8px 0;border-bottom:0.5px solid var(--border)">
-  <form method="post" action="/notes/{{ n.id }}">
+  <form method="post" action="/notes/{{ n.id }}" class="hr-ok">
     <input type="hidden" name="f_q" value="{{ f_q }}">
     <input type="hidden" name="f_person_id" value="{{ f_person_id or '' }}">
     <input type="hidden" name="f_archived" value="{{ f_archived or '' }}">
@@ -33,7 +33,7 @@
     </div>
     <p class="muted3 small">Sovrascrive questa nota. Per un altro incontro usa "Nuova nota".</p>
   </form>
-  <form method="post" action="/notes/{{ n.id }}/delete" style="margin-top:6px"
+  <form method="post" action="/notes/{{ n.id }}/delete" class="hr-ok" style="margin-top:6px"
         onsubmit="return confirm('Eliminare definitivamente questa nota?{% if linked %} Le {{ linked|length }} azioni collegate restano in elenco, scollegate.{% endif %}')">
     <input type="hidden" name="f_q" value="{{ f_q }}">
     <input type="hidden" name="f_person_id" value="{{ f_person_id or '' }}">

@@ -34,7 +34,9 @@ assegna una provvisoria (*Amministrazione → Utenti*, o `python -m app.admin_cl
   solo con questa chiave.
 - **Ruoli**: *Site admin* (IT: utenti, audit, backup, aggiornamenti; nessun dato del personale),
   *Director* (i suoi team e le loro persone) e *HR* (dalla 0.36: vede le persone di tutti i
-  director; per ora in sola lettura, le modifiche di HR arrivano nelle versioni successive).
+  director; scrive le sue note e azioni, il resto per ora in sola lettura: le altre modifiche di
+  HR arrivano nelle versioni successive). Note 1:1 e azioni sono di chi le scrive: nessuno legge
+  quelle degli altri.
   Password di almeno 12 caratteri, hash scrypt; dopo 5 errori l'utente è bloccato per qualche
   minuto (lo sblocca l'admin).
 - **Sessioni**: il DB resta aperto finché gira il servizio; ogni utente si blocca quando chiude la

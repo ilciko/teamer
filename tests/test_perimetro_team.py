@@ -129,12 +129,14 @@ def test_trasferimento_passa_persone_e_storico(org, client, client2, admin_clien
     assert "Logistica" not in html and "Magazzino" not in html and "Vendite" in html
     # chi riceve vede tutto
     seen = _visible("dir2", [org["luca"]])
-    for t in ("person", "person_assignment", "ral_event", "meeting_note", "goal", "performance_review",
+    for t in ("person", "person_assignment", "ral_event", "goal", "performance_review",
               "ninebox_assessment", "benefit_assignment", "bonus_allocation"):
         assert seen[t] >= 1, t
     html = client2.get(f"/people/{org['luca']}").text
     assert "Luca Logistica" in html and "Review 2026" in html
-    assert "Colloquio Luca" in client2.get("/notes?q=magazzino").text
+    # la nota resta a chi l'ha scritta (in sola lettura), non passa a chi riceve
+    assert "Colloquio Luca" not in client2.get("/notes?q=magazzino").text
+    assert "Colloquio Luca" in client.get("/notes?q=magazzino").text
     with as_user("dir2"):
         cyc = db.one("SELECT c.name, c.owner_user_id FROM goal g JOIN review_cycle c ON c.id=g.cycle_id "
                      "WHERE g.person_id=?", (org["luca"],))

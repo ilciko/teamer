@@ -7,7 +7,7 @@ blocca quando l'ultima pagina di quella sessione si chiude.
 
 Ruoli: l'admin (IT) vede solo il pannello `/admin` e il proprio account; il director
 tutto il resto; HR tutto il resto tranne dashboard, report, simulazioni, verifica dei
-riporti e configurazione, e in questa versione solo in lettura (`allowed`).
+riporti e configurazione, e scrive solo le sue note e azioni (`allowed`, `HR_WRITE_OK`).
 """
 from urllib.parse import quote
 
@@ -27,9 +27,9 @@ ADMIN_PREFIXES = ("/admin", "/account", "/lock")
 HOME = {"admin": "/admin", "director": "/", "hr": "/org"}
 # HR (0.36): niente dashboard, report, simulazioni, verifica riporti, configurazione
 HR_DENIED = ("/reports", "/org/sim", "/org/riporti", "/settings")
-# le sole scritture di HR in questa versione: il suo account, uscita, modalità pubblica e le
+# le scritture di HR: il suo account, uscita, modalità pubblica, le sue note e azioni (0.37) e le
 # anteprime htmx (`*/simulate`), che calcolano e basta
-HR_WRITE_OK = ("/lock", "/account", "/public-mode")
+HR_WRITE_OK = ("/lock", "/account", "/public-mode", "/notes", "/actions")
 
 
 def client_ip(request: Request) -> str | None:

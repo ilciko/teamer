@@ -1,4 +1,9 @@
-"""Note 1:1 (con ricerca full-text) e action item."""
+"""Note 1:1 (con ricerca per parole) e azioni.
+
+Sono di chi le scrive (classe `authored`, docs/perimetri.md): la vista mostra solo le proprie.
+Quando la persona esce dal perimetro la vista `person` non la mostra più: il nome arriva da
+`perim_note_person` e la nota resta in sola lettura (`outside`); un'azione si può ancora chiudere.
+"""
 from datetime import date
 from urllib.parse import urlencode
 
@@ -26,18 +31,24 @@ def _notes_url(q: str = "", person_id=None, anchor: int | None = None,
     return f"/notes?{urlencode(params)}" + (f"#nota-{anchor}" if anchor else "")
 
 
+# nome della persona anche se è uscita dal perimetro (`outside` = 1), per note e azioni
+_PERSON_NAME = ("COALESCE(p.full_name, np.full_name) AS full_name, p.id IS NULL AS outside")
+_PERSON_JOIN = ("LEFT JOIN person p ON p.id = {a}.person_id "
+                "LEFT JOIN perim_note_person np ON np.id = {a}.person_id")
+
+
 def _note(nid: int):
+    """Una nota propria di una persona ancora nel perimetro (le altre non si modificano)."""
     return db.one(
-        """SELECT mn.*, p.full_name FROM meeting_note mn
-           JOIN person p ON p.id = mn.person_id WHERE mn.id=?""", (nid,))
+        f"""SELECT mn.*, {_PERSON_NAME} FROM meeting_note mn {_PERSON_JOIN.format(a='mn')}
+            WHERE mn.id=? AND p.id IS NOT NULL""", (nid,))
 
 
 @router.get("/notes")
 def notes_list(request: Request, q: str = "", person_id: OptInt = None, archived: str = ""):
     """Le archiviate restano fuori (anche dalla ricerca) finché il toggle è spento."""
     params: list = []
-    sql = """SELECT mn.*, p.full_name FROM meeting_note mn
-             JOIN person p ON p.id = mn.person_id WHERE 1=1"""
+    sql = f"""SELECT mn.*, {_PERSON_NAME} FROM meeting_note mn {_PERSON_JOIN.format(a='mn')} WHERE 1=1"""
     # ricerca per parole: ognuna deve comparire nel titolo o nel testo (niente sintassi da imparare)
     for word in q.split():
         like = "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
@@ -49,10 +60,12 @@ def notes_list(request: Request, q: str = "", person_id: OptInt = None, archived
     if not archived:
         sql += " AND mn.archived_at IS NULL"
     sql += " ORDER BY mn.note_date DESC, mn.id DESC LIMIT 100"
-    notes = db.query(sql, tuple(params))
+    rows = db.query(sql, tuple(params))
+    notes = [n for n in rows if not n["outside"]]
     people = db.query("SELECT id, full_name FROM person ORDER BY full_name")
     return _templates().TemplateResponse(request, "notes.html", {
-        "notes": notes, "q": q, "person_id": person_id, "people": people,
+        "notes": notes, "outside_notes": [n for n in rows if n["outside"]],
+        "q": q, "person_id": person_id, "people": people,
         "archived": "1" if archived else "",
         "person_name": next((pp["full_name"] for pp in people if pp["id"] == person_id), None),
     })
@@ -62,8 +75,7 @@ def notes_list(request: Request, q: str = "", person_id: OptInt = None, archived
 def notes_report(request: Request, person_id: OptInt = None, archived: str = ""):
     """Report stampabile (→ PDF dal browser): globale o del singolo dipendente,
     dal più recente. Stessi filtri della lista, esclusa la ricerca full-text."""
-    sql = """SELECT mn.*, p.full_name FROM meeting_note mn
-             JOIN person p ON p.id = mn.person_id WHERE 1=1"""
+    sql = f"""SELECT mn.*, {_PERSON_NAME} FROM meeting_note mn {_PERSON_JOIN.format(a='mn')} WHERE 1=1"""
     params: list = []
     if person_id:
         sql += " AND mn.person_id=?"
@@ -71,7 +83,9 @@ def notes_report(request: Request, person_id: OptInt = None, archived: str = "")
     if not archived:
         sql += " AND mn.archived_at IS NULL"
     sql += " ORDER BY mn.note_date DESC, mn.id DESC"
-    person = db.one("SELECT id, full_name FROM person WHERE id=?", (person_id,)) if person_id else None
+    person = db.one("SELECT id, full_name FROM person WHERE id=? UNION ALL "
+                    "SELECT id, full_name FROM perim_note_person WHERE id=?", (person_id, person_id)) \
+        if person_id else None
     return _templates().TemplateResponse(request, "notes_report.html", {
         "notes": db.query(sql, tuple(params)), "person": person,
         "person_id": person_id, "archived": "1" if archived else "",
@@ -182,8 +196,7 @@ def note_delete(nid: int, f_q: str = Form(""), f_person_id: str = Form(""),
 def actions_list(request: Request, show: str = "aperte"):
     where = "WHERE a.status != 'chiuso'" if show == "aperte" else ""
     actions = db.query(
-        f"""SELECT a.*, p.full_name FROM action_item a
-            JOIN person p ON p.id = a.person_id {where}
+        f"""SELECT a.*, {_PERSON_NAME} FROM action_item a {_PERSON_JOIN.format(a='a')} {where}
             ORDER BY CASE WHEN a.due_date IS NULL THEN 1 ELSE 0 END, a.due_date""")
     people = db.query("SELECT id, full_name FROM person WHERE status='attivo' ORDER BY full_name")
     return _templates().TemplateResponse(request, "actions.html", {

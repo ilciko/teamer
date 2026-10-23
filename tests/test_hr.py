@@ -1,4 +1,5 @@
-"""Ruolo HR, tappa 1 (0.36): vede le persone di tutti i director, in sola lettura."""
+"""Ruolo HR, tappa 1 (0.36): vede le persone di tutti i director, in sola lettura (tappa 2, le sue
+note e azioni: tests/test_note_autore.py)."""
 import pytest
 
 from app import db, perimeter, users
@@ -72,7 +73,7 @@ def test_post_rifiutati_salvo_account_e_anteprime(client, client2, hr_client):
     t1, t2, p1, p2 = _seed(client, client2)
     for path, data in [("/people", {"full_name": "Nuova"}), ("/org/team", {"name": "X"}),
                        (f"/people/{p1}/ral", {"amount": "1", "effective_date": "2026-01-01", "change_type": "aumento"}),
-                       ("/notes", {"person_id": p1, "note_date": "2026-01-01", "body": "x"}),
+                       (f"/people/{p1}/assignment", {"team_id": t2, "role_type": "ic", "start_date": "2026-01-01"}),
                        ("/settings/general", {}), ("/admin/users", {}), ("/azienda/liste", {})]:
         assert hr_client.post(path, data=data).status_code == 403, path
     assert db.sys.one("SELECT COUNT(*) AS n FROM person")["n"] == 2
@@ -100,7 +101,7 @@ def test_connessione_di_hr_in_sola_lettura(client, client2, hr_client):
         with pytest.raises(db.sqlcipher.DatabaseError):
             db.execute("UPDATE person SET full_name='X' WHERE id=?", (p1,))
         with pytest.raises(db.sqlcipher.DatabaseError):
-            db.execute("DELETE FROM meeting_note")
+            db.execute("DELETE FROM ral_event")
         with pytest.raises(db.sqlcipher.DatabaseError):
             db.execute("INSERT INTO lookup (category, code, label) VALUES ('x', 'y', 'z')")
         # la configurazione è la sua, di default (una voce sola per chiave)
@@ -111,8 +112,8 @@ def test_connessione_di_hr_in_sola_lettura(client, client2, hr_client):
     assert db.sys.one("SELECT COUNT(*) AS n FROM team")["n"] == 2
 
 
-def test_whitelist_vuota_e_ruolo_nel_db(app_db):
-    assert perimeter.HR_WRITABLE == {}
+def test_whitelist_e_ruolo_nel_db(app_db):
+    assert set(perimeter.HR_WRITABLE) == set(perimeter.AUTHORED)   # 0.37: solo note e azioni
     assert "hr" in users.ROLES and "hr" in perimeter.SESSION_ROLES
     with pytest.raises(db.sqlcipher.IntegrityError):
         db.sys.execute("INSERT INTO app_user (username, role, password_hash) VALUES ('x', 'boh', 'h')")
