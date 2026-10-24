@@ -5,7 +5,7 @@ import pytest
 from app import db, perimeter, users
 from tests.conftest import PASSWORD, as_user, login
 
-PERSON_TABLES = [*perimeter.PERSON, *[t for t in perimeter.CHILD if t not in ("goal_review", "wellbeing_entry")]]
+PERSON_TABLES = [*perimeter.PERSON, *[t for t in perimeter.CHILD if t not in ("goal_review", "wellbeing_entry", "bonus_pool_approval")]]
 
 
 def _team(client, name, parent=None, lead=None):

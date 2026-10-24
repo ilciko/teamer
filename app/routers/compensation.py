@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app import db
+from app import db, perimeter, session, users
 from app.routers import hrview
 from app.params import OptInt
 from app.services import budget as budget_svc
@@ -911,16 +911,20 @@ def _role_factors() -> dict[str, float]:
 def bonus_list(request: Request):
     """HR (0.43) vede i suoi montepremi per ruolo e li crea qui; il director i suoi compositi."""
     ctx = hrview.context(request)
-    pools = []
-    for p in db.query("SELECT * FROM bonus_pool WHERE kind=? ORDER BY id DESC",
-                      ("ruolo" if ctx["hr"] else "composito",)):
+    pools, hr_pools = [], []
+    for p in db.query("SELECT * FROM bonus_pool ORDER BY id DESC"):
         allocs = db.query(
             "SELECT COALESCE(SUM(final_amount),0) AS t, COUNT(*) AS n FROM bonus_allocation "
             "WHERE pool_id=? AND voided=0 AND included=1", (p["id"],))[0]
-        pools.append({**dict(p), "allocated": allocs["t"], "n": allocs["n"]})
+        row = {**dict(p), "allocated": allocs["t"], "n": allocs["n"]}
+        if p["kind"] == "ruolo" and not ctx["hr"]:
+            row["approved"] = _my_approval(p["id"]) is not None   # il director: la sua parte (vista sulle sue persone)
+            hr_pools.append(row)
+        elif (p["kind"] == "ruolo") == ctx["hr"]:
+            pools.append(row)
     teams = db.query("SELECT id, name, owner_user_id FROM team WHERE archived_at IS NULL AND holding=0 ORDER BY name")
     return _templates().TemplateResponse(request, "bonus_list.html", {
-        **ctx, "pools": pools, "role_factors": _role_factors(), "year": date.today().year - 1,
+        **ctx, "pools": pools, "hr_pools": hr_pools, "role_factors": _role_factors(), "year": date.today().year - 1,
         "team_opts": [{"id": t["id"], "name": t["name"] + (f" · {ctx['directors'][t['owner_user_id']]}"
                                                            if ctx["directors"].get(t["owner_user_id"]) else "")}
                       for t in teams],
@@ -957,11 +961,12 @@ async def bonus_create(request: Request):
 
 def _platea_ruolo(pool) -> list[dict]:
     """Platea del premio di ruolo: persone attive nei team scelti (tutti se nessuno), in organico alla
-    data di riferimento, col ruolo prevalente nell'anno di competenza non fra quelli esclusi."""
+    data di riferimento, col ruolo prevalente nell'anno di competenza non fra quelli esclusi.
+    Si legge dalla connessione di sistema: il premio attraversa i perimetri dei director."""
     teams = json.loads(pool["teams"] or "[]")
     excluded = set(json.loads(pool["excluded_roles"] or "[]"))
     ref = str(pool["ref_date"] or f"{pool['competence_year']}-12-31")[:10]
-    rows = db.query(
+    rows = db.sys.query(
         """SELECT p.id, p.full_name, p.hire_date, pa.team_id, pa.role_type AS role_now,
                   COALESCE(t.owner_user_id, p.owner_user_id) AS director_id
            FROM person p
@@ -974,8 +979,8 @@ def _platea_ruolo(pool) -> list[dict]:
             continue
         if r["hire_date"] and str(r["hire_date"])[:10] > ref:
             continue
-        hist = db.query("SELECT role_type, start_date, end_date FROM person_assignment WHERE person_id=? AND voided=0",
-                        (r["id"],))
+        hist = db.sys.query("SELECT role_type, start_date, end_date FROM person_assignment WHERE person_id=? AND voided=0",
+                            (r["id"],))
         role = budget_svc.role_prevalente([dict(h) for h in hist], pool["competence_year"]) or r["role_now"]
         if role in excluded:
             continue
@@ -986,9 +991,10 @@ def _platea_ruolo(pool) -> list[dict]:
 def _generate_ruolo(pool) -> None:
     """Proposte del premio di ruolo: peso = moltiplicatore del ruolo usato (quello scelto sull'allocazione,
     altrimenti il prevalente dell'anno). Platea ricalcolata; chi ne esce resta escluso, chi era escluso
-    a mano resta escluso; i finali ritoccati a mano restano."""
+    a mano resta escluso; i finali ritoccati a mano restano. Scrive dalla connessione di sistema: il
+    pool è di HR ma lo tocca anche il director che cambia un ruolo delle sue persone."""
     factors = _role_factors()
-    existing = {a["person_id"]: a for a in db.query("SELECT * FROM bonus_allocation WHERE pool_id=?", (pool["id"],))}
+    existing = {a["person_id"]: a for a in db.sys.query("SELECT * FROM bonus_allocation WHERE pool_id=?", (pool["id"],))}
     platea = {r["id"]: r for r in _platea_ruolo(pool)}
     rows = {}
     for pid, r in platea.items():
@@ -998,11 +1004,11 @@ def _generate_ruolo(pool) -> None:
         rows[pid] = (r["role_proposed"], role, factors.get(role, 1.0), included)
     weights = {pid: f for pid, (_, _, f, inc) in rows.items() if inc}
     cap = pool["total_cap"]
-    if pool["per_head"]:
-        cap = round(pool["per_head"] * len(weights), 2)
-        db.execute("UPDATE bonus_pool SET total_cap=? WHERE id=?", (cap, pool["id"]))
-    proposals = budget_svc.bonus_proposals(cap, weights)
-    with db.transaction() as conn:
+    with db.sys.transaction() as conn:
+        if pool["per_head"]:
+            cap = round(pool["per_head"] * len(weights), 2)
+            conn.execute("UPDATE bonus_pool SET total_cap=? WHERE id=?", (cap, pool["id"]))
+        proposals = budget_svc.bonus_proposals(cap, weights)
         for pid, (proposed, role, f, inc) in rows.items():
             amount = proposals.get(pid, 0) if inc else 0
             prev = existing.get(pid)
@@ -1022,14 +1028,56 @@ def _generate_ruolo(pool) -> None:
                              (prev["id"],))
 
 
+def _my_approval(pool_id: int):
+    s = session.current()
+    return db.sys.one("SELECT * FROM bonus_pool_approval WHERE pool_id=? AND user_id=?", (pool_id, s.user_id)) if s else None
+
+
+@router.post("/comp/bonus/{pool_id}/send")
+def bonus_send(pool_id: int):
+    """HR invia il premio di ruolo ai director: ognuno vede le sue persone, può cambiare il ruolo e approva."""
+    pool = db.one("SELECT * FROM bonus_pool WHERE id=?", (pool_id,))
+    if pool and pool["kind"] == "ruolo" and pool["status"] == "bozza" and hrview.is_hr():
+        _generate_ruolo(pool)
+        db.sys.execute("UPDATE bonus_pool SET status='in_approvazione' WHERE id=?", (pool_id,))
+        perimeter.bump()   # ora lo vedono i director
+    return RedirectResponse(f"/comp/bonus/{pool_id}", status_code=302)
+
+
+@router.post("/comp/bonus/{pool_id}/recall")
+def bonus_recall(pool_id: int):
+    """HR richiama in bozza: le approvazioni date cadono, i director non lo vedono più."""
+    pool = db.one("SELECT * FROM bonus_pool WHERE id=?", (pool_id,))
+    if pool and pool["kind"] == "ruolo" and pool["status"] == "in_approvazione" and hrview.is_hr():
+        with db.sys.transaction() as conn:
+            conn.execute("DELETE FROM bonus_pool_approval WHERE pool_id=?", (pool_id,))
+            conn.execute("UPDATE bonus_pool SET status='bozza' WHERE id=?", (pool_id,))
+        perimeter.bump()
+    return RedirectResponse(f"/comp/bonus/{pool_id}", status_code=302)
+
+
+@router.post("/comp/bonus/{pool_id}/approve")
+def bonus_approve(pool_id: int, note: str = Form(None)):
+    """Il director approva la sua parte del premio di ruolo (una volta sola; HR può richiamare)."""
+    pool = db.one("SELECT * FROM bonus_pool WHERE id=?", (pool_id,))
+    s = session.current()
+    if pool and pool["kind"] == "ruolo" and pool["status"] == "in_approvazione" and s and s.role == "director":
+        db.sys.execute("INSERT OR IGNORE INTO bonus_pool_approval (pool_id, user_id, note) VALUES (?,?,?)",
+                       (pool_id, s.user_id, (note or "").strip() or None))
+    return RedirectResponse(f"/comp/bonus/{pool_id}", status_code=302)
+
+
 @router.post("/comp/bonus/{pool_id}/alloc/{aid}/role")
 def bonus_alloc_role(pool_id: int, aid: int, role_type: str = Form("")):
-    """Premio di ruolo (0.43): il ruolo usato per questa allocazione (vuoto = torna al prevalente)."""
+    """Premio di ruolo (0.43): il ruolo usato per questa allocazione (vuoto = torna al prevalente).
+    HR finché non è chiuso; il director, sulle sue persone, mentre è in approvazione e prima di approvare."""
     pool = db.one("SELECT * FROM bonus_pool WHERE id=?", (pool_id,))
-    if pool and pool["kind"] == "ruolo" and pool["status"] != "chiuso":
-        db.execute("UPDATE bonus_allocation SET role_type=? WHERE id=? AND pool_id=?",
-                   (role_type or None, aid, pool_id))
-        _generate_ruolo(pool)
+    alloc = db.one("SELECT id FROM bonus_allocation WHERE id=? AND pool_id=?", (aid, pool_id))   # la vista: solo le sue persone
+    if pool and alloc and pool["kind"] == "ruolo" and pool["status"] != "chiuso":
+        ok = hrview.is_hr() or (pool["status"] == "in_approvazione" and not _my_approval(pool_id))
+        if ok:
+            db.sys.execute("UPDATE bonus_allocation SET role_type=? WHERE id=?", (role_type or None, aid))
+            _generate_ruolo(pool)
     return RedirectResponse(f"/comp/bonus/{pool_id}", status_code=302)
 
 
@@ -1072,8 +1120,22 @@ def bonus_detail(request: Request, pool_id: int):
                      director=ctx["directors"].get(c.get("director_id")))
         allocs.sort(key=lambda a: (not a["included"], a["director"] or "", a["team_name"] or "", a["full_name"]))
     teams = {t["id"]: t["name"] for t in db.query("SELECT id, name FROM team")}
+    approvals, my_approval, can_edit_role = [], None, False
+    if pool["kind"] == "ruolo":
+        names = users.director_names()
+        done = {a["user_id"]: a for a in db.sys.query("SELECT * FROM bonus_pool_approval WHERE pool_id=?", (pool_id,))}
+        if ctx["hr"]:
+            # i director con persone incluse nel premio, e chi ha già approvato
+            dids = sorted({r["director_id"] for r in _platea_ruolo(pool) if r["director_id"]}
+                          | set(done), key=lambda d: names.get(d, ""))
+            approvals = [{"id": d, "name": names.get(d, f"#{d}"), "approval": done.get(d)} for d in dids]
+            can_edit_role = pool["status"] != "chiuso"
+        else:
+            my_approval = _my_approval(pool_id)
+            can_edit_role = pool["status"] == "in_approvazione" and my_approval is None
     return _templates().TemplateResponse(request, "bonus_detail.html", {
         **ctx, "pool": pool, "allocs": allocs, "residual": residual, "role_factors": _role_factors(),
+        "approvals": approvals, "my_approval": my_approval, "can_edit_role": can_edit_role,
         "pool_teams": [teams.get(t, f"#{t}") for t in json.loads(pool["teams"] or "[]")],
         "pool_excluded_roles": json.loads(pool["excluded_roles"] or "[]"),
     })

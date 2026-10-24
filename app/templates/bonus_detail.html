@@ -3,13 +3,30 @@
 {% block content %}
 <div class="page-head">
   <h1>Montepremi {{ pool.period }}</h1>
-  <span class="badge {{ 'green' if pool.status == 'chiuso' else 'amber' }}">{{ pool.status }}</span>
+  <span class="badge {{ 'green' if pool.status == 'chiuso' else 'amber' }}">{{ 'in approvazione' if pool.status == 'in_approvazione' else pool.status }}</span>
   {% if pool.kind == 'ruolo' %}<span class="badge">per ruolo · competenza {{ pool.competence_year }}</span>{% endif %}
   <div class="spacer"></div>
   <div id="residual-box">{% include "_bonus_residual.html" %}</div>
 </div>
 
-{% if pool.status != 'chiuso' %}
+{% if pool.kind == 'ruolo' and not hr %}
+{# il director: la sua parte del premio di HR #}
+<div class="card" style="border-left:3px solid var(--{{ 'green' if my_approval else 'amber' }}-border)">
+  {% if pool.status == 'chiuso' %}
+  <p class="small" style="margin:0">Premio chiuso da HR: qui vedi gli importi finali delle tue persone.</p>
+  {% elif my_approval %}
+  <p class="small" style="margin:0"><span class="badge green">approvato da te</span> il {{ my_approval.approved_at | dt }}{% if my_approval.note %} — {{ my_approval.note }}{% endif %}. Se serve una modifica, chiedi a HR di richiamare il premio.</p>
+  {% else %}
+  <form method="post" action="/comp/bonus/{{ pool.id }}/approve" class="frow" style="align-items:end" onsubmit="return confirm('Approvare la tua parte del premio? Dopo non potrai più cambiare i ruoli.')">
+    <div style="flex:2"><label class="fld">Nota per HR (facoltativa)</label><input type="text" name="note" placeholder="es. ok, con Rossi passato a team leader"></div>
+    <div><button class="btn green">Approva la mia parte →</button></div>
+  </form>
+  <p class="muted3 small" style="margin-top:6px">Prima di approvare puoi cambiare il ruolo con cui ciascuna delle tue persone entra nel premio (il moltiplicatore segue). Gli importi si ripartiscono su tutta la platea: cambiano anche per gli altri director.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if pool.status != 'chiuso' and (hr or pool.kind != 'ruolo') %}
 <div class="grid2">
   <div class="card">
     <div class="card-title">Dati del montepremi</div>
@@ -39,6 +56,25 @@
       <a class="small" href="/azienda?tab=premi">modifica →</a>
     </p>
     <p class="muted3 small" style="margin-top:6px">Il ruolo proposto è quello prevalente nel {{ pool.competence_year }}; «Rigenera» riapplica platea e moltiplicatori, tenendo i ruoli e i finali che hai cambiato a mano.</p>
+    <div class="card-title" style="margin-top:10px">Approvazione dei director</div>
+    {% if pool.status == 'bozza' %}
+    <p class="small" style="margin:0 0 6px">In bozza il premio lo vedi solo tu. Con «Invia ai director» ognuno vede le sue persone, può cambiare il ruolo con cui entrano e approva la sua parte.</p>
+    <form method="post" action="/comp/bonus/{{ pool.id }}/send" class="hr-ok" onsubmit="return confirm('Inviare il premio ai director? Lo vedranno e potranno approvare la loro parte.')">
+      <button class="btn sm">Invia ai director →</button>
+    </form>
+    {% else %}
+    {% for d in approvals %}
+    <div class="small" style="margin-bottom:3px">
+      {% if d.approval %}<span class="badge green">approvato</span> <strong>{{ d.name }}</strong> <span class="muted3">{{ d.approval.approved_at | dt }}{% if d.approval.note %} — {{ d.approval.note }}{% endif %}</span>
+      {% else %}<span class="badge amber">in attesa</span> <strong>{{ d.name }}</strong>{% endif %}
+    </div>
+    {% else %}<p class="muted small">Nessun director con persone nel premio.</p>{% endfor %}
+    {% if pool.status == 'in_approvazione' %}
+    <form method="post" action="/comp/bonus/{{ pool.id }}/recall" class="hr-ok" style="margin-top:6px" onsubmit="return confirm('Richiamare il premio in bozza? Le approvazioni date cadono e i director non lo vedono più.')">
+      <button class="btn sm ghost">↩ Richiama in bozza</button>
+    </form>
+    {% endif %}
+    {% endif %}
   </div>
   {% else %}
   <div class="card">
@@ -100,7 +136,7 @@
       <td class="muted">{{ lookup_label('role_type', a.role_now) if a.role_now else '—' }}</td>
       <td>{{ lookup_label('role_type', a.role_proposed) if a.role_proposed else '—' }}</td>
       <td>
-        {% if pool.status != 'chiuso' and a.included %}
+        {% if can_edit_role and a.included %}
         <form method="post" action="/comp/bonus/{{ pool.id }}/alloc/{{ a.id }}/role" class="hr-ok">
           <select name="role_type" onchange="this.form.submit()" aria-label="Ruolo per il premio di {{ a.full_name }}">
             {% for r in lookups('role_type') %}<option value="{{ r.code }}" {{ 'selected' if r.code == a.role_type }}>{{ r.label }}{{ ' (proposto)' if r.code == a.role_proposed }}</option>{% endfor %}
@@ -111,27 +147,30 @@
       <td class="num"><strong>{{ '%g' % a.weight if a.included else '—' }}</strong></td>
       <td class="num muted">{{ a.proposed_amount | eur }}</td>
       <td class="num">
+        {% if hr %}
         <form hx-post="/comp/bonus/{{ pool.id }}/alloc/{{ a.id }}" hx-target="#residual-box" hx-trigger="change" class="hr-ok">
           <input type="number" name="final_amount" value="{{ a.final_amount or 0 }}" step="0.01" style="text-align:right"
                  {{ 'disabled' if pool.status == 'chiuso' or not a.included }}>
         </form>
+        {% else %}<strong>{{ a.final_amount | eur if a.included else '—' }}</strong>{% endif %}
       </td>
       <td class="muted small">{{ a.note or '' }}</td>
       {% if pool.status != 'chiuso' %}
-      <td><form method="post" action="/comp/bonus/{{ pool.id }}/alloc/{{ a.id }}/toggle" class="hr-ok">
-        <button class="btn sm ghost">{{ 'Escludi' if a.included else 'Includi' }}</button></form></td>
+      <td>{% if hr %}<form method="post" action="/comp/bonus/{{ pool.id }}/alloc/{{ a.id }}/toggle" class="hr-ok">
+        <button class="btn sm ghost">{{ 'Escludi' if a.included else 'Includi' }}</button></form>{% endif %}</td>
       {% endif %}
     </tr>
     {% endfor %}
   </table>
   </div>
+  {% if hr %}
   <div class="actions">
     {% if pool.status != 'chiuso' %}
     <form method="post" action="/comp/bonus/{{ pool.id }}/generate" class="hr-ok"
           onsubmit="return confirm('Rigenerare le proposte da platea e moltiplicatori? Ruoli e finali cambiati a mano restano.')">
       <button class="btn ghost sm">Rigenera proposte</button>
     </form>
-    <form method="post" action="/comp/bonus/{{ pool.id }}/close" class="hr-ok" onsubmit="return confirm('Chiudere il montepremi?')">
+    <form method="post" action="/comp/bonus/{{ pool.id }}/close" class="hr-ok" onsubmit="return confirm('Chiudere il montepremi? {% if approvals | rejectattr('approval') | list %}Non tutti i director hanno approvato. {% endif %}')">
       <button class="btn green sm">Chiudi montepremi</button>
     </form>
     {% else %}
@@ -140,6 +179,7 @@
     </form>
     {% endif %}
   </div>
+  {% endif %}
   {% else %}
   <div style="overflow-x:auto">
   <table class="tbl">

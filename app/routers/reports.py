@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
-from app import db
+from app import db, session
 from app.params import OptInt
 from app.routers import hrview
 from app.services import org_tree as org_svc
@@ -233,6 +233,13 @@ def _processes() -> list[dict]:
         out.append({"kind": "Piano aumenti", "title": "Senza budget",
                     "detail": f"{orphan['n']} proposte pendenti", "url": "/comp/plan",
                     "attention": False})
+    # premi di ruolo di HR in attesa della mia approvazione (0.46)
+    me = session.current()
+    for p in db.query("SELECT id, period, competence_year FROM bonus_pool WHERE kind='ruolo' AND status='in_approvazione' ORDER BY id DESC"):
+        if me and not db.sys.one("SELECT 1 FROM bonus_pool_approval WHERE pool_id=? AND user_id=?", (p["id"], me.user_id)):
+            out.append({"kind": "Premio di ruolo", "title": p["period"],
+                        "detail": f"competenza {p['competence_year']}: da approvare la tua parte",
+                        "url": f"/comp/bonus/{p['id']}", "attention": True})
     for c in db.query("SELECT * FROM review_cycle WHERE status='aperto' ORDER BY year DESC"):
         n = db.one(
             """SELECT

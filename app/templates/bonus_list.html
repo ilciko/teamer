@@ -24,6 +24,26 @@
   </table>
 </div>
 
+{% if hr_pools %}
+<div class="card">
+  <div class="card-title">Premi di ruolo di HR — le tue persone</div>
+  <table class="tbl">
+    <thead><tr><th>Periodo</th><th>Stato</th><th class="num">Tue persone</th><th class="num">Allocato a loro</th><th></th></tr></thead>
+    {% for p in hr_pools %}
+    <tr>
+      <td><strong>{{ p.period }}</strong> <span class="badge">competenza {{ p.competence_year }}</span></td>
+      <td>{% if p.status == 'in_approvazione' %}{% if p.approved %}<span class="badge green">approvato da te</span>{% else %}<span class="badge amber">da approvare</span>{% endif %}
+          {% else %}<span class="badge green">{{ p.status }}</span>{% endif %}</td>
+      <td class="num">{{ p.n }}</td>
+      <td class="num">{{ p.allocated | eur }}</td>
+      <td><a class="btn sm {{ 'ghost' if p.approved or p.status != 'in_approvazione' }}" href="/comp/bonus/{{ p.id }}">{{ 'Approva →' if p.status == 'in_approvazione' and not p.approved else 'Apri' }}</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted3 small" style="margin-top:6px">HR prepara il premio per ruolo su tutta l'azienda; tu vedi le tue persone, puoi cambiare il ruolo con cui una persona entra nel premio e approvi la tua parte. Chiude HR.</p>
+</div>
+{% endif %}
+
 <div class="card" style="max-width:{{ '720px' if hr else '520px' }}">
   <div class="card-title">Nuovo montepremi{% if hr %} per ruolo{% endif %}</div>
   <form method="post" action="/comp/bonus" class="hr-ok">

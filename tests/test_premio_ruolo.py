@@ -90,4 +90,58 @@ def test_ruolo_per_allocazione_finale_ed_esclusione(client, client2, hr_client):
     assert db.sys.one("SELECT role_type, weight FROM bonus_allocation WHERE id=?", (anna["id"],))["role_type"] == "ic"
     hr_client.post(f"/comp/bonus/{pid}/close", data={})
     assert "Riapri" in hr_client.get(f"/comp/bonus/{pid}").text
-    assert client.get(f"/comp/bonus/{pid}", follow_redirects=False).status_code == 302   # non suo: la vista non lo mostra
+    html = client.get(f"/comp/bonus/{pid}").text                                           # chiuso: il director lo legge (0.46)
+    assert "Premio chiuso da HR" in html and "Anna Alfa" in html and "Bruno Beta" not in html
+
+
+def test_invio_ai_director_approvazione_e_richiamo(client, client2, hr_client):
+    """0.46: in bozza lo vede solo HR; inviato, ogni director vede le sue persone, cambia un ruolo e approva."""
+    t1, t2, ids, coo, dir2 = _seed(client, client2)
+    pid = _pool(hr_client)
+    assert "Premi di ruolo di HR" not in client.get("/comp/bonus").text
+    assert client.get(f"/comp/bonus/{pid}", follow_redirects=False).status_code == 302        # bozza: invisibile
+    html = hr_client.get(f"/comp/bonus/{pid}").text
+    assert "Invia ai director" in html and "in attesa" not in html
+    hr_client.post(f"/comp/bonus/{pid}/send", data={})
+    assert db.sys.one("SELECT status FROM bonus_pool WHERE id=?", (pid,))["status"] == "in_approvazione"
+    html = hr_client.get(f"/comp/bonus/{pid}").text
+    assert html.count("in attesa") == 2 and "Richiama in bozza" in html                       # coo e dir2
+    # coo: lista, dashboard, dettaglio con le sue persone sole
+    assert "Premi di ruolo di HR" in client.get("/comp/bonus").text and "da approvare" in client.get("/comp/bonus").text
+    assert "Premio di ruolo" in client.get("/").text and "da approvare la tua parte" in client.get("/").text
+    html = client.get(f"/comp/bonus/{pid}").text
+    assert "Anna Alfa" in html and "Aldo Alfa" in html and "Bruno Beta" not in html
+    assert "Approva la mia parte" in html and "Dati del montepremi" not in html and "Chiudi montepremi" not in html
+    anna = db.sys.one("SELECT * FROM bonus_allocation WHERE pool_id=? AND person_id=?", (pid, ids["Anna Alfa"]))
+    bruno = db.sys.one("SELECT * FROM bonus_allocation WHERE pool_id=? AND person_id=?", (pid, ids["Bruno Beta"]))
+    # coo cambia il ruolo di Anna (peso 2): gli importi si ricalcolano su tutta la platea
+    client.post(f"/comp/bonus/{pid}/alloc/{anna['id']}/role", data={"role_type": "tl"})
+    row = db.sys.one("SELECT role_type, weight, proposed_amount FROM bonus_allocation WHERE id=?", (anna["id"],))
+    assert row["role_type"] == "tl" and row["weight"] == 2.0 and row["proposed_amount"] == 4000     # 10.000 × 2/5
+    # coo non tocca le persone di dir2, né il pool
+    client.post(f"/comp/bonus/{pid}/alloc/{bruno['id']}/role", data={"role_type": "mgr"})
+    assert db.sys.one("SELECT role_type FROM bonus_allocation WHERE id=?", (bruno["id"],))["role_type"] == "ic"
+    client.post(f"/comp/bonus/{pid}/close", data={})
+    client.post(f"/comp/bonus/{pid}/update", data={"period": "Hackerato", "total_cap": "1"})
+    p = db.sys.one("SELECT status, period FROM bonus_pool WHERE id=?", (pid,))
+    assert p["status"] == "in_approvazione" and p["period"] == "Premio HR 2026"
+    with as_user("coo"):
+        assert db.one("SELECT COUNT(*) AS n FROM bonus_allocation WHERE pool_id=?", (pid,))["n"] == 2   # solo le sue
+    # approva: da lì niente più cambi di ruolo; HR lo vede
+    client.post(f"/comp/bonus/{pid}/approve", data={"note": "ok così"})
+    assert db.sys.one("SELECT user_id, note FROM bonus_pool_approval WHERE pool_id=?", (pid,))["user_id"] == coo
+    client.post(f"/comp/bonus/{pid}/alloc/{anna['id']}/role", data={"role_type": "mgr"})
+    assert db.sys.one("SELECT role_type FROM bonus_allocation WHERE id=?", (anna["id"],))["role_type"] == "tl"
+    html = client.get(f"/comp/bonus/{pid}").text
+    assert "approvato da te" in html and "Approva la mia parte" not in html
+    assert "Premio di ruolo" not in client.get("/").text
+    html = hr_client.get(f"/comp/bonus/{pid}").text
+    assert "ok così" in html and html.count("in attesa") == 1
+    # HR richiama: approvazioni via, i director non lo vedono più; poi re-invia e chiude
+    hr_client.post(f"/comp/bonus/{pid}/recall", data={})
+    assert db.sys.one("SELECT COUNT(*) AS n FROM bonus_pool_approval WHERE pool_id=?", (pid,))["n"] == 0
+    assert client.get(f"/comp/bonus/{pid}", follow_redirects=False).status_code == 302
+    hr_client.post(f"/comp/bonus/{pid}/send", data={})
+    hr_client.post(f"/comp/bonus/{pid}/close", data={})
+    html = client2.get(f"/comp/bonus/{pid}").text
+    assert "Bruno Beta" in html and "Premio chiuso da HR" in html and "Anna Alfa" not in html

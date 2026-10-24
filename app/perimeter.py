@@ -72,7 +72,11 @@ CHILD = {
     "ral_proposal": [("budget_id", "ral_budget")],
     "ral_budget_member": [("budget_id", "ral_budget")],
     "bonus_allocation": [("pool_id", "bonus_pool")],
+    "bonus_pool_approval": [("pool_id", "bonus_pool")],
 }
+# contenitori altrui che un director vede comunque (0.46): il premio di ruolo di HR, una volta inviato
+# ai director; le righe di persona che ne dipendono (allocazioni) restano filtrate sul suo perimetro
+OWNED_SHARED = {"bonus_pool": "(x.kind = 'ruolo' AND x.status != 'bozza')"}
 TEAM = ["team"]
 PERSON = ["person", "person_assignment", "employment", "ral_event", "benefit_assignment", "incentive",
           "ninebox_assessment", "attachment", "listino_person_param", "replacement_decision"]
@@ -340,14 +344,20 @@ def install(conn, uid: int, role: str = "director") -> None:
         if "person_id" in _cols(conn, t):
             stmts.append(f"CREATE TEMP TRIGGER _p_{t}_pins BEFORE INSERT ON main.{t} BEGIN "
                          f"SELECT RAISE(ABORT, 'fuori perimetro: {t}') WHERE NEW.person_id NOT {IN_PERSON}; END")
+            # in un contenitore condiviso (premio di ruolo) le righe delle persone altrui non si toccano
+            stmts.append(f"CREATE TEMP TRIGGER _p_{t}_pupd BEFORE UPDATE ON main.{t} BEGIN "
+                         f"SELECT RAISE(IGNORE) WHERE OLD.person_id NOT {IN_PERSON}; END")
+            stmts.append(f"CREATE TEMP TRIGGER _p_{t}_pdel BEFORE DELETE ON main.{t} BEGIN "
+                         f"SELECT RAISE(IGNORE) WHERE OLD.person_id NOT {IN_PERSON}; END")
     stmts.append(f"CREATE TEMP VIEW team AS SELECT {', '.join(_cols(conn, 'team'))} FROM main.team WHERE id {IN_TEAM}")
     for t in PERSON:
         col = "id" if t == "person" else "person_id"
         stmts.append(f"CREATE TEMP VIEW {t} AS SELECT {', '.join(_cols(conn, t))} FROM main.{t} WHERE {col} {IN_PERSON}")
     for t, refs in OWNED.items():
         hidden = _hidden("x", refs)
+        mine = f"x.owner_user_id = {uid}" + (f" OR {OWNED_SHARED[t]}" if t in OWNED_SHARED else "")
         stmts.append(f"CREATE TEMP VIEW {t} AS SELECT {', '.join('x.' + c for c in _cols(conn, t))} FROM main.{t} x "
-                     f"WHERE x.owner_user_id = {uid} AND NOT ({hidden})")
+                     f"WHERE ({mine}) AND NOT ({hidden})")
     for t, refs in CHILD.items():
         visible = " AND ".join(f"({col} IS NULL OR {col} IN (SELECT id FROM {parent}))" for col, parent in refs)
         if "person_id" in _cols(conn, t):

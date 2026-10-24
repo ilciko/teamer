@@ -410,6 +410,10 @@ Una riga per `role_type` (default ic 1, tl 2, mgr 3, sr 4), gestita da HR in Azi
 dalla 0036 ha `kind` (`composito` | `ruolo`), `competence_year`, `ref_date`, `teams` e `excluded_roles` (JSON);
 `bonus_allocation` ha `role_proposed` (prevalente nell'anno) e `role_type` (usato per il premio).
 
+### `bonus_pool_approval` — approvazione del premio di ruolo per director *(0037)*
+
+Una riga per (pool, director): `approved_at`, `note`. Il pool «ruolo» passa bozza → `in_approvazione` → chiuso.
+
 ### `bonus_allocation` — distribuzione premio per persona
 | Campo | Tipo | Note |
 |---|---|---|
