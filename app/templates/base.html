@@ -35,11 +35,11 @@
       {# il site admin non vede i dati del personale: solo il suo pannello #}
       <a class="nav-link {{ 'active' if path.startswith('/admin') }}" href="/admin">Amministrazione</a>
       {% elif me %}
-      {% if not pub and not hr_nav %}
+      {% if not pub %}
       <a class="nav-link {{ 'active' if path == '/' }}" href="/">Dashboard</a>
-      <a class="nav-link {{ 'active' if path.startswith('/reports') }}" href="/reports">Report</a>
+      {% if not hr_nav %}<a class="nav-link {{ 'active' if path.startswith('/reports') }}" href="/reports">Report</a>{% endif %}
       {% endif %}
-      {# HR (0.36): niente dashboard né report; in Sistema ha Azienda (0.41) al posto della Configurazione #}
+      {# HR: niente report; dashboard sua (0.42); in Sistema ha Azienda (0.41) al posto della Configurazione #}
       {% for title, links in nav_groups %}
       {% set visible = links | rejectattr(3) | list if pub else links %}
       {% if visible %}

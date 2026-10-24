@@ -6,6 +6,7 @@ from fastapi.responses import RedirectResponse
 
 from app import db
 from app.params import OptInt
+from app.routers import hrview
 from app.services import org_tree as org_svc
 from app.services import trends
 
@@ -152,6 +153,56 @@ async def reports_exclusions(request: Request):
     return RedirectResponse(dest, status_code=302)
 
 
+def _dashboard_hr(request: Request, today: str, horizon: str):
+    """Dashboard di HR (0.42): le sue azioni in scadenza, i contratti a termine in scadenza di tutti
+    i director, le proposte del piano aumenti arrivate da validare, le cessazioni e le persone che
+    aspettano un director."""
+    ctx = hrview.context(request)
+    directors = ctx["directors"]
+    director_of = "COALESCE(t.owner_user_id, p.owner_user_id)"
+    person_join = """LEFT JOIN person_assignment pa ON pa.person_id = p.id AND pa.voided = 0 AND pa.end_date IS NULL
+                     LEFT JOIN team t ON t.id = pa.team_id"""
+    def with_director(rows):
+        return [{**dict(r), "director": directors.get(r["director_id"])} for r in rows]
+    expiring_contracts = with_director(db.query(
+        f"""SELECT e.*, p.full_name, {director_of} AS director_id FROM employment e
+            JOIN person p ON p.id = e.person_id {person_join}
+            WHERE e.voided = 0 AND p.status = 'attivo' AND e.end_date IS NOT NULL AND e.end_date BETWEEN ? AND ?
+            ORDER BY e.end_date""", (today, horizon)))
+    overdue_actions = db.query(
+        """SELECT a.*, p.full_name FROM action_item a JOIN person p ON p.id = a.person_id
+           WHERE a.status != 'chiuso' AND a.due_date IS NOT NULL AND a.due_date < ? ORDER BY a.due_date""", (today,))
+    upcoming_actions = db.query(
+        """SELECT a.*, p.full_name FROM action_item a JOIN person p ON p.id = a.person_id
+           WHERE a.status != 'chiuso' AND a.due_date IS NOT NULL AND a.due_date BETWEEN ? AND ?
+           ORDER BY a.due_date LIMIT 10""", (today, horizon))
+    proposals = with_director(db.query(
+        f"""SELECT COALESCE(b.owner_user_id, {director_of}) AS director_id, COUNT(*) AS n,
+                   COALESCE(SUM(pr.amount), 0) AS delta, MIN(pr.proposed_at) AS since
+            FROM ral_proposal pr JOIN person p ON p.id = pr.person_id
+            LEFT JOIN ral_budget b ON b.id = pr.budget_id {person_join}
+            WHERE pr.voided = 0 AND pr.status = 'proposta'
+            GROUP BY 1 ORDER BY since"""))
+    da_decidere = with_director(db.query(
+        f"""SELECT p.id, p.full_name, p.end_date, {director_of} AS director_id FROM person p {person_join}
+            WHERE p.status = 'cessato' AND p.end_date >= ?
+              AND NOT EXISTS (SELECT 1 FROM hiring_position hp WHERE hp.replaces_person_id = p.id AND hp.voided = 0)
+              AND NOT EXISTS (SELECT 1 FROM replacement_decision d WHERE d.person_id = p.id AND d.voided = 0)
+            ORDER BY p.end_date DESC""", ((date.today() - timedelta(days=365)).isoformat(),)))
+    da_collocare = with_director(db.query(
+        f"""SELECT p.id, p.full_name, pa.start_date, t.owner_user_id AS director_id FROM person p
+            JOIN person_assignment pa ON pa.person_id = p.id AND pa.voided = 0 AND pa.end_date IS NULL
+            JOIN team t ON t.id = pa.team_id WHERE p.status = 'attivo' AND t.holding = 1 ORDER BY pa.start_date"""))
+    headcount = db.one("SELECT COUNT(*) AS n FROM person WHERE status='attivo'")["n"]
+    return _templates().TemplateResponse(request, "dashboard_hr.html", {
+        **ctx, "headcount": headcount, "n_directors": len(directors),
+        "expiring_contracts": expiring_contracts, "overdue_actions": overdue_actions,
+        "upcoming_actions": upcoming_actions, "proposals": proposals,
+        "n_proposals": sum(r["n"] for r in proposals), "delta_proposals": sum(r["delta"] for r in proposals),
+        "da_decidere": da_decidere, "da_collocare": da_collocare,
+    })
+
+
 def _processes() -> list[dict]:
     """Processi aperti da mostrare in dashboard, con avanzamento e link."""
     out = []
@@ -211,6 +262,8 @@ def _processes() -> list[dict]:
 def dashboard(request: Request):
     today = date.today().isoformat()
     horizon = (date.today() + timedelta(days=90)).isoformat()
+    if hrview.is_hr():
+        return _dashboard_hr(request, today, horizon)
 
     headcount = db.one("SELECT COUNT(*) AS n FROM person WHERE status='attivo'")["n"]
     ral = db.one(

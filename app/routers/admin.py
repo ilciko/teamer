@@ -58,9 +58,6 @@ def admin_page(request: Request, tab: str = "users", saved: str = "", err: str =
         ctx["now"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ctx["unassigned"] = perimeter.unassigned()
         ctx["directors"] = [u for u in rows if u["role"] == "director" and u["active"]]
-    elif tab == "teams":
-        ctx["teams"] = perimeter.team_tree()
-        ctx["directors"] = [u for u in users.all_users() if u["role"] == "director" and u["active"]]
     elif tab == "audit":
         page = max(page, 1)
         rows, total = _audit_rows(user, event, date_from, date_to, page)

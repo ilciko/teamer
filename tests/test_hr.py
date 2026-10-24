@@ -9,7 +9,7 @@ from tests.conftest import PASSWORD, as_user, login
 HR_PAGES = ["/people", "/people?show=tutti", "/org", "/org/chart", "/comp/hiring", "/comp/salary",
             "/comp/plan", "/comp/plan/report", "/comp/budget", "/comp/bonus", "/comp/listino",
             "/ninebox", "/cycles", "/notes", "/notes/report", "/actions", "/account", "/azienda", "/azienda?tab=listino"]
-HR_DENIED = ["/", "/reports", "/org/sim", "/org/riporti", "/settings", "/admin"]
+HR_DENIED = ["/reports", "/org/sim", "/org/riporti", "/settings", "/admin"]
 
 
 def _seed(client, client2):
@@ -61,11 +61,42 @@ def test_scheda_persona_e_team_senza_errori(client, client2, hr_client):
 
 @pytest.mark.parametrize("path", HR_DENIED)
 def test_pagine_fuori_dal_ruolo(hr_client, path):
-    r = hr_client.get(path, follow_redirects=False)
-    if path == "/":
-        assert r.status_code == 302 and r.headers["location"] == "/org"   # niente dashboard: casa è l'organigramma
-    else:
-        assert r.status_code == 403, path
+    assert hr_client.get(path, follow_redirects=False).status_code == 403, path
+
+
+def test_dashboard_di_hr(client, client2, hr_client):
+    """0.42: le sue azioni, i contratti a termine di tutti, le proposte arrivate da validare."""
+    t1, t2, p1, p2 = _seed(client, client2)
+    with as_user("hr1"):
+        db.execute("INSERT INTO action_item (person_id, description, due_date) VALUES (?, 'azione di HR', '2020-01-01')", (p2,))
+    with as_user("coo"):
+        db.execute("INSERT INTO action_item (person_id, description, due_date) VALUES (?, 'azione del coo', '2020-01-01')", (p1,))
+    from datetime import date, timedelta
+
+    fine = (date.today() + timedelta(days=30)).isoformat()
+    hr_client.post(f"/people/{p2}/employment", data={"livello": "l1", "tipo_contratto": "td", "start_date": "2026-01-01", "end_date": fine})
+    client.post("/comp/budget", data={"period": "Aumenti coo", "year": "2026", "total_cap": "10000"})
+    b1 = db.sys.one("SELECT id FROM ral_budget WHERE period='Aumenti coo'")["id"]
+    with as_user("coo"):
+        db.execute("INSERT INTO ral_proposal (person_id, budget_id, amount, effective_date, status, proposed_at) "
+                   "VALUES (?,?, 1500, '2027-01-01', 'proposta', '2026-10-01')", (p1, b1))
+        db.execute("INSERT INTO ral_proposal (person_id, budget_id, amount, effective_date, status) "
+                   "VALUES (?,?, 900, '2027-01-01', 'bozza')", (p1, b1))
+    r = hr_client.get("/", follow_redirects=False)
+    assert r.status_code == 200
+    html = r.text
+    assert "azione di HR" in html and "azione del coo" not in html                 # solo le sue
+    assert "Bruno Beta" in html and "Contratti a termine" in html and "dir2" in html
+    assert "Proposte di aumento arrivate — 1, +€ 1.500" in html and ">coo<" in html.replace("<strong>coo</strong>", ">coo<")
+    assert 'href="/comp/plan?director=' in html
+    nav = html.split('class="sidebar"')[1].split("</nav>")[0]
+    assert 'href="/"' in nav and 'href="/reports"' not in nav
+    # un director nuovo arriva in dashboard dopo il login
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    assert login(TestClient(app), "hr1").url.path == "/"
 
 
 def test_post_rifiutati_salvo_account_e_anteprime(client, client2, hr_client):
@@ -125,7 +156,7 @@ def test_barra_laterale_e_avviso(hr_client):
     html = hr_client.get("/org").text
     nav = html.split('class="sidebar"')[1].split("</nav>")[0]
     assert 'href="/people"' in nav and 'href="/comp/plan"' in nav and 'href="/notes"' in nav
-    for href in ('href="/"', 'href="/reports"', 'href="/settings"', 'href="/admin"'):
+    for href in ('href="/reports"', 'href="/settings"', 'href="/admin"'):
         assert href not in nav, href
     assert 'href="/azienda"' in nav                                             # Azienda è di HR (0.41)
     assert "hr1 · HR" in nav and "public-switch" in nav
@@ -160,6 +191,6 @@ def test_cambio_di_ruolo_a_hr(client, client2, hr_client):
     from app.main import app
 
     c = TestClient(app)
-    assert login(c, "dir2").url.path == "/org"
+    assert login(c, "dir2").url.path == "/"
     html = c.get("/people").text
     assert "Anna Alfa" in html and "Bruno Beta" in html

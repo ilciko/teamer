@@ -6,13 +6,12 @@
   <div class="spacer"></div>
   <div class="actions" style="margin:0">
     <a class="btn sm {{ 'ghost' if tab != 'users' }}" href="/admin?tab=users">Utenti</a>
-    <a class="btn sm {{ 'ghost' if tab != 'teams' }}" href="/admin?tab=teams">Team</a>
     <a class="btn sm {{ 'ghost' if tab != 'audit' }}" href="/admin?tab=audit">Audit</a>
     <a class="btn sm {{ 'ghost' if tab != 'system' }}" href="/admin?tab=system">Sistema</a>
     <a class="btn sm {{ 'ghost' if tab != 'update' }}" href="/admin?tab=update">Aggiornamenti{% if update_available() %} ●{% endif %}</a>
   </div>
 </div>
-{% if err %}<div class="flash error">{{ err }}</div>{% elif restored and tab == 'teams' %}<div class="flash">Team {{ restored }}.</div>{% elif restored %}<div class="flash">Ripristino completato: {{ restored }}.</div>{% elif saved and tab != 'update' %}<div class="flash">Fatto.</div>{% endif %}
+{% if err %}<div class="flash error">{{ err }}</div>{% elif restored %}<div class="flash">Ripristino completato: {{ restored }}.</div>{% elif saved and tab != 'update' %}<div class="flash">Fatto.</div>{% endif %}
 
 {% if tab == 'users' %}
 {% if temp %}{% set tu, tp = temp.split(':', 1) %}
@@ -94,24 +93,6 @@
     <p class="muted3 small">Nasce con una password provvisoria, mostrata una volta sola: al primo accesso l'utente la cambia.</p>
     <div class="actions"><button class="btn sm">Crea utente</button></div>
   </form>
-</div>
-
-{% elif tab == 'teams' %}
-<div class="card">
-  <div class="card-title">Team e titolari</div>
-  <p class="small" style="margin-bottom:8px">Ogni team appartiene a un director, che vede solo i suoi team e le persone che ci lavorano. Una persona passa a un altro director per mano di HR (pagina Persone): arriva nel suo team «Da collocare» con tutto lo storico. I team non si spostano.</p>
-  <table class="tbl">
-    <tr><th>Team</th><th>Titolare</th><th></th></tr>
-    {% for t in teams %}
-    <tr{% if t.archived_at %} class="muted"{% endif %}>
-      <td style="padding-left:{{ 8 + t.depth * 18 }}px">{{ t.name }}{% if t.archived_at %} <span class="muted small">(archiviato)</span>{% endif %}</td>
-      <td>{% if t.owner %}{{ t.owner }}{% else %}<span class="badge amber">da assegnare</span>{% endif %}</td>
-      <td>
-      </td>
-    </tr>
-    {% else %}<tr><td colspan="3" class="muted">Nessun team.</td></tr>{% endfor %}
-  </table>
-  <p class="muted3 small" style="margin-top:6px">I team «da assegnare» si assegnano tutti insieme da Utenti → Dati da assegnare. I nomi dei team sono l'unico dato di business visibile qui.</p>
 </div>
 
 {% elif tab == 'audit' %}

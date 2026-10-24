@@ -196,7 +196,7 @@ def test_spostamento_rifiutato(org, client, hr_client, admin_client):
     assert client.post(f"/people/{org['luca']}/director", data={"director_id": "1"}).status_code == 403   # non il director
     assert admin_client.post(f"/people/{org['luca']}/director", data={"director_id": "1"}).status_code == 403
     html = admin_client.get("/admin?tab=teams").text
-    assert "Logistica" in html and "Luca" not in html and "Trasferisci" not in html   # via il trasferimento di team
+    assert "Logistica" not in html and "Luca" not in html and "Trasferisci" not in html   # via il tab Team dell'admin (0.42)
     assert db.sys.one("SELECT COUNT(*) AS n FROM team WHERE holding=1")["n"] == 0
 
 

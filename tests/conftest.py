@@ -113,7 +113,7 @@ def hr_client(client):
 
     users.create("hr1", "hr", PASSWORD)
     c = TestClient(app)
-    assert login(c, "hr1").url.path == "/org"
+    assert login(c, "hr1").url.path == "/"
     yield c
 
 

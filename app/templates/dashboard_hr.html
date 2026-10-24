@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Dashboard</h1><span class="badge">HR</span></div>
+
+<div class="grid3" style="margin-bottom:14px">
+  <div class="stat"><div class="v">{{ headcount }}</div><div class="k">Persone attive · {{ n_directors }} director</div></div>
+  <div class="stat"><div class="v">{{ n_proposals }}</div><div class="k">Proposte da validare</div></div>
+  <div class="stat"><div class="v">{{ expiring_contracts | length }}</div><div class="k">Contratti in scadenza (90 gg)</div></div>
+</div>
+
+<div class="grid2">
+  <div>
+    <div class="card" {% if n_proposals %}style="border-left:3px solid var(--amber-border)"{% endif %}>
+      <div class="card-title">Proposte di aumento arrivate{% if n_proposals %} — {{ n_proposals }}, {{ '+' if delta_proposals > 0 }}{{ delta_proposals | eur }}{% endif %}</div>
+      {% for r in proposals %}
+      <div class="small" style="margin-bottom:4px">
+        <span class="badge amber">{{ r.n }}</span> <strong>{{ r.director or 'da assegnare' }}</strong>
+        — variazione {{ '+' if r.delta > 0 }}{{ r.delta | eur }}{% if r.since %} · dal {{ r.since | dt }}{% endif %}
+        {% if r.director_id %}· <a href="/comp/plan?director={{ r.director_id }}">valida →</a>{% endif %}
+      </div>
+      {% else %}<p class="muted small">Nessuna proposta in attesa: i director non hanno inviato nulla.</p>{% endfor %}
+      {% if n_proposals %}<div class="actions"><a class="btn sm ghost" href="/comp/plan">Apri il piano →</a></div>{% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card-title">⚠ Contratti a termine — prossimi 90 giorni</div>
+      {% for e in expiring_contracts %}
+      <div class="small" style="margin-bottom:3px">
+        <span class="badge amber">{{ e.end_date | dt }}</span>
+        <a href="/people/{{ e.person_id }}">{{ e.full_name }}</a>
+        <span class="muted">{{ lookup_label('tipo_contratto', e.tipo_contratto) }}{% if e.director %} · {{ e.director }}{% endif %}</span>
+      </div>
+      {% else %}<p class="muted small">Nessun contratto a termine in scadenza nei prossimi 90 giorni.</p>{% endfor %}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Le mie azioni</div>
+      {% if overdue_actions %}
+      <div class="small" style="font-weight:600;margin-bottom:4px;color:var(--red-text)">In ritardo</div>
+      {% for a in overdue_actions %}
+      <div class="small" style="margin-bottom:3px">
+        <span class="badge red">{{ a.due_date | dt }}</span>
+        <a href="/people/{{ a.person_id }}">{{ a.full_name }}</a> — {{ a.description }}
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% if upcoming_actions %}
+      <div class="small" style="font-weight:600;margin:8px 0 4px">In arrivo</div>
+      {% for a in upcoming_actions %}
+      <div class="small" style="margin-bottom:3px">
+        <span class="badge">{{ a.due_date | dt }}</span>
+        <a href="/people/{{ a.person_id }}">{{ a.full_name }}</a> — {{ a.description }}
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% if not overdue_actions and not upcoming_actions %}<p class="muted small">Nessuna azione in scadenza.</p>{% endif %}
+      <div class="actions"><a class="btn sm ghost" href="/actions">Tutte le azioni →</a></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="card-title">In attesa dei director</div>
+      {% if da_decidere %}
+      <div class="small" style="font-weight:600;margin-bottom:4px">Cessazioni da decidere (sostituire o no)</div>
+      {% for c in da_decidere %}
+      <div class="small" style="margin-bottom:3px">
+        <span class="badge amber">{{ c.end_date | dt }}</span>
+        <a href="/people/{{ c.id }}">{{ c.full_name }}</a> <span class="muted">{{ c.director or '' }}</span>
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% if da_collocare %}
+      <div class="small" style="font-weight:600;margin:8px 0 4px">Persone da collocare in un team</div>
+      {% for c in da_collocare %}
+      <div class="small" style="margin-bottom:3px">
+        <span class="badge blue">dal {{ c.start_date | dt }}</span>
+        <a href="/people/{{ c.id }}">{{ c.full_name }}</a> <span class="muted">{{ c.director or '' }}</span>
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% if not da_decidere and not da_collocare %}<p class="muted small">Niente in sospeso.</p>{% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Scorciatoie</div>
+      <div class="actions" style="flex-wrap:wrap;margin-top:0">
+        <a class="btn sm" href="/people">+ Persona</a>
+        <a class="btn sm" href="/comp/salary">Nuove RAL</a>
+        <a class="btn sm" href="/comp/plan">Piano aumenti</a>
+        <a class="btn sm" href="/notes">+ Nota</a>
+        <a class="btn sm ghost" href="/azienda">Azienda</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -27,7 +27,7 @@ COOKIE = "teamer_session"
 
 # pagine dell'admin (oltre a quelle fuori dal guard): niente dati del personale
 ADMIN_PREFIXES = ("/admin", "/account", "/lock")
-HOME = {"admin": "/admin", "director": "/", "hr": "/org"}
+HOME = {"admin": "/admin", "director": "/", "hr": "/"}
 # HR (0.36): niente dashboard, report, simulazioni, verifica riporti, configurazione
 HR_DENIED = ("/reports", "/org/sim", "/org/riporti", "/settings")
 # le scritture di HR: il suo account, uscita, modalità pubblica, le sue note e azioni (0.37), le
@@ -79,7 +79,7 @@ def allowed(role: str, path: str, method: str = "GET") -> bool:
     if path.startswith("/admin"):
         return False
     if role == "hr":
-        if path == "/" or path.startswith(HR_DENIED):
+        if path.startswith(HR_DENIED):
             return False
         if method == "GET" or path.endswith("/simulate"):
             return True
