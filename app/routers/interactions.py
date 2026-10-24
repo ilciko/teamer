@@ -1,6 +1,6 @@
 """Note 1:1 (con ricerca per parole) e azioni.
 
-Sono di chi le scrive (classe `authored`, docs/perimetri.md): la vista mostra solo le proprie.
+Sono di chi le scrive (classe `authored`, app/perimeter.py): la vista mostra solo le proprie.
 Quando la persona esce dal perimetro la vista `person` non la mostra più: il nome arriva da
 `perim_note_person` e la nota resta in sola lettura (`outside`); un'azione si può ancora chiudere.
 """

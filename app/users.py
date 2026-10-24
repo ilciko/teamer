@@ -8,7 +8,7 @@ qui ne sta solo l'hash scrypt. Ruoli:
   alla persona che lo rappresenta (`app_user.person_id`, una persona Director+ non ancora collegata):
   nessun director è sopra gli altri, l'app non presume gerarchie fra loro.
 - `hr`: profilo aziendale trasversale, vede le persone di tutti i director (0.36: in sola
-  lettura; 0.37: note e azioni proprie; il resto arriva nelle tappe successive, docs/perimetri.md).
+  lettura; 0.37: note e azioni proprie; il resto arriva nelle tappe successive, app/perimeter.py).
 
 Gli utenti si correggono in place e si disattivano, non si cancellano: l'audit punta a
 loro. `audit_event` è append-only.

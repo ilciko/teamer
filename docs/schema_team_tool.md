@@ -449,7 +449,7 @@ Una riga per (pool, director): `approved_at`, `note`. Il pool «ruolo» passa bo
 
 > Unica eccezione all'append-only: la nota è un **documento**, non un evento — nessuna query di stato la legge. Il "cambiamento reale" è una nota nuova, la "correzione" è la modifica in place. Si cancella davvero, e cancellandola le `action_item` collegate sopravvivono con `meeting_note_id = NULL`: l'impegno preso non muore col testo.
 
-> **Di chi la scrive** (classe `authored`, `docs/perimetri.md`): ognuno vede e modifica solo le proprie note, a prescindere dal perimetro della persona; director e HR non si leggono a vicenda. Se la persona passa a un altro director la nota resta all'autore, in sola lettura, e non passa a nessuno.
+> **Di chi la scrive** (classe `authored`, `app/perimeter.py`): ognuno vede e modifica solo le proprie note, a prescindere dal perimetro della persona; director e HR non si leggono a vicenda. Se la persona passa a un altro director la nota resta all'autore, in sola lettura, e non passa a nessuno.
 
 > Archiviare (`archived_at`) toglie la nota di mezzo — lista, ricerca, dashboard, scheda persona — senza cancellarla: in Note un toggle la fa ricomparire e da lì si ripristina. È uno stato reversibile, non una correzione, quindi non tocca `updated_at`. Il report stampabile (`/notes/report`, globale o per persona) segue lo stesso toggle e marca le archiviate.
 
@@ -482,7 +482,7 @@ Una riga per (pool, director): `approved_at`, `note`. Il pool «ruolo» passa bo
 
 ## Proprietari *(0028)*
 
-Configurazione (`lookup`, `ninebox_weight`, `weight_mapping`, `evaluation_model`, `bonus_factor`, `benefit_type`, `listino_profile`), contenitori (`review_cycle`, `ral_budget`, `bonus_pool`, `hiring_budget`, `hiring_transfer`, `reorg_scenario`), i loro figli senza persona (`hiring_position`, `reorg_team`, `reorg_move`, `reorg_position`, `reorg_position_move`) e `team` hanno `owner_user_id INTEGER DEFAULT (teamer_owner()) FK→app_user.id`: il director a cui appartengono, NULL = da assegnare. Le UNIQUE della configurazione includono il proprietario (`ninebox_weight`, `weight_mapping`, `bonus_factor` hanno ora un `id` e una UNIQUE con il proprietario al posto della chiave primaria naturale). `bonus_allocation.pool_id` è facoltativo (una riga staccata dal montepremi resta nello storico della persona). Dalla 0029 anche `person` ha `owner_user_id`: conta solo per chi non ha ancora un'assegnazione (resta del director che l'ha creata); per gli altri il perimetro lo decide il team dell'ultima assegnazione. Vedi `docs/perimetri.md`.
+Configurazione (`lookup`, `ninebox_weight`, `weight_mapping`, `evaluation_model`, `bonus_factor`, `benefit_type`, `listino_profile`), contenitori (`review_cycle`, `ral_budget`, `bonus_pool`, `hiring_budget`, `hiring_transfer`, `reorg_scenario`), i loro figli senza persona (`hiring_position`, `reorg_team`, `reorg_move`, `reorg_position`, `reorg_position_move`) e `team` hanno `owner_user_id INTEGER DEFAULT (teamer_owner()) FK→app_user.id`: il director a cui appartengono, NULL = da assegnare. Le UNIQUE della configurazione includono il proprietario (`ninebox_weight`, `weight_mapping`, `bonus_factor` hanno ora un `id` e una UNIQUE con il proprietario al posto della chiave primaria naturale). `bonus_allocation.pool_id` è facoltativo (una riga staccata dal montepremi resta nello storico della persona). Dalla 0029 anche `person` ha `owner_user_id`: conta solo per chi non ha ancora un'assegnazione (resta del director che l'ha creata); per gli altri il perimetro lo decide il team dell'ultima assegnazione. Vedi `app/perimeter.py`.
 
 ### `user_meta` — configurazione per director *(0028)*
 | Campo | Tipo | Note |
@@ -506,7 +506,7 @@ In `app_meta` restano `schema_version`, `instance_id` e `default_ccnl` (identifi
 | id | INTEGER PK | |
 | username | TEXT UNIQUE NOCASE | si digita al login, niente elenco |
 | display_name | TEXT | |
-| role | TEXT | `admin` (site admin IT: utenti, audit, backup, aggiornamenti; nessun dato del personale) / `director` (i suoi team e le loro persone) / `hr` (0031: vede le persone di tutti i director; 0.36 in sola lettura, vedi `docs/perimetri.md`) |
+| role | TEXT | `admin` (site admin IT: utenti, audit, backup, aggiornamenti; nessun dato del personale) / `director` (i suoi team e le loro persone) / `hr` (0031: vede le persone di tutti i director; 0.36 in sola lettura, vedi `app/perimeter.py`) |
 | password_hash | TEXT | `scrypt$n$r$p$salt$hash` (min 12 caratteri) |
 | must_change_password | BOOLEAN | password provvisoria (creazione, reset): ogni pagina rimanda ad `/account` |
 | active | BOOLEAN | disattivato = sessioni chiuse subito, login rifiutato. Mai cancellato: l'audit punta qui |
@@ -541,7 +541,7 @@ In `app_meta` restano `schema_version`, `instance_id` e `default_ccnl` (identifi
 - **Report aggregati**: per team (via `person_assignment`), per casella 9-box, per centro di costo, budget vs allocato, trend benessere (per persona e per team), gap autovalutazione vs valutazione TL.
 - **Dashboard scadenze** (vista): contratti a termine in scadenza (`employment.tipo_contratto = 'determinato'` + `end_date`), `action_item` aperti oltre `due_date`, cicli di review `aperti`, benefit con `end_date` imminente.
 
-Lo stile UI dell'app segue i design token dell'artefatto 9-box (palette, font, componenti): vedi la sezione "Design System" in `proposte_integrazioni_schema.md`.
+Lo stile UI dell'app (palette, font, componenti) sta nei design token di `app/static/css/tokens.css`.
 
 Il diagramma ER completo è nel file `schema_team_tool_ER.mermaid`.
 

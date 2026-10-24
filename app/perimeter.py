@@ -1,4 +1,4 @@
-"""Perimetri per director: chi vede cosa (docs/perimetri.md).
+"""Perimetri per director: chi vede cosa.
 
 Ogni tabella sta in esattamente una classe (`CLASSES`, verificato da tests/test_perimeter.py):
 

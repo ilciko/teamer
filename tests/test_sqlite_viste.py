@@ -1,7 +1,7 @@
 """Caratterizzazione di SQLite/SQLCipher per i perimetri per director.
 
 Non testano codice dell'app: fissano i comportamenti del motore su cui poggiano
-i perimetri (docs/perimetri.md). Se un aggiornamento di
+i perimetri (app/perimeter.py). Se un aggiornamento di
 SQLCipher cambia uno di questi fatti, deve fallire qui, non in produzione.
 
 L'impianto verificato: TEMP VIEW omonime che schermano le righe, TEMP TRIGGER
@@ -288,7 +288,7 @@ def test_contextvar_del_middleware_arriva_nella_route_sync_del_threadpool():
     assert r["thread"] != threading.main_thread().name
 
 
-# ---- fatti aggiunti per i perimetri per director (docs/perimetri.md) ----
+# ---- fatti aggiunti per i perimetri per director (app/perimeter.py) ----
 
 def _owned(tmp_path, uid=7, name="o.db"):
     """Connessione con la funzione teamer_owner() e una tabella col proprietario di default."""
