@@ -7,6 +7,7 @@ obiettivi/review/benessere, note 1:1 e azioni.
 
 - **Stack**: FastAPI + Jinja2 + htmx, SQLite cifrato con **SQLCipher** (chiave di sistema su file, nota solo all'IT; gli utenti entrano con la propria password), Python gestito da `uv`.
 - **Schema dati**: tabelle append-only in 5 aree (organigramma, valutazioni, retribuzione, interazioni, utenti e audit) — vedi `docs/schema_team_tool.md` e il diagramma ER.
+- **Guide d'uso** per profilo: [site admin](docs/guida_admin.md), [HR](docs/guida_hr.md), [director](docs/guida_director.md).
 - **Nessuna risorsa esterna a runtime**: font, htmx e Chart.js sono vendored in `app/static/`.
 
 ## Sviluppo (Mac)
@@ -43,7 +44,7 @@ assegna una provvisoria (*Amministrazione → Utenti*, o `python -m app.admin_cl
   sua ultima pagina Teamer e riprende in place con la password. Il blocco di uno non tocca gli altri.
 - **Audit** (*Amministrazione → Audit*): accessi, errori, blocchi, gestione utenti, backup,
   aggiornamenti e ogni azione che modifica dati (chi, quando, quale indirizzo; mai il contenuto).
-- **Director separati** (`docs/perimetri.md`): ogni director vede solo i suoi team e le persone che
+- **Director separati** (`app/perimeter.py`): ogni director vede solo i suoi team e le persone che
   ci lavorano, con tutto il loro storico; ha la sua configurazione (questionario 9-box, aggiustamenti,
   pesi e moltiplicatori premio, listino, soglie: parte da quella di default), i suoi cicli, budget,
   montepremi e simulazioni.
