@@ -113,7 +113,7 @@ def test_filtri_cumulabili(client):
     tid, lp = _team(), _profilo(client, "GE040")
     lp2 = _profilo(client, "PS010", "Professional")
     t2 = _team("Sales")
-    a = _persona(client, "Anna Alfa", tid, 50000, lp)
+    _persona(client, "Anna Alfa", tid, 50000, lp)
     _persona(client, "Bice Beta", t2, 60000, lp2, role_type="tl")
     html = client.get("/comp/listino").text
     assert "Anna Alfa" in html and "Bice Beta" in html

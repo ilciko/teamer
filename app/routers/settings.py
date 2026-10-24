@@ -6,7 +6,7 @@ di HR); sicurezza, backup e aggiornamenti sono del site admin (`app/routers/admi
 import json
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import RedirectResponse
 
 from app import db
 from app.services import cost, ninebox_calc

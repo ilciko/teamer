@@ -171,7 +171,7 @@ def load_key(path: Path | None = None) -> str:
     try:
         key = path.read_text().strip().lower()
     except OSError as exc:
-        raise KeyMissing(f"chiave del database non leggibile in {path}: {exc.strerror or exc}")
+        raise KeyMissing(f"chiave del database non leggibile in {path}: {exc.strerror or exc}") from exc
     if not re.fullmatch(r"[0-9a-f]{64}", key):
         raise KeyMissing(f"chiave del database non valida in {path} (attesi 64 caratteri esadecimali)")
     return key
@@ -201,11 +201,15 @@ def _connect(path: Path, key_sql: str):
         conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
     except sqlcipher.DatabaseError:
         conn.close()
-        raise WrongPassword()
+        raise WrongPassword() from None
     return conn
 
 
 def _raw(key: str) -> str:
+    """Chiave grezza come letterale di PRAGMA key/rekey, che non accettano parametri: per questo
+    solo 64 cifre esadecimali, verificate qui anche se chi chiama le ha già controllate."""
+    if not re.fullmatch(r"[0-9a-f]{64}", key):
+        raise ValueError("chiave grezza non valida")
     return f"\"x'{key}'\""
 
 
@@ -503,7 +507,7 @@ def restore(src: Path, *, source_key: str | None = None, password: str | None = 
     try:
         conn = _connect(tmp, key_sql)
     except sqlcipher.DatabaseError:  # file non cifrato o non SQLite
-        raise WrongPassword()
+        raise WrongPassword() from None
     try:
         if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise RestoreError("Il file è danneggiato (integrity_check non superato).")

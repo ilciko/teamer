@@ -1,6 +1,6 @@
 """0.47: un budget (aumenti, assunzioni, montepremi) senza movimenti si elimina anche se chiuso;
 con movimenti resta nello storico. Vale per il director e per HR «in veste di»."""
-from app import db, users
+from app import db
 from tests.conftest import as_user
 from tests.test_viste_hr import _seed
 

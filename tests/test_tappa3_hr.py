@@ -1,9 +1,8 @@
 """Tappa 3 del profilo HR (0.39): contratti solo HR, RAL dirette, director «in veste di», budget
 intestati al director, macchina a stati del piano, cessazione «da decidere»."""
-import pytest
 
 from app import db, users
-from tests.conftest import PASSWORD, as_user, login
+from tests.conftest import PASSWORD, as_user
 from tests.test_viste_hr import _seed
 
 

@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import config, db, session, users
-from tests.conftest import PASSWORD, login, make_legacy_db
+from tests.conftest import login, make_legacy_db
 
 
 def _app():

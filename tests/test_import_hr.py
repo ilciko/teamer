@@ -4,7 +4,7 @@ import io
 
 from openpyxl import Workbook, load_workbook
 
-from app import db, users
+from app import db
 from app.services import importer
 from tests.test_viste_hr import _seed
 

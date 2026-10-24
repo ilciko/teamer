@@ -3,7 +3,7 @@ una persona collegata non si sposta né si cessa; badge in lista e scheda."""
 import pytest
 
 from app import db, users
-from tests.conftest import PASSWORD, as_user
+from tests.conftest import PASSWORD
 from tests.test_viste_hr import _seed
 
 

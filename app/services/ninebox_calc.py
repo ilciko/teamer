@@ -74,7 +74,7 @@ def score(choices: list[int], questions: list) -> tuple[float, float, list[float
     if len(choices) != len(questions):
         raise ValueError(f"servono {len(questions)} risposte")
     values, sums = [], {a: [0.0, 0.0] for a in AXES}
-    for c, q in zip(choices, questions):
+    for c, q in zip(choices, questions, strict=True):
         if not 0 <= c < len(q["options"]):
             raise ValueError("risposta inesistente")
         v = q["options"][c]["value"]

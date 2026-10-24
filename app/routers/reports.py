@@ -190,7 +190,7 @@ def _dashboard_hr(request: Request, today: str, horizon: str):
               AND NOT EXISTS (SELECT 1 FROM replacement_decision d WHERE d.person_id = p.id AND d.voided = 0)
             ORDER BY p.end_date DESC""", ((date.today() - timedelta(days=365)).isoformat(),)))
     da_collocare = with_director(db.query(
-        f"""SELECT p.id, p.full_name, pa.start_date, t.owner_user_id AS director_id FROM person p
+        """SELECT p.id, p.full_name, pa.start_date, t.owner_user_id AS director_id FROM person p
             JOIN person_assignment pa ON pa.person_id = p.id AND pa.voided = 0 AND pa.end_date IS NULL
             JOIN team t ON t.id = pa.team_id WHERE p.status = 'attivo' AND t.holding = 1 ORDER BY pa.start_date"""))
     headcount = db.one("SELECT COUNT(*) AS n FROM person WHERE status='attivo'")["n"]

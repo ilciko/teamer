@@ -62,7 +62,7 @@ def parse_params(form: Mapping, saved: Mapping[str, str] | None = None) -> dict:
 def validate_params(form: Mapping) -> tuple[dict, list[str]]:
     """Versione stretta per il salvataggio: ogni campo presente deve essere valido."""
     p, errors = {}, []
-    for k, default in DEFAULTS.items():
+    for k in DEFAULTS:
         raw = form.get(k)
         if raw is None or str(raw).strip() == "":
             errors.append(f"{k}: mancante")

@@ -4,8 +4,7 @@ Dalla 0.41 codici e parametri sono aziendali (Azienda → Listino, di HR): qui t
 stessi numeri. Il director imposta il codice e la produttività delle sue persone; HR consulta.
 Filtri cumulabili: codice, team, ruolo e, per HR, director.
 """
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, HTTPException, Request
 
 from app import db
 from app.routers import hrview

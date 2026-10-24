@@ -189,3 +189,16 @@ def test_migrazione_censimento_allinea_alla_assunzione(fresh_db):
     assert eff(neo, "censimento") == "2026-06-01"
     assert eff(vet, "censimento") == "2025-01-01"
     assert eff(neo, "aumento") == "2020-01-01"
+
+
+def test_raw_accetta_solo_chiavi_esadecimali():
+    """0.47.6: PRAGMA key/rekey non accettano parametri, quindi il letterale si costruisce solo da
+    64 cifre esadecimali."""
+    import pytest
+
+    from app.db import _raw
+
+    assert _raw("a" * 64) == "\"x'" + "a" * 64 + "'\""
+    for bad in ("a" * 63, "g" * 64, "a" * 63 + "'", "A" * 64):
+        with pytest.raises(ValueError):
+            _raw(bad)

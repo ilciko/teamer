@@ -322,7 +322,7 @@ def test_org_chart_nasconde_posizioni_aperte(client):
     db.execute("INSERT INTO hiring_position (budget_id, title, team_id, role_type) VALUES (?, 'Backend dev', ?, 'ic')",
                (bid, t))
     html = client.get("/org/chart").text
-    assert "Backend dev" in html and f'href="/org/chart?pos=0"' in html and "Nascondi posizioni aperte" in html
+    assert "Backend dev" in html and 'href="/org/chart?pos=0"' in html and "Nascondi posizioni aperte" in html
     html = client.get(f"/org/chart?team_id={t}&pos=0").text
     assert "Backend dev" not in html and "Mostra posizioni aperte" in html
     assert f'href="/org/chart?team_id={t}&amp;pos=1"' in html and 'name="pos" value="0"' in html

@@ -1,8 +1,8 @@
 """Perimetri, parte 0.32: proprietari, configurazione per director, dati da assegnare."""
 import pytest
 
-from app import db, perimeter, session, users
-from tests.conftest import PASSWORD, as_user, login
+from app import db, perimeter, users
+from tests.conftest import as_user
 
 
 def _tables():

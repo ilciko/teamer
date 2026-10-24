@@ -1,6 +1,5 @@
 """Montepremi per ruolo di HR (0.43): moltiplicatori aziendali, platea per team con esclusioni,
 ruolo prevalente nell'anno di competenza, ruolo e finale modificabili per allocazione."""
-import pytest
 
 from app import db
 from app.services import budget

@@ -38,7 +38,6 @@ def _on(client):
 
 
 def test_switch_accende_e_spegne(client):
-    from app import db
 
     html = client.get("/org").text
     assert 'action="/public-mode"' in html and 'class="public-switch"' in html
@@ -72,7 +71,6 @@ def test_dashboard_porta_all_organigramma_e_post_bloccati(client):
 
 
 def test_nessuna_cifra_nelle_pagine_condivisibili(client):
-    from app import db
 
     tid, pid, sid = _setup(client)
     _on(client)

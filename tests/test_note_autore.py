@@ -119,7 +119,7 @@ def test_dopo_il_trasferimento_le_note_restano_a_chi_le_ha_scritte(client, clien
     pid = luca["luca"]
     nid = _note(client, pid, "Prima del passaggio", "da ricordare", action="verificare obiettivi")
     aid = db.sys.one("SELECT id FROM action_item WHERE meeting_note_id=?", (nid,))["id"]
-    hr_nid = _note(hr_client, pid, "Nota HR", "resta a HR")
+    _note(hr_client, pid, "Nota HR", "resta a HR")
     _transfer(hr_client, luca["luca"])
     # chi cede le legge nella sezione apposita, senza link alla scheda né modifica
     html = client.get("/notes").text

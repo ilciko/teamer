@@ -171,8 +171,8 @@ def _guards_person(t: str) -> list[str]:
     col = "id" if t == "person" else "person_id"
     out = []
     if t == "person":  # nasce del director che la crea ed entra nel perimetro (trigger AFTER INSERT)
-        out.append(f"CREATE TEMP TRIGGER _p_person_ins BEFORE INSERT ON main.person BEGIN "
-                   f"SELECT RAISE(ABORT, 'fuori perimetro: person') WHERE NEW.owner_user_id IS NOT teamer_owner(); END")
+        out.append("CREATE TEMP TRIGGER _p_person_ins BEFORE INSERT ON main.person BEGIN "
+                   "SELECT RAISE(ABORT, 'fuori perimetro: person') WHERE NEW.owner_user_id IS NOT teamer_owner(); END")
     else:
         extra = f" OR NEW.team_id NOT {IN_TEAM}" if t == "person_assignment" else ""
         out.append(f"CREATE TEMP TRIGGER _p_{t}_ins BEFORE INSERT ON main.{t} BEGIN "

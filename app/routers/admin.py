@@ -84,7 +84,7 @@ def audit_export(fmt: str, user: str = "", event: str = "", date_from: str = "",
     ws.append(["Quando", "Utente", "Evento", "Dettaglio", "IP"])
     for r in rows:
         ws.append([r[c] for c in AUDIT_COLS])
-    for col, width in zip("ABCDE", (20, 16, 18, 80, 16)):
+    for col, width in zip("ABCDE", (20, 16, 18, 80, 16), strict=True):
         ws.column_dimensions[col].width = width
     out = io.BytesIO()
     wb.save(out)

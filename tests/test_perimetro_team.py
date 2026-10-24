@@ -3,7 +3,7 @@ persona a un altro director (0.40, fatto da HR: `perimeter.transfer_person`)."""
 import pytest
 
 from app import db, perimeter, users
-from tests.conftest import PASSWORD, as_user, login
+from tests.conftest import as_user
 
 PERSON_TABLES = [*perimeter.PERSON, *[t for t in perimeter.CHILD if t not in ("goal_review", "wellbeing_entry", "bonus_pool_approval")]]
 
