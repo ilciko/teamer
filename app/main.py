@@ -166,6 +166,35 @@ async def auth_guard(request: Request, call_next):
     return response
 
 
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def _cross_origin(request: Request) -> bool:
+    """Richiesta partita da un'altra origine (CSRF). In HTTPS il browser manda `Sec-Fetch-Site`,
+    affidabile anche dietro un reverse proxy; in HTTP (istanza in LAN) no, e vale `Origin`
+    confrontato con l'host richiesto. Senza nessuno dei due (curl, test) non c'è un browser
+    da ingannare: passa."""
+    site = request.headers.get("sec-fetch-site")
+    if site:
+        return site not in ("same-origin", "none")
+    origin = request.headers.get("origin")
+    if not origin:
+        return False
+    host = origin.split("://", 1)[-1].lower()
+    allowed = {h.strip().lower() for h in (request.headers.get("host", ""),
+                                           *request.headers.get("x-forwarded-host", "").split(",")) if h.strip()}
+    return host not in allowed
+
+
+@app.middleware("http")
+async def origin_guard(request: Request, call_next):
+    """Più esterno di `auth_guard`: copre anche login, sblocco e battito. Si aggiunge al cookie
+    `SameSite=Lax`, che non ferma un altro host dello stesso sito."""
+    if request.method not in SAFE_METHODS and _cross_origin(request):
+        return Response("Richiesta rifiutata: proviene da un'altra origine.", status_code=403)
+    return await call_next(request)
+
+
 @app.exception_handler(db.sqlcipher.IntegrityError)
 async def _out_of_perimeter(request: Request, exc: db.sqlcipher.IntegrityError):
     """Una guardia del perimetro ha fermato una scrittura (ultima difesa: l'interfaccia non la offre)."""
