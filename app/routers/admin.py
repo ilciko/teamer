@@ -118,7 +118,8 @@ def admin_page(request: Request, tab: str = "users", saved: str = "", err: str =
     elif tab == "update":
         ctx["upd"] = {"current": config.APP_VERSION, "latest": updater.latest(), "available": updater.available(),
                       "state": updater.state(), "log": updater.log_tail(), "can_request": updater.can_request(),
-                      "pending": updater.pending(), "repo": updater.REPO, "backups": updater.backups()}
+                      "pending": updater.pending(), "repo": updater.REPO, "backups": updater.backups(),
+                      "channel": updater.channel(), "channels": updater.CHANNELS}
     resp = templates.TemplateResponse(request, "admin.html", ctx)
     if tab == "users" and ctx.get("temp"):
         resp.delete_cookie("teamer_temp_pw", path="/admin")
@@ -241,6 +242,17 @@ async def restore(file: UploadFile, source_key: str = Form(""), password: str = 
 
 @router.post("/admin/update/check")
 def update_check():
+    updater.check()
+    return _back("update")
+
+
+@router.post("/admin/update/channel")
+def update_channel(channel: str = Form(...)):
+    """Canale degli aggiornamenti: stabile (release) o anteprima (ultimo tag); poi ricontrolla subito."""
+    if channel not in updater.CHANNELS:
+        return _back("update", err="Canale non previsto.")
+    updater.set_channel(channel)
+    users.audit("update_channel", channel)
     updater.check()
     return _back("update")
 

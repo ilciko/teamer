@@ -91,3 +91,23 @@ def test_backup_elencati(upd_dir, tmp_path):
     (bk / "altro.txt").write_text("no")
     assert [b["name"] for b in updater.backups()] == ["teamer-v0.28.2-20261022.db"]
     assert updater.backups()[0]["size_kb"] == 2
+
+
+def test_canale_anteprima_prende_il_tag_piu_alto(upd_dir, admin_client, client):
+    """0.47.1: canale stabile = releases/latest; anteprima = tag più alto anche senza release."""
+    assert updater.channel() == "stable"
+    tags = [{"name": "v0.47.0"}, {"name": "v0.47.2"}, {"name": "v0.47.10"}, {"name": "main-x"}]
+    assert updater.parse_tags(tags)["tag"] == "v0.47.10" and updater.parse_tags([]) is None
+    seen = []
+    r = admin_client.post("/admin/update/channel", data={"channel": "tag"}, follow_redirects=False)
+    assert r.status_code == 302 and updater.channel() == "tag"
+    r = updater.check(fetch=lambda url: seen.append(url) or tags)
+    assert seen[0].endswith("/tags?per_page=100") and r["tag"] == "v0.47.10" and r["channel"] == "tag"
+    html = admin_client.get("/admin?tab=update").text
+    assert 'name="channel"' in html and "v0.47.10" in html
+    updater.set_channel("stable")
+    r = updater.check(fetch=lambda url: seen.append(url) or {"tag_name": "v0.47.0", "html_url": "https://x"})
+    assert seen[1].endswith("/releases/latest") and r["tag"] == "v0.47.0"
+    assert admin_client.post("/admin/update/channel", data={"channel": "boh"}, follow_redirects=False).status_code == 302
+    assert updater.channel() == "stable"
+    assert client.post("/admin/update/channel", data={"channel": "tag"}).status_code == 403

@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Teamer — aggiorna all'ultima release GitHub.
 #
-# Uso: teamer-update [--no-restart] [--from-app]
+# Uso: teamer-update [--no-restart] [--from-app] [--channel stable|tag]
 #   --no-restart  non riavvia il servizio (usato dall'installer, che lo crea dopo)
 #   --from-app    lanciato da teamer-update.service quando l'app scrive data/update/request
+#   --channel     stable = ultima Release pubblicata (default); tag = tag più alto anche senza Release
+#                 (anteprima). Senza flag vale data/update/channel, scelto dall'admin nell'app.
+# Non si torna mai indietro: se l'installata è più recente del bersaglio non fa nulla.
 #
 # Il DB (data/), la config (.env) e la chiave del DB (/etc/teamer) non vengono toccati: prima dello swap si fa una copia del
 # DB in data/backups/ (le ultime 5). Stato e log dell'ultimo aggiornamento stanno in
@@ -24,11 +27,15 @@ GH_TOKEN="${GH_TOKEN:-}"
 
 NO_RESTART=0
 FROM_APP=0
+CHANNEL=""
+prev=""
 for arg in "$@"; do
   case "$arg" in
     --no-restart) NO_RESTART=1 ;;
     --from-app) FROM_APP=1 ;;
+    stable|tag) [[ "$prev" == "--channel" ]] && CHANNEL="$arg" ;;
   esac
+  prev="$arg"
 done
 
 mkdir -p "$UPD" "$DATA/backups"
@@ -107,8 +114,17 @@ install_units() {   # dalla cartella deploy/install della versione installata
   fi
 }
 
-TAG=$(curl -fsSL "${auth[@]}" "https://api.github.com/repos/${GH_REPO}/releases/latest" \
-      | grep -m1 '"tag_name"' | cut -d'"' -f4 || true)
+[[ -z "$CHANNEL" && -f "$UPD/channel" ]] && CHANNEL=$(tr -d '[:space:]' < "$UPD/channel")
+[[ "$CHANNEL" == "tag" ]] || CHANNEL="stable"
+if [[ "$CHANNEL" == "tag" ]]; then
+  # anteprima: il tag più alto in versione, pubblicato o no
+  TAG=$(curl -fsSL "${auth[@]}" "https://api.github.com/repos/${GH_REPO}/tags?per_page=100" \
+        | grep '"name"' | cut -d'"' -f4 | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+else
+  TAG=$(curl -fsSL "${auth[@]}" "https://api.github.com/repos/${GH_REPO}/releases/latest" \
+        | grep -m1 '"tag_name"' | cut -d'"' -f4 || true)
+fi
+msg "Canale ${CHANNEL}: versione disponibile ${TAG:-nessuna}."
 if [[ -z "$TAG" ]]; then
   if (( FROM_APP )); then
     state error "nessuna release raggiungibile su ${GH_REPO}"
@@ -125,6 +141,13 @@ if [[ "$TAG" == "$CURRENT" ]]; then
   msg "Già alla versione ${TAG}: niente da fare."
   [[ -d "$APP_DIR/src/deploy/install" ]] && install_units "$APP_DIR/src/deploy/install"
   state ok "già alla versione più recente"
+  exit 0
+fi
+if [[ "$CURRENT" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ && "$TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+   && [[ "$(printf '%s\n%s\n' "$TAG" "$CURRENT" | sort -V | tail -1)" == "$CURRENT" ]]; then
+  msg "Installata ${CURRENT}, sul canale ${CHANNEL} c'è ${TAG}: non si torna indietro, niente da fare."
+  [[ -d "$APP_DIR/src/deploy/install" ]] && install_units "$APP_DIR/src/deploy/install"
+  state ok "installata ${CURRENT}, più recente di ${TAG} (canale ${CHANNEL})"
   exit 0
 fi
 

@@ -5,10 +5,13 @@ L'app gira senza privilegi (systemd: utente `teamer`, filesystem in sola lettura
 scrivendo `data/update/request`; la path unit `teamer-update.path` (root) lo vede e lancia
 `teamer-update`, che scrive stato e log in `data/update/` (vedi deploy/install/).
 
-Il controllo della versione (`check`) interroga l'API pubblica delle release di GitHub e
-salva il risultato in `data/update/latest.json`: un file e non `app_meta`, perché gira anche
-di notte, quando il DB è bloccato. Offline o in errore non succede niente: l'app resta
-utilizzabile senza rete.
+Il controllo della versione (`check`) interroga l'API pubblica di GitHub e salva il risultato
+in `data/update/latest.json`: un file e non `app_meta`, perché gira anche di notte, quando il DB
+è bloccato. Offline o in errore non succede niente: l'app resta utilizzabile senza rete.
+
+Canali (0.47.1, `data/update/channel`, scelto dall'admin): `stable` = l'ultima Release pubblicata
+(il default, per la produzione); `tag` = il tag più alto, anche senza Release (anteprima: gli
+incrementi intermedi arrivano subito, per l'istanza di test). Lo legge anche `teamer-update`.
 """
 from __future__ import annotations
 
@@ -30,6 +33,24 @@ FIRST_CHECK_DELAY_SECONDS = 60
 
 def update_dir() -> Path:
     return config.DB_PATH.parent / "update"
+
+
+CHANNELS = {"stable": "Stabile — release pubblicate", "tag": "Anteprima — ultimo tag, anche senza release"}
+
+
+def channel() -> str:
+    try:
+        c = (update_dir() / "channel").read_text().strip()
+    except OSError:
+        return "stable"
+    return c if c in CHANNELS else "stable"
+
+
+def set_channel(c: str) -> None:
+    if c not in CHANNELS:
+        raise ValueError(c)
+    update_dir().mkdir(parents=True, exist_ok=True)
+    (update_dir() / "channel").write_text(c + "\n")
 
 
 # ---- versioni ----
@@ -54,6 +75,17 @@ def parse_release(payload) -> dict | None:
         return None
     return {"tag": tag, "url": payload.get("html_url"), "name": payload.get("name") or tag,
             "published_at": payload.get("published_at")}
+
+
+def parse_tags(payload) -> dict | None:
+    """Risposta di /tags → il tag più alto in versione (v0.47.1 > v0.47.0 > v0.46.2); None se nessuno."""
+    if not isinstance(payload, list):
+        return None
+    best = max((t.get("name") for t in payload if isinstance(t, dict) and parse_version(t.get("name"))),
+               key=parse_version, default=None)
+    if not best:
+        return None
+    return {"tag": best, "url": f"https://github.com/{REPO}/releases/tag/{best}", "name": best, "published_at": None}
 
 
 # ---- file di stato ----
@@ -119,17 +151,21 @@ def _fetch(url: str) -> dict:
 
 
 def check(fetch=None) -> dict:
-    """Interroga l'ultima release e salva l'esito; in errore tiene l'ultima versione nota."""
+    """Interroga l'ultima versione del canale e salva l'esito; in errore tiene l'ultima nota."""
     now = datetime.now().isoformat(timespec="seconds")
-    url = f"https://api.github.com/repos/{REPO}/releases/latest"
+    ch = channel()
+    if ch == "tag":
+        url, parse = f"https://api.github.com/repos/{REPO}/tags?per_page=100", parse_tags
+    else:
+        url, parse = f"https://api.github.com/repos/{REPO}/releases/latest", parse_release
     previous = latest() or {}
     try:
-        release = parse_release((fetch or _fetch)(url))
+        release = parse((fetch or _fetch)(url))
     except Exception as exc:  # rete assente, rate limit, JSON strano: non è un problema dell'app
         result = {**{k: previous[k] for k in ("tag", "url", "name", "published_at") if k in previous},
-                  "checked_at": now, "error": str(exc)[:200]}
+                  "checked_at": now, "channel": ch, "error": str(exc)[:200]}
     else:
-        result = {"checked_at": now, **(release or {"tag": None})}
+        result = {"checked_at": now, "channel": ch, **(release or {"tag": None})}
     try:
         _write_json(update_dir() / "latest.json", result)
     except OSError:

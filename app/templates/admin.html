@@ -176,12 +176,17 @@
     <div class="card-title">Versione</div>
     <table class="tbl">
       <tr><td class="muted">Installata</td><td><strong>{{ upd.current }}</strong></td></tr>
-      <tr><td class="muted">Ultima pubblicata</td>
+      <tr><td class="muted">Canale</td>
+          <td><form method="post" action="/admin/update/channel" class="frow" style="align-items:center;gap:6px;margin:0">
+            <select name="channel" onchange="this.form.submit()" aria-label="Canale degli aggiornamenti">
+              {% for code, label in upd.channels.items() %}<option value="{{ code }}" {{ 'selected' if code == upd.channel }}>{{ label }}</option>{% endfor %}
+            </select></form></td></tr>
+      <tr><td class="muted">Ultima disponibile</td>
           <td>{% if lt.tag %}<a href="{{ lt.url }}" target="_blank" rel="noopener">{{ lt.tag }}</a>{% if upd.available %} <span class="badge green">nuova</span>{% else %} <span class="muted small">già installata</span>{% endif %}{% else %}—{% endif %}</td></tr>
       <tr><td class="muted">Ultimo controllo</td>
           <td>{{ lt.checked_at | dt if lt.checked_at else 'mai' }}{% if lt.error %} <span class="badge amber" title="{{ lt.error }}">non riuscito</span>{% endif %}</td></tr>
     </table>
-    <p class="muted3 small" style="margin-top:6px">Il controllo parte da solo una volta al giorno su <code>github.com/{{ upd.repo }}</code> e avvisa soltanto: l'aggiornamento si lancia da qui.</p>
+    <p class="muted3 small" style="margin-top:6px">Il controllo parte da solo una volta al giorno su <code>github.com/{{ upd.repo }}</code> e avvisa soltanto: l'aggiornamento si lancia da qui. Canale <strong>stabile</strong> = solo le release pubblicate (produzione); <strong>anteprima</strong> = l'ultimo tag, anche senza release (istanza di test). Non si torna mai a una versione più vecchia.</p>
     <form method="post" action="/admin/update/check"><div class="actions"><button class="btn sm ghost">Controlla ora</button></div></form>
   </div>
 
