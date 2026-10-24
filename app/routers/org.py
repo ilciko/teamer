@@ -416,7 +416,7 @@ def person_cessation(pid: int, end_date: str = Form(...)):
 @router.post("/people/{pid}/director")
 def person_transfer(pid: int, director_id: str = Form(""), on_date: str = Form(None), correct: str = Form(None)):
     """HR (0.40) sposta la persona a un altro director: arriva nel suo team «Da collocare».
-    `correct` (0.47.2): corregge uno spostamento sbagliato invece di aggiungerne un altro."""
+    `correct` (0.47.4): corregge un director sbagliato, sempre, verso il suo «Da collocare» e senza storico."""
     if not hrview.is_hr():
         raise HTTPException(403)
     u = users.get(int(director_id)) if director_id.isdigit() else None

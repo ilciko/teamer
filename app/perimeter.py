@@ -548,10 +548,10 @@ def transfer_person(pid: int, to_uid: int, on_date: str, correct: bool = False) 
     la dimenticano; se era responsabile di un suo team, il team resta senza responsabile. Nessuna
     quota o tetto si sposta. I team non si muovono mai.
 
-    `correct` (0.47.2) è la correzione di uno spostamento sbagliato: l'assegnazione nata da quello
-    spostamento (nel team «Da collocare») si annulla, quella chiusa prima torna aperta e il controllo
-    sulla data salta. Se il director scelto è quello di prima, finisce lì: la persona torna nel suo
-    team com'era (le proposte annullate dallo spostamento restano annullate, sono append-only)."""
+    `correct` (0.47.4) è la correzione di un director sbagliato (spostamento o censimento), sempre
+    possibile: l'assegnazione corrente si annulla e al suo posto ne nasce una, con la stessa data
+    d'inizio, nel «Da collocare» del director scelto (anche se è quello di prima: la ricolloca lui);
+    `on_date` non conta e lo storico non cresce. Le proposte annullate restano annullate."""
     n = {"righe nei cicli": 0, "righe staccate": 0, "annullate": 0}
     with db.sys.transaction() as c:
         p = c.execute("SELECT id, status, full_name FROM person WHERE id=?", (pid,)).fetchone()
@@ -569,30 +569,18 @@ def transfer_person(pid: int, to_uid: int, on_date: str, correct: bool = False) 
             "SELECT pa.*, t.holding FROM person_assignment pa JOIN team t ON t.id = pa.team_id "
             "WHERE pa.person_id=? AND pa.voided=0 AND pa.end_date IS NULL "
             "ORDER BY pa.start_date DESC, pa.id DESC LIMIT 1", (pid,)).fetchone()
-        if correct:
-            if not cur or not cur["holding"]:
-                raise TransferError("Si corregge solo uno spostamento: la persona non è in un team «Da collocare».")
-            prev = c.execute(
-                "SELECT * FROM person_assignment WHERE person_id=? AND voided=0 AND id != ? "
-                "AND end_date = date(?, '-1 day') ORDER BY id DESC LIMIT 1", (pid, cur["id"], str(cur["start_date"])[:10])).fetchone()
-            c.execute("UPDATE person_assignment SET voided=1, void_reason='spostamento corretto' WHERE id=?", (cur["id"],))
-            if prev:
-                c.execute("UPDATE person_assignment SET end_date=NULL WHERE id=?", (prev["id"],))
-                prev_uid = c.execute("SELECT owner_user_id FROM team WHERE id=?", (prev["team_id"],)).fetchone()[0]
-                if prev_uid == to_uid:   # torna da dove era venuta: com'era, senza passare da «Da collocare»
-                    c.execute("UPDATE person SET owner_user_id=? WHERE id=?", (to_uid, pid))
-                    bump()
-                    return n
-            cur = c.execute("SELECT * FROM person_assignment WHERE id=?", (prev["id"],)).fetchone() if prev else None
-            src = director_of(c, pid)
-        if cur and str(cur["start_date"]) >= on_date:
-            raise TransferError("La data deve essere successiva all'inizio dell'assegnazione precedente." if correct else
-                                "La data deve essere successiva all'inizio dell'assegnazione corrente: per rifare uno spostamento sbagliato usa «Correggi».")
-        from datetime import date, timedelta
+        if correct and cur:
+            c.execute("UPDATE person_assignment SET voided=1, void_reason='director corretto' WHERE id=?", (cur["id"],))
+            on_date = str(cur["start_date"])[:10]
+        else:
+            if cur and str(cur["start_date"]) >= on_date:
+                raise TransferError("La data deve essere successiva all'inizio dell'assegnazione corrente: "
+                                    "per un director sbagliato usa «Correggi».")
+            from datetime import date, timedelta
 
-        prev_end = (date.fromisoformat(on_date) - timedelta(days=1)).isoformat()
-        c.execute("UPDATE person_assignment SET end_date=? WHERE person_id=? AND voided=0 AND end_date IS NULL",
-                  (prev_end, pid))
+            prev_end = (date.fromisoformat(on_date) - timedelta(days=1)).isoformat()
+            c.execute("UPDATE person_assignment SET end_date=? WHERE person_id=? AND voided=0 AND end_date IS NULL",
+                      (prev_end, pid))
         holding = ensure_holding_team(c, to_uid)
         c.execute("INSERT INTO person_assignment (person_id, team_id, role_type, start_date, listino_profile_id) "
                   "VALUES (?,?,?,?,?)", (pid, holding, cur["role_type"] if cur else "ic", on_date,
