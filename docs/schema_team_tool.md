@@ -310,6 +310,22 @@ Prove di organigramma da confrontare, approvare e applicare (`/org/sim`, `app/se
 
 > **Applicato vs impegnato**: `applicato` = RAL **reale** di chi è stato assunto (la `expected_ral` non conta più); `impegnato` = Σ `expected_ral` delle posizioni `pianificata`/`in_selezione`; residuo = tetto − applicato − impegnato.
 
+### `replacement_decision` — decisione «non sostituire» dopo una cessazione *(0033, append-only)*
+
+Dalla 0.39 la cessazione la registra HR; il director decide se sostituire (posizione con
+`hiring_position.replaces_person_id`) o no. Una cessazione senza posizione né decisione è «da decidere»
+(dashboard del director).
+
+| Colonna | Tipo | Note |
+|---|---|---|
+| id | INTEGER PK | |
+| person_id | INTEGER FK→person.id | la persona cessata |
+| decision | TEXT | oggi solo `non_sostituire` |
+| note | TEXT | motivo, facoltativo |
+| decided_by | INTEGER FK→app_user.id | default `teamer_owner()`: chi ha deciso |
+| created_at | DATETIME | |
+| voided / void_reason | | si annulla, non si cancella: la cessazione torna da decidere |
+
 ### `hiring_transfer` — riporto fra budget assunzioni *(a eventi)*
 | Campo | Tipo | Note |
 |---|---|---|

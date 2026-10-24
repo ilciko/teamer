@@ -78,6 +78,7 @@ templates.env.filters["eur_plain"] = fmt_eur  # cifre mostrabili anche in pubbli
 templates.env.globals["public"] = public.active
 templates.env.globals["current_user"] = session.current
 templates.env.globals["is_hr"] = lambda: (s := session.current()) is not None and s.role == "hr"
+templates.env.globals["hr_acting"] = lambda: hrview.acting_name()   # HR: il director «in veste di» (0.39)
 templates.env.globals["roles"] = users.ROLES
 templates.env.globals["update_available"] = updater.available
 templates.env.filters["dt"] = fmt_date
@@ -194,6 +195,7 @@ from app.routers import (  # noqa: E402
     reports,
     review,
     settings,
+    hrview,
 )
 
 app.include_router(admin.router)
@@ -202,6 +204,7 @@ app.include_router(reports.router)
 app.include_router(org.router)
 app.include_router(reorg.router)
 app.include_router(compensation.router)
+app.include_router(hrview.router)
 app.include_router(listino.router)
 app.include_router(ninebox.router)
 app.include_router(review.router)

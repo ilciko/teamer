@@ -11,3 +11,15 @@
   </div>
 </details>
 {% endmacro %}
+
+{# HR: il director «in veste di» (0.39). Vale per la sessione: budget, piano e analisi salary diventano i suoi. #}
+{% macro acting_select(dir_opts, acting, next) %}
+<form method="post" action="/hr/acting" class="hr-ok frow" style="align-items:center;gap:6px;margin:0">
+  <input type="hidden" name="next" value="{{ next }}">
+  <span class="muted small">In veste di</span>
+  <select name="director_id" onchange="this.form.submit()" aria-label="Director in veste di" style="min-width:180px">
+    <option value="">— solo consultazione —</option>
+    {% for o in dir_opts %}<option value="{{ o.id }}" {{ 'selected' if o.id == acting }}>{{ o.name }}</option>{% endfor %}
+  </select>
+</form>
+{% endmacro %}

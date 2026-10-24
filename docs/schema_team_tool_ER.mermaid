@@ -302,6 +302,9 @@ erDiagram
     REORG_SCENARIO ||--o{ REORG_POSITION_MOVE : sposta
     HIRING_POSITION ||--o{ REORG_POSITION_MOVE : spostata
 
+    PERSON ||--o{ REPLACEMENT_DECISION : non_sostituita
+    APP_USER ||--o{ REPLACEMENT_DECISION : decide
+
     APP_USER ||--o{ AUDIT_EVENT : registra
     APP_USER ||--o{ USER_META : configura
     APP_USER ||--o{ TEAM : titolare

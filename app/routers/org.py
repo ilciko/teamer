@@ -3,10 +3,11 @@ import base64
 from datetime import date, timedelta
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Form, Query, Request, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 
-from app import db, session, users
+from app import db, perimeter, session, users
+from app.routers import hrview
 from app.services import budget as budget_svc
 from app.services import org_tree as org_svc
 from app.services import cost
@@ -183,7 +184,8 @@ def people_list(request: Request, show: str = "attivi", director: str = ""):
     return _templates().TemplateResponse(request, "people_list.html",
                                          {"people": people, "show": show, "teams": teams,
                                           "listino_profiles": listino_profiles, "hr": hr,
-                                          "directors": directors, "director": director})
+                                          "directors": directors, "director": director,
+                                          **({"dir_opts": hrview.context(request)["dir_opts"]} if hr else {})})
 
 
 @router.post("/people")
@@ -191,13 +193,27 @@ def person_create(full_name: str = Form(...), hire_date: str = Form(None), email
                   team_id: str = Form(None), role_type: str = Form("ic"),
                   livello: str = Form(None), tipo_contratto: str = Form(None),
                   ral: str = Form(None), ref_date: str = Form(None),
-                  listino_profile_id: str = Form(None)):
-    """Censimento: crea la persona e, se forniti, lo stato attuale (team, contratto, RAL)."""
+                  listino_profile_id: str = Form(None), director_id: str = Form(None)):
+    """Censimento: crea la persona e, se forniti, lo stato attuale (team, contratto, RAL).
+
+    Dalla 0.39 la parte contrattuale (livello, contratto, RAL) la gestisce HR: il form del director
+    non la mostra (il censimento iniziale, come l'import da Excel, la accetta comunque) e HR la
+    completa dalla scheda. HR sceglie il director titolare: la persona nasce intestata a lui
+    (`owner_user_id`) e, se c'è, in un suo team."""
+    hr = hrview.is_hr()
+    owner = None
+    if hr:
+        if not (director_id or "").isdigit() or int(director_id) not in users.director_names():
+            raise HTTPException(403, "Scegli il director della persona")
+        owner = int(director_id)
+        if team_id and not db.one("SELECT 1 FROM team WHERE id=? AND owner_user_id=?", (int(team_id), owner)):
+            raise HTTPException(403, "Il team non è di quel director")
     start = ref_date or hire_date or date.today().isoformat()
     with db.transaction() as conn:
         cur = conn.execute(
-            "INSERT INTO person (full_name, hire_date, email) VALUES (?,?,?)",
-            (full_name.strip(), hire_date or None, email or None))
+            "INSERT INTO person (full_name, hire_date, email, owner_user_id) "
+            "VALUES (?,?,?, COALESCE(?, teamer_owner()))",
+            (full_name.strip(), hire_date or None, email or None, owner))
         pid = cur.lastrowid
         if team_id:
             conn.execute(
@@ -217,6 +233,9 @@ def person_create(full_name: str = Form(...), hire_date: str = Form(None), email
                 "VALUES (?,?,?,0,'censimento')", (pid, ral_start, float(ral)))
     if team_id:
         _derive_manager(pid)
+    if hr:   # la persona è di un director: la sua sessione ricarica il perimetro (la verifica dei riporti è sua)
+        perimeter.bump()
+    elif team_id:
         return _verify_reports(f"/people/{pid}", "cambiamento", start)
     return RedirectResponse(f"/people/{pid}", status_code=302)
 
@@ -264,8 +283,10 @@ def person_card(request: Request, pid: int):
         "SELECT * FROM action_item WHERE person_id=? AND status != 'chiuso' ORDER BY due_date", (pid,))
     attachments = db.query(
         "SELECT id, filename, note, created_at FROM attachment WHERE person_id=? ORDER BY id DESC", (pid,))
-    replacement = None
+    replacement = decision = None
     if p["status"] == "cessato":
+        decision = db.one("SELECT * FROM replacement_decision WHERE person_id=? AND voided=0 "
+                          "ORDER BY id DESC LIMIT 1", (pid,))
         replacement = db.one(
             "SELECT hp.*, hb.period, hired.full_name AS hired_name FROM hiring_position hp "
             "JOIN hiring_budget hb ON hb.id = hp.budget_id "
@@ -305,7 +326,7 @@ def person_card(request: Request, pid: int):
         "notes": notes, "actions": actions, "attachments": attachments,
         "teams": teams, "people_opts": people_opts,
         "listino_profiles": db.query("SELECT * FROM listino_profile WHERE active=1 ORDER BY sort_order, code"),
-        "prev_p": prev_p, "next_p": next_p, "replacement": replacement,
+        "prev_p": prev_p, "next_p": next_p, "replacement": replacement, "decision": decision,
         "report_mismatch": report_mismatch,
         "total_cost": cost.total_cost(pid, year), "year": year,
     })
@@ -339,7 +360,24 @@ def person_cessation(pid: int, end_date: str = Form(...)):
         conn.execute(
             "UPDATE employment SET end_date=? WHERE person_id=? AND end_date IS NULL AND voided=0",
             (end_date, pid))
+    if hrview.is_hr():   # la decisione di sostituire è del director: la trova in dashboard e in scheda
+        return RedirectResponse(f"/people/{pid}", status_code=302)
     return RedirectResponse(f"/people/{pid}/replacement", status_code=302)
+
+
+@router.post("/people/{pid}/replacement/none")
+def replacement_none(pid: int, note: str = Form(None)):
+    """Il director decide di non sostituire chi è cessato: decisione registrata (append-only)."""
+    db.execute("INSERT INTO replacement_decision (person_id, note) VALUES (?,?)", (pid, (note or "").strip() or None))
+    return RedirectResponse(f"/people/{pid}", status_code=302)
+
+
+@router.post("/people/{pid}/replacement/none/{did}/void")
+def replacement_none_void(pid: int, did: int):
+    """Decisione presa per errore: si annulla, e la cessazione torna «da decidere»."""
+    db.execute("UPDATE replacement_decision SET voided=1, void_reason='annullata da UI' WHERE id=? AND person_id=?",
+               (did, pid))
+    return RedirectResponse(f"/people/{pid}", status_code=302)
 
 
 def _last_assignment(pid: int):

@@ -45,7 +45,7 @@ def test_assunzioni_director_totali_filtro_e_trimestre(client, client2, hr_clien
     assert "Totale dei budget aperti" in html and "2 budget, 1 posizioni aperte" in html
     assert "tetto € 150.000" in html and "impegnato € 35.000" in html and "residuo € 115.000" in html
     assert "Q1 2027" in html
-    assert "Nuovo budget assunzioni" not in html and "/position/" not in html   # niente form per HR
+    assert "Nuovo budget assunzioni" not in html and "modifica «" not in html   # niente form per HR (salvo la RAL prevista, 0.39)
     html = hr_client.get(f"/comp/hiring?director={dir2}").text
     assert "Assunzioni dir2" in html and "Assunzioni coo" not in html and "1 budget, 0 posizioni" in html
     html = hr_client.get(f"/comp/hiring?director={dir2}&director={coo}").text

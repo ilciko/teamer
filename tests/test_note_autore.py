@@ -82,9 +82,8 @@ def test_hr_gestisce_le_sue_note_e_azioni(client, hr_client, luca):
     assert db.sys.one("SELECT meeting_note_id FROM action_item WHERE id=?", (aid,))["meeting_note_id"] is None
     assert hr_client.post("/actions", data={"person_id": pid, "description": "nuova azione"},
                           follow_redirects=False).status_code == 302
-    # il resto di HR resta in sola lettura
-    assert hr_client.post(f"/people/{pid}/ral", data={"amount": "1", "effective_date": "2026-01-01",
-                                                      "change_type": "aumento"}).status_code == 403
+    # fuori dalle sue route HR resta in sola lettura
+    assert hr_client.post("/org/team", data={"name": "X"}).status_code == 403
 
 
 def test_la_nota_altrui_non_si_tocca_nemmeno_per_id(client, hr_client, luca):

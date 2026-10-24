@@ -85,7 +85,7 @@
   </nav>
   <main class="content{% block content_class %}{% endblock %}">
     {% if public() %}<div class="public-banner no-print">👁 Modalità pubblica: pagine riservate chiuse, cifre oscurate.</div>{% endif %}
-    {% if is_hr() %}<div class="public-banner no-print">Profilo HR: i dati si consultano; note e azioni sono le tue. Le altre modifiche arrivano nelle prossime versioni.</div>{% endif %}
+    {% if is_hr() %}<div class="public-banner no-print">Profilo HR{% if hr_acting() %} · in veste di <strong>{{ hr_acting() }}</strong>: budget, piano aumenti e analisi salary sono i suoi{% else %} · consultazione: per creare budget e proposte scegli un director «in veste di»{% endif %}. Contratti, RAL, benefit e cessazioni si registrano dalla scheda persona.</div>{% endif %}
     {% block content %}{% endblock %}
   </main>
 </div>

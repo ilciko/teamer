@@ -2,7 +2,7 @@
 import json
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from app import db
@@ -82,10 +82,13 @@ def incentive_create(pid: int, amount: float = Form(...), inc_date: str = Form(.
 PENDING = ("bozza", "proposta", "approvata")
 
 
-def _salary_rows(budget_id=None):
-    """Righe dell'analisi salary; `a_piano` = proposte pendenti su quel budget."""
+def _salary_rows(budget_id=None, director_id=None):
+    """Righe dell'analisi salary; `a_piano` = proposte pendenti su quel budget. Per HR
+    `director_id` restringe alle persone di un director («in veste di»)."""
+    flt = " AND COALESCE(t.owner_user_id, p.owner_user_id) = ?" if director_id else ""
     rows = db.query(
-        """SELECT p.id, p.full_name, t.name AS team_name, pa.role_type,
+        f"""SELECT p.id, p.full_name, t.name AS team_name, pa.role_type,
+                  COALESCE(t.owner_user_id, p.owner_user_id) AS director_id,
                   (SELECT amount FROM ral_event r WHERE r.person_id=p.id AND r.voided=0
                    ORDER BY r.effective_date DESC, r.id DESC LIMIT 1) AS ral,
                   (SELECT box_number FROM ninebox_assessment n WHERE n.person_id=p.id AND n.voided=0
@@ -99,9 +102,47 @@ def _salary_rows(budget_id=None):
         LEFT JOIN person_assignment pa ON pa.person_id=p.id AND pa.voided=0 AND pa.end_date IS NULL
         LEFT JOIN team t ON t.id = pa.team_id
         LEFT JOIN employment e ON e.person_id=p.id AND e.voided=0 AND e.end_date IS NULL
-        WHERE p.status='attivo' ORDER BY t.name, p.full_name""",
-        (budget_id, budget_id))
+        WHERE p.status='attivo'{flt} ORDER BY t.name, p.full_name""",
+        (budget_id, budget_id, *([director_id] if director_id else [])))
     return [dict(r) for r in rows]
+
+
+def _new_employment(conn, pid: int, new_livello: str, effective: str, reason: str | None) -> None:
+    """Nuova situazione contrattuale con il livello nuovo: chiude la corrente il giorno prima e
+    copia da lei il resto (CCNL, contratto, smart working, part-time)."""
+    prev_end = (date.fromisoformat(effective) - timedelta(days=1)).isoformat()
+    prev = conn.execute(
+        "SELECT * FROM employment WHERE person_id=? AND end_date IS NULL AND voided=0 "
+        "ORDER BY start_date DESC LIMIT 1", (pid,)).fetchone()
+    conn.execute(
+        "UPDATE employment SET end_date=? WHERE person_id=? AND end_date IS NULL AND voided=0",
+        (prev_end, pid))
+    conn.execute(
+        "INSERT INTO employment (person_id, livello, ccnl, tipo_contratto, smartwork, "
+        "timbratura_scheme, part_time_pct, weekly_hours, start_date, note) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (pid, new_livello,
+         prev["ccnl"] if prev else db.get_meta("default_ccnl") or None,
+         prev["tipo_contratto"] if prev else None,
+         prev["smartwork"] if prev else None,
+         prev["timbratura_scheme"] if prev else None,
+         prev["part_time_pct"] if prev else 100,
+         prev["weekly_hours"] if prev else None,
+         effective, reason))
+
+
+def _hr_direct(row, new_ral: float, effective: str, new_livello: str, change_type: str, reason: str | None) -> None:
+    """HR (0.39): nuova RAL e/o livello scritti direttamente, senza piano (variazioni CCNL, scatti,
+    adeguamenti). L'importo è la RAL nuova, assoluta: vale anche per chi non ha ancora una RAL."""
+    with db.transaction() as conn:
+        if new_livello:
+            _new_employment(conn, row["id"], new_livello, effective, reason)
+        if new_ral:
+            conn.execute(
+                "INSERT INTO ral_event (person_id, effective_date, amount, delta, change_type, reason) "
+                "VALUES (?,?,?,?,?,?)",
+                (row["id"], effective, round(new_ral, 2), round(new_ral - (row["ral"] or 0), 2),
+                 change_type, reason))
 
 
 def _apply_increase(row, amount: float, effective: str, new_livello: str,
@@ -110,27 +151,9 @@ def _apply_increase(row, amount: float, effective: str, new_livello: str,
 
     Ritorna l'id dell'evento RAL creato (None se c'è solo il cambio livello).
     """
-    prev_end = (date.fromisoformat(effective) - timedelta(days=1)).isoformat()
     if new_livello:
-        prev = db.one(
-            "SELECT * FROM employment WHERE person_id=? AND end_date IS NULL AND voided=0 "
-            "ORDER BY start_date DESC LIMIT 1", (row["id"],))
         with db.transaction() as conn:
-            conn.execute(
-                "UPDATE employment SET end_date=? WHERE person_id=? AND end_date IS NULL AND voided=0",
-                (prev_end, row["id"]))
-            conn.execute(
-                "INSERT INTO employment (person_id, livello, ccnl, tipo_contratto, smartwork, "
-                "timbratura_scheme, part_time_pct, weekly_hours, start_date, note) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (row["id"], new_livello,
-                 prev["ccnl"] if prev else db.get_meta("default_ccnl") or None,
-                 prev["tipo_contratto"] if prev else None,
-                 prev["smartwork"] if prev else None,
-                 prev["timbratura_scheme"] if prev else None,
-                 prev["part_time_pct"] if prev else 100,
-                 prev["weekly_hours"] if prev else None,
-                 effective, reason))
+            _new_employment(conn, row["id"], new_livello, effective, reason)
     if amount and row["ral"]:
         return db.execute(
             "INSERT INTO ral_event (person_id, budget_id, effective_date, amount, delta, "
@@ -176,10 +199,15 @@ def _salary_changes(form, budget_id=None) -> list[dict]:
 
 @router.get("/comp/salary")
 def salary_page(request: Request, budget_id: OptInt = None, saved: int = 0):
-    rows = _salary_rows(budget_id)
+    """Per HR (0.39): senza director scelto è l'inserimento diretto di RAL e livello nuovi (CCNL),
+    per tutte le persone con il loro director; «in veste di» un director è il suo piano aumenti."""
+    ctx = hrview.context(request)
+    rows = _salary_rows(budget_id, ctx["acting"])
+    if ctx["hr"]:
+        rows = [{**r, "director": ctx["directors"].get(r["director_id"])} for r in rows]
     budgets = db.query(
-        "SELECT * FROM ral_budget WHERE status='aperto' "
-        "ORDER BY year IS NULL, year DESC, id DESC")
+        "SELECT * FROM ral_budget WHERE status='aperto' " + ("AND owner_user_id=? " if ctx["acting"] else "") +
+        "ORDER BY year IS NULL, year DESC, id DESC", (ctx["acting"],) if ctx["acting"] else ())
     budget = db.one("SELECT * FROM ral_budget WHERE id=?", (budget_id,)) if budget_id else None
     total = sum(r["ral"] or 0 for r in rows)
     amber = int(db.get_meta("ral_stale_amber_years", "2"))
@@ -188,10 +216,33 @@ def salary_page(request: Request, budget_id: OptInt = None, saved: int = 0):
     for c in last_inc.values():
         c["flag"] = cost.ral_age_flag(c["effective_date"], amber, red)
     return _templates().TemplateResponse(request, "salary.html", {
-        "rows": rows, "budgets": budgets, "budget": budget,
+        **ctx, "rows": rows, "budgets": budgets, "budget": budget,
         "budget_id": budget_id, "total": total, "saved": saved,
         "last_inc": last_inc,
     })
+
+
+@router.post("/comp/salary/apply")
+async def salary_apply(request: Request):
+    """HR (0.39): le RAL e i livelli nuovi scritti qui diventano subito eventi reali, senza piano
+    (variazioni CCNL comunicate dallo studio paghe). Solo HR, e non «in veste di» un director."""
+    if not hrview.is_hr() or hrview.acting_id():
+        raise HTTPException(403)
+    form = await request.form()
+    default_date = form.get("effective_date") or date.today().isoformat()
+    change_type = form.get("change_type") or "ccnl"
+    reason = (form.get("reason") or "").strip() or None
+    saved = 0
+    for r in _salary_rows():
+        new_ral = _num(form, f"ral_{r['id']}")
+        new_lvl = (form.get(f"lvl_{r['id']}") or "").strip()
+        if new_lvl == (r["livello"] or ""):
+            new_lvl = ""
+        if not new_ral and not new_lvl:
+            continue
+        _hr_direct(r, new_ral, form.get(f"date_{r['id']}") or default_date, new_lvl, change_type, reason)
+        saved += 1
+    return RedirectResponse(f"/comp/salary?saved={saved}", status_code=302)
 
 
 @router.post("/comp/salary/simulate")
@@ -215,6 +266,7 @@ async def salary_simulate(request: Request):
 @router.post("/comp/salary/plan")
 async def salary_plan(request: Request):
     """Salva le righe compilate come proposte in bozza: nulla diventa reale qui."""
+    hrview.require_acting()   # HR propone solo «in veste di» un director
     form = await request.form()
     budget_id = int(form["budget_id"]) if form.get("budget_id") else None
     reason = form.get("reason") or None
@@ -268,12 +320,12 @@ def plan_page(request: Request, budget_id: OptInt = None, saved: int = 0):
     e budget per riga, filtro Director e totale delle richieste; niente selettore dei budget."""
     ctx = hrview.context(request)
     where, params = "WHERE pr.voided=0", []
-    if ctx["hr"]:
+    if ctx["ro_hr"]:   # HR che consulta: solo ciò che la riguarda; «in veste di» è il piano del director
         budget_id = None
         where += " AND pr.status='proposta'"
-        if ctx["sel"]:
-            where += f" AND COALESCE(b.owner_user_id, t.owner_user_id, p.owner_user_id) IN ({','.join('?' * len(ctx['sel']))})"
-            params += sorted(ctx["sel"])
+    if ctx["sel"]:
+        where += f" AND COALESCE(b.owner_user_id, t.owner_user_id, p.owner_user_id) IN ({','.join('?' * len(ctx['sel']))})"
+        params += sorted(ctx["sel"])
     if budget_id:
         where += " AND pr.budget_id=?"
         params.append(budget_id)
@@ -303,13 +355,14 @@ def plan_page(request: Request, budget_id: OptInt = None, saved: int = 0):
         p["new_ral"] = int(new_ral) if new_ral == int(new_ral) else new_ral  # niente "43500.0"
     budget = db.one("SELECT * FROM ral_budget WHERE id=?", (budget_id,)) if budget_id else None
     totals = None
-    if ctx["hr"]:
+    if ctx["ro_hr"]:
         totals = {"n": len(proposals), "delta": sum(p["amount"] or 0 for p in proposals),
                   "new_ral": sum(p["new_ral"] for p in proposals)}
     return _templates().TemplateResponse(request, "plan.html", {
         **ctx, "totals": totals,
         "proposals": proposals, "budget": budget, "budget_id": budget_id,
-        "budgets": db.query("SELECT * FROM ral_budget ORDER BY id DESC"),
+        "budgets": db.query("SELECT * FROM ral_budget " + ("WHERE owner_user_id=? " if ctx["acting"] else "") +
+                            "ORDER BY id DESC", (ctx["acting"],) if ctx["acting"] else ()),
         "summary": _budget_numbers(budget) if budget else None,
         "n_approvate": sum(1 for p in proposals if p["status"] == "approvata"),
         "n_bozze": sum(1 for p in proposals if p["status"] == "bozza"),
@@ -322,10 +375,16 @@ def _plan_redirect(budget_id) -> RedirectResponse:
     return RedirectResponse(f"/comp/plan{qs}", status_code=302)
 
 
+# macchina a stati del piano (0.39): bozza → proposta (a HR) → approvata → applicata; una proposta
+# si respinge o torna in bozza (per cambiarne l'importo), un'approvata torna in attesa, una respinta si riapre
+PLAN_TRANSITIONS = {"bozza": {"proposta"}, "proposta": {"approvata", "respinta", "bozza"},
+                    "approvata": {"proposta"}, "respinta": {"bozza"}}
+
+
 @router.post("/comp/plan/{pid}/status")
 def plan_status(pid: int, status: str = Form(...)):
     p = db.one("SELECT * FROM ral_proposal WHERE id=?", (pid,))
-    if not p or p["status"] == "applicata":
+    if not p or status not in PLAN_TRANSITIONS.get(p["status"], ()):
         return _plan_redirect(p["budget_id"] if p else None)
     today = date.today().isoformat()
     proposed_at = today if status == "proposta" else p["proposed_at"]
@@ -341,9 +400,12 @@ def plan_status(pid: int, status: str = Form(...)):
 @router.post("/comp/plan/{pid}/update")
 def plan_update(pid: int, new_ral: float = Form(0), effective_date: str = Form(None),
                 new_livello: str = Form(None), note: str = Form(None)):
-    """Si conferma la nuova RAL (è quella che decide HR): la variazione la calcola il server."""
+    """Si conferma la nuova RAL (è quella che decide HR): la variazione la calcola il server.
+    Il director cambia solo le bozze (una proposta inviata la riporta in bozza); HR cambia le
+    proposte in attesa — è la sua validazione — e, «in veste di» un director, anche le sue bozze."""
     p = db.one("SELECT * FROM ral_proposal WHERE id=?", (pid,))
-    if not p or p["status"] == "applicata":
+    editable = {"bozza"} if not hrview.is_hr() else ({"bozza", "proposta"} if hrview.acting_id() else {"proposta"})
+    if not p or p["status"] not in editable:
         return _plan_redirect(p["budget_id"] if p else None)
     p = dict(p)
     p["effective_date"] = effective_date or None
@@ -494,7 +556,7 @@ def budget_page(request: Request):
                         **_budget_numbers(b)})
     open_budgets = [b for b in budgets if b["status"] == "aperto"]
     totals = None
-    if ctx["hr"]:
+    if ctx["ro_hr"]:
         totals = {k: sum(b[k] for b in open_budgets) for k in ("total_cap", "applicato", "impegnato", "residuo")}
         totals["n_budget"] = len(open_budgets)
         totals["n_richieste"] = sum(len(b["pending"]) for b in open_budgets)
@@ -511,11 +573,16 @@ def budget_create(period: str = Form(...), year: int = Form(...),
                   description: str = Form(None)):
     """Tetto fisso oppure % sul monte RAL (platea: attivi, esclusi gli assunti dell'anno)."""
     pct_val = float(pct) if pct else None
+    acting = hrview.acting_id()
     people = db.query(
         """SELECT p.id, p.hire_date,
                   (SELECT amount FROM ral_event r WHERE r.person_id=p.id AND r.voided=0
                    ORDER BY r.effective_date DESC, r.id DESC LIMIT 1) AS ral
-           FROM person p WHERE p.status='attivo' ORDER BY p.full_name""")
+           FROM person p
+           LEFT JOIN person_assignment pa ON pa.person_id=p.id AND pa.voided=0 AND pa.end_date IS NULL
+           LEFT JOIN team t ON t.id=pa.team_id
+           WHERE p.status='attivo' AND (? IS NULL OR COALESCE(t.owner_user_id, p.owner_user_id) = ?)
+           ORDER BY p.full_name""", (acting, acting))
     members = []
     for r in people:
         ral = r["ral"] or 0
@@ -524,10 +591,12 @@ def budget_create(period: str = Form(...), year: int = Form(...),
         members.append((r["id"], ral, 0 if reason else 1, reason))
     included_amounts = [m[1] for m in members if m[2]]
     cap = budget_svc.cap_from_pct(pct_val, included_amounts) if pct_val else float(total_cap or 0)
+    owner = hrview.require_acting()   # HR: il budget nasce del director scelto (e la platea sono le sue persone)
     with db.transaction() as conn:
         cur = conn.execute(
-            "INSERT INTO ral_budget (period, year, pct, total_cap, description) VALUES (?,?,?,?,?)",
-            (period, year, pct_val, cap, description or None))
+            "INSERT INTO ral_budget (period, year, pct, total_cap, description, owner_user_id) "
+            "VALUES (?,?,?,?,?, COALESCE(?, teamer_owner()))",
+            (period, year, pct_val, cap, description or None, owner))
         bid = cur.lastrowid
         for pid, ral, inc, reason in members:
             conn.execute(
@@ -627,7 +696,7 @@ def hiring_page(request: Request):
                         **_hiring_numbers(hb)})
     open_budgets = [b for b in budgets if b["status"] == "aperto"]
     totals = None
-    if ctx["hr"]:
+    if ctx["ro_hr"]:
         totals = {k: sum(b[k] for b in open_budgets) for k in ("cap", "riporto", "applicato", "impegnato", "residuo")}
         totals["n_budget"] = len(open_budgets)
         totals["n_aperte"] = sum(len(b["aperte"]) for b in open_budgets)
@@ -643,14 +712,21 @@ def hiring_page(request: Request):
         "teams": db.query("SELECT * FROM team WHERE archived_at IS NULL ORDER BY name"),
         "recent_people": db.query(
             "SELECT id, full_name FROM person WHERE status='attivo' ORDER BY id DESC LIMIT 50"),
+        # chi una posizione nuova può sostituire: i cessati senza sostituzione, poi gli attivi (uscite annunciate)
+        "replaceable": db.query(
+            """SELECT p.id, p.full_name, p.status, p.end_date FROM person p
+               WHERE NOT EXISTS (SELECT 1 FROM hiring_position hp WHERE hp.replaces_person_id=p.id AND hp.voided=0)
+               ORDER BY p.status='cessato' DESC, p.end_date DESC, p.full_name"""),
     })
 
 
 @router.post("/comp/hiring")
 def hiring_budget_create(period: str = Form(...), year: int = Form(...),
                          total_cap: float = Form(...), note: str = Form(None)):
-    db.execute("INSERT INTO hiring_budget (period, year, total_cap, note) VALUES (?,?,?,?)",
-               (period, year, total_cap, note or None))
+    owner = hrview.require_acting()   # HR: il budget nasce del director scelto
+    db.execute("INSERT INTO hiring_budget (period, year, total_cap, note, owner_user_id) "
+               "VALUES (?,?,?,?, COALESCE(?, teamer_owner()))",
+               (period, year, total_cap, note or None, owner))
     return RedirectResponse("/comp/hiring", status_code=302)
 
 
@@ -714,9 +790,10 @@ async def hiring_transfer(bid: int, request: Request):
             year = int(form.get("year") or date.today().year)
             period = (form.get("period") or "").strip() or f"Assunzioni {year}"
             to_id = conn.execute(
-                "INSERT INTO hiring_budget (period, year, total_cap, note) VALUES (?,?,?,?)",
+                "INSERT INTO hiring_budget (period, year, total_cap, note, owner_user_id) "
+                "VALUES (?,?,?,?, COALESCE(?, teamer_owner()))",
                 (period, year, float(form.get("total_cap") or 0),
-                 (form.get("new_note") or "").strip() or None)).lastrowid
+                 (form.get("new_note") or "").strip() or None, hrview.owner())).lastrowid
         else:
             dest = conn.execute("SELECT id FROM hiring_budget WHERE id=?",
                                 (form.get("to_budget_id") or 0,)).fetchone()
@@ -763,12 +840,23 @@ def hiring_transfer_void(tid: int):
 @router.post("/comp/hiring/{bid}/position")
 def position_create(bid: int, title: str = Form(...), team_id: str = Form(None),
                     role_type: str = Form("ic"), expected_ral: float = Form(0),
-                    expected_start: str = Form(None), note: str = Form(None)):
+                    expected_start: str = Form(None), note: str = Form(None),
+                    replaces_person_id: str = Form(None)):
+    """Ogni posizione dice se è un +1 al team o la sostituzione di qualcuno (0.39)."""
     db.execute(
         "INSERT INTO hiring_position (budget_id, title, team_id, role_type, expected_ral, "
-        "expected_start, note) VALUES (?,?,?,?,?,?,?)",
+        "expected_start, note, replaces_person_id) VALUES (?,?,?,?,?,?,?,?)",
         (bid, title.strip(), team_id or None, role_type, expected_ral,
-         expected_start or None, note or None))
+         expected_start or None, note or None, int(replaces_person_id) if (replaces_person_id or "").isdigit() else None))
+    return RedirectResponse("/comp/hiring", status_code=302)
+
+
+@router.post("/comp/hiring/position/{pid}/ral")
+def position_ral(pid: int, expected_ral: float = Form(...)):
+    """HR (0.39) corregge la RAL prevista di una posizione di qualunque director, senza «in veste di»."""
+    if not hrview.is_hr():
+        raise HTTPException(403)
+    db.execute("UPDATE hiring_position SET expected_ral=? WHERE id=? AND voided=0", (expected_ral, pid))
     return RedirectResponse("/comp/hiring", status_code=302)
 
 

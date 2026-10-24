@@ -143,8 +143,11 @@ def test_senza_ral_elencata_ma_esclusa(client):
 
 def test_part_time_da_employment(client):
     tid, lp = _team(), _profilo(client, "GE040")
+    from app import db
+
     pid = _persona(client, "Anna Rossi", tid, 50000, lp)
-    client.post(f"/people/{pid}/employment", data={"livello": "impiegato", "part_time_pct": "50", "start_date": "2026-01-01"})
+    db.execute("INSERT INTO employment (person_id, livello, part_time_pct, start_date) "   # il contratto lo scrive HR (0.39)
+               "VALUES (?, 'impiegato', 50, '2026-01-01')", (pid,))
     html = client.post("/comp/listino/simulate", data={"anno": "2026"}).text
     assert "96,8" in html and "749,35" in html  # metà giorni, costo/gg doppio
 

@@ -7,9 +7,12 @@ blocca quando l'ultima pagina di quella sessione si chiude.
 
 Ruoli: l'admin (IT) vede solo il pannello `/admin` e il proprio account; il director
 tutto il resto; HR tutto il resto tranne dashboard, report, simulazioni, verifica dei
-riporti e configurazione, e scrive solo le sue note e azioni (`allowed`, `HR_WRITE_OK`).
+riporti e configurazione, e scrive dentro `HR_WRITE_OK` (note e azioni, persone e contratti, piano e
+budget; `allowed`); la parte contrattuale è solo sua (`CONTRACT_POST`: il director la legge).
 """
 from urllib.parse import quote
+
+import re
 
 from fastapi import APIRouter, Form, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -27,9 +30,16 @@ ADMIN_PREFIXES = ("/admin", "/account", "/lock")
 HOME = {"admin": "/admin", "director": "/", "hr": "/org"}
 # HR (0.36): niente dashboard, report, simulazioni, verifica riporti, configurazione
 HR_DENIED = ("/reports", "/org/sim", "/org/riporti", "/settings")
-# le scritture di HR: il suo account, uscita, modalità pubblica, le sue note e azioni (0.37) e le
-# anteprime htmx (`*/simulate`), che calcolano e basta
-HR_WRITE_OK = ("/lock", "/account", "/public-mode", "/notes", "/actions")
+# le scritture di HR: il suo account, uscita, modalità pubblica, le sue note e azioni (0.37), le
+# anteprime htmx (`*/simulate`), che calcolano e basta, e dalla 0.39 (tappa 3) persone e contratti,
+# analisi salary, piano, budget aumenti e assunzioni (quelli dei director «in veste di») e il
+# selettore del director
+HR_WRITE_OK = ("/lock", "/account", "/public-mode", "/notes", "/actions", "/hr/acting",
+               "/people", "/comp/salary", "/comp/plan", "/comp/budget", "/comp/hiring")
+# ...ma non elimina persone né decide la sostituzione di chi cessa (è del director)
+HR_WRITE_DENIED = re.compile(r"^/people/\d+/(delete|replacement)(/|$)")
+# la parte contrattuale la scrive solo HR (0.39): il director la legge
+CONTRACT_POST = re.compile(r"^/people/\d+/(ral|benefit|incentive|employment|cessation)(/|$)")
 
 
 def client_ip(request: Request) -> str | None:
@@ -71,7 +81,11 @@ def allowed(role: str, path: str, method: str = "GET") -> bool:
     if role == "hr":
         if path == "/" or path.startswith(HR_DENIED):
             return False
-        return method == "GET" or path.startswith(HR_WRITE_OK) or path.endswith("/simulate")
+        if method == "GET" or path.endswith("/simulate"):
+            return True
+        return path.startswith(HR_WRITE_OK) and not HR_WRITE_DENIED.match(path)
+    if method != "GET" and CONTRACT_POST.match(path):
+        return False
     return True
 
 

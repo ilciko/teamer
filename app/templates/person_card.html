@@ -36,9 +36,23 @@
   <span class="badge {{ 'green' if replacement.status == 'assunta' else 'amber' if replacement.status == 'in_selezione' else 'red' if replacement.status == 'annullata' else '' }}">{{ lookup_label('position_status', replacement.status) }}</span>
   {% if replacement.hired_name %} da <a href="/people/{{ replacement.person_id }}"><strong>{{ replacement.hired_name }}</strong></a>{% endif %}
   · <a href="/comp/hiring">apri assunzioni →</a>
+  {% elif decision %}
+  <strong>Decisione del director:</strong> non sostituire <span class="muted3">({{ decision.created_at | dt }}{% if decision.note %} — {{ decision.note }}{% endif %})</span>
+  {% if not is_hr() %}
+  <form method="post" action="/people/{{ p.id }}/replacement/none/{{ decision.id }}/void" style="display:inline" class="hr-ok"
+        onsubmit="return confirm('Annullare la decisione? La cessazione torna da decidere.')">
+    <button class="btn sm ghost">Annulla la decisione</button>
+  </form>
+  {% endif %}
+  {% elif is_hr() %}
+  <span class="badge amber">da decidere</span> Il director non ha ancora deciso se sostituire questa persona.
   {% else %}
-  Nessuna sostituzione pianificata per questa cessazione.
+  <span class="badge amber">da decidere</span> Nessuna sostituzione pianificata per questa cessazione:
   <a href="/people/{{ p.id }}/replacement"><strong>Pianifica sostituzione →</strong></a>
+  <form method="post" action="/people/{{ p.id }}/replacement/none" style="display:inline;margin-left:8px" class="hr-ok">
+    <input type="text" name="note" placeholder="motivo (facoltativo)" style="width:180px">
+    <button class="btn sm ghost">Non sostituire</button>
+  </form>
   {% endif %}
 </div>
 {% endif %}
@@ -58,7 +72,7 @@
 
   <div class="card">
     <div class="card-title">Anagrafica</div>
-    <form method="post" action="/people/{{ p.id }}/update">
+    <form method="post" action="/people/{{ p.id }}/update" class="hr-ok">
       <label class="fld">Nome e cognome</label><input type="text" name="full_name" value="{{ p.full_name }}" required>
       <div class="frow">
         <div><label class="fld">Assunzione</label><input type="date" name="hire_date" value="{{ p.hire_date or '' }}"></div>
@@ -70,29 +84,32 @@
     </form>
     <details style="margin-top:10px">
       <summary class="muted small" style="cursor:pointer">Avatar / cessazione</summary>
-      <form method="post" action="/people/{{ p.id }}/avatar" enctype="multipart/form-data">
+      <form method="post" action="/people/{{ p.id }}/avatar" enctype="multipart/form-data" class="hr-ok">
         <label class="fld">Immagine profilo</label>
         <div class="frow"><input type="file" name="avatar" accept="image/*"><button class="btn sm ghost">Carica</button></div>
       </form>
-      {% if p.status == 'attivo' %}
-      <form method="post" action="/people/{{ p.id }}/cessation" onsubmit="return confirm('Confermi la cessazione?')">
+      {% if p.status == 'attivo' and is_hr() %}
+      <form method="post" action="/people/{{ p.id }}/cessation" onsubmit="return confirm('Confermi la cessazione?')" class="hr-ok">
         <label class="fld">Data cessazione</label>
         <div class="frow"><input type="date" name="end_date" required><button class="btn sm danger">Cessa</button></div>
       </form>
       {% endif %}
+      {% if p.status == 'attivo' and not is_hr() %}<p class="muted3 small" style="margin-top:8px">La cessazione la registra HR.</p>{% endif %}
+      {% if not is_hr() %}
       <div style="margin-top:12px;padding-top:10px;border-top:0.5px solid var(--red-border)">
         <label class="fld" style="color:var(--red-text)">Eliminazione definitiva (solo inserimenti per errore)</label>
         <p class="muted3 small" style="margin-bottom:6px">Cancella la persona e <strong>tutti</strong> i suoi dati (RAL, valutazioni, obiettivi, note…). Per un'uscita reale usa la cessazione. Per confermare riscrivi il nome esatto.</p>
         {% if request.query_params.get('err') == 'confirm' %}<div class="flash error">Il nome non corrisponde: nulla è stato eliminato.</div>{% endif %}
         {% if request.query_params.get('err') == 'linked' %}<div class="flash error">Questa persona è ancora collegata ad altri dati e non si può eliminare: usa la cessazione.</div>{% endif %}
         <form method="post" action="/people/{{ p.id }}/delete"
-              onsubmit="return confirm('Eliminazione irreversibile di {{ p.full_name }} e di tutto il suo storico. Procedere?')">
+              onsubmit="return confirm('Eliminazione irreversibile di {{ p.full_name }} e di tutto il suo storico. Procedere?')" class="hr-ok">
           <div class="frow">
             <input type="text" name="confirm_name" placeholder="{{ p.full_name }}" required>
             <button class="btn sm danger">Elimina definitivamente</button>
           </div>
         </form>
       </div>
+      {% endif %}
     </details>
   </div>
 
@@ -121,10 +138,10 @@
     {% endif %}
     {% if not employment %}<p class="muted small" style="margin-top:8px">Nessuna situazione contrattuale registrata.</p>{% endif %}
 
-    {% if assignment %}
+    {% if assignment and not is_hr() %}
     <details style="margin-top:10px">
       <summary class="muted small" style="cursor:pointer">Correggi assegnazione corrente (errore di inserimento)</summary>
-      <form method="post" action="/people/{{ p.id }}/assignment/{{ assignment.id }}/update">
+      <form method="post" action="/people/{{ p.id }}/assignment/{{ assignment.id }}/update" class="hr-ok">
         <div class="frow">
           <div><label class="fld">Team</label>
             <select name="team_id" required>
@@ -150,10 +167,10 @@
     </details>
     {% endif %}
 
-    {% if employment %}
+    {% if employment and is_hr() %}
     <details style="margin-top:6px">
       <summary class="muted small" style="cursor:pointer">Correggi situazione contrattuale corrente (errore di inserimento)</summary>
-      <form method="post" action="/people/{{ p.id }}/employment/{{ employment.id }}/update">
+      <form method="post" action="/people/{{ p.id }}/employment/{{ employment.id }}/update" class="hr-ok">
         <div class="frow">
           <div><label class="fld">Livello</label>
             <select name="livello"><option value="">—</option>
@@ -189,9 +206,10 @@
     </details>
     {% endif %}
 
+    {% if not is_hr() %}
     <details style="margin-top:10px">
       <summary class="muted small" style="cursor:pointer">Nuova assegnazione (team/ruolo)</summary>
-      <form method="post" action="/people/{{ p.id }}/assignment">
+      <form method="post" action="/people/{{ p.id }}/assignment" class="hr-ok">
         <div class="frow">
           <div><label class="fld">Team</label>
             <select name="team_id" required>{% for t in teams %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}</select></div>
@@ -209,10 +227,12 @@
         <div class="actions"><button class="btn sm">Registra</button></div>
       </form>
     </details>
+    {% endif %}
 
+    {% if is_hr() %}
     <details style="margin-top:6px">
       <summary class="muted small" style="cursor:pointer">Nuova situazione contrattuale</summary>
-      <form method="post" action="/people/{{ p.id }}/employment">
+      <form method="post" action="/people/{{ p.id }}/employment" class="hr-ok">
         <div class="frow">
           <div><label class="fld">Livello</label>
             <select name="livello"><option value="">—</option>{% for l in lookups('livello') %}<option value="{{ l.code }}">{{ l.label }}</option>{% endfor %}</select></div>
@@ -236,6 +256,9 @@
         <div class="actions"><button class="btn sm">Registra</button></div>
       </form>
     </details>
+    {% else %}
+    <p class="muted3 small" style="margin-top:8px">Contratto, RAL, benefit e cessazione li registra HR (0.39): qui si leggono.</p>
+    {% endif %}
 
     {% if assignments|length > 1 or employments|length > 1 %}
     <details style="margin-top:6px">
@@ -277,14 +300,15 @@
         <td class="num {{ 'pos' if e.delta_calc > 0 else 'neg' if e.delta_calc < 0 else '' }}">{{ e.delta_calc | eur if e.delta_calc else '' }}</td>
         <td>{{ lookup_label('change_type', e.change_type) }}</td>
         <td class="muted">{{ e.reason or '' }}</td>
-        <td><form method="post" action="/people/{{ p.id }}/ral/{{ e.id }}/void" onsubmit="return confirm('Annullare questo evento?')">
-          <button class="btn sm ghost" title="Annulla evento">✕</button></form></td>
+        <td>{% if is_hr() %}<form method="post" action="/people/{{ p.id }}/ral/{{ e.id }}/void" onsubmit="return confirm('Annullare questo evento?')" class="hr-ok">
+          <button class="btn sm ghost" title="Annulla evento">✕</button></form>{% endif %}</td>
       </tr>
       {% else %}<tr><td colspan="6" class="muted">Nessun evento RAL.</td></tr>{% endfor %}
     </table>
+    {% if is_hr() %}
     <details style="margin-top:10px" {{ 'open' if not ral_events }}>
       <summary class="muted small" style="cursor:pointer">Nuovo evento RAL</summary>
-      <form method="post" action="/people/{{ p.id }}/ral">
+      <form method="post" action="/people/{{ p.id }}/ral" class="hr-ok">
         <div class="frow">
           <div><label class="fld">Nuova RAL €</label><input type="number" name="amount" step="0.01" required></div>
           <div><label class="fld">Decorrenza</label><input type="date" name="effective_date" value="{{ today() }}" required></div>
@@ -297,6 +321,7 @@
         <div class="actions"><button class="btn sm">Registra</button></div>
       </form>
     </details>
+    {% endif %}
   </div>
 
   <div class="card">
@@ -307,14 +332,15 @@
         <td><strong>{{ b.name }}</strong></td>
         <td>{% if b.value_kind == 'amount' %}{{ (b.value or 0) | float | eur }}{% else %}{{ b.value or 'sì' }}{% endif %}</td>
         <td class="muted small">dal {{ b.effective_date | dt }}</td>
-        <td><form method="post" action="/people/{{ p.id }}/benefit/{{ b.id }}/end">
-          <button class="btn sm ghost" title="Termina benefit">✕</button></form></td>
+        <td>{% if is_hr() %}<form method="post" action="/people/{{ p.id }}/benefit/{{ b.id }}/end" class="hr-ok">
+          <button class="btn sm ghost" title="Termina benefit">✕</button></form>{% endif %}</td>
       </tr>
       {% else %}<tr><td class="muted" colspan="4">Nessun benefit attivo.</td></tr>{% endfor %}
     </table>
+    {% if is_hr() %}
     <details style="margin-top:8px">
       <summary class="muted small" style="cursor:pointer">Assegna benefit</summary>
-      <form method="post" action="/people/{{ p.id }}/benefit">
+      <form method="post" action="/people/{{ p.id }}/benefit" class="hr-ok">
         <div class="frow">
           <div><label class="fld">Benefit</label>
             <select name="benefit_type_id" required>
@@ -331,7 +357,7 @@
     </details>
     <details style="margin-top:6px">
       <summary class="muted small" style="cursor:pointer">Incentivo one-shot</summary>
-      <form method="post" action="/people/{{ p.id }}/incentive">
+      <form method="post" action="/people/{{ p.id }}/incentive" class="hr-ok">
         <div class="frow">
           <div><label class="fld">Importo €</label><input type="number" name="amount" step="0.01" required></div>
           <div><label class="fld">Data</label><input type="date" name="inc_date" value="{{ today() }}" required></div>
@@ -339,12 +365,15 @@
         <label class="fld">Motivo</label><input type="text" name="reason">
         <div class="actions"><button class="btn sm">Registra</button></div>
       </form>
-      {% if incentives %}
-      <table class="tbl small" style="margin-top:8px">
-        {% for i in incentives %}<tr><td>{{ i.inc_date | dt }}</td><td class="num">{{ i.amount | eur }}</td><td class="muted">{{ i.reason or '' }}</td></tr>{% endfor %}
-      </table>
-      {% endif %}
     </details>
+  </div>
+    {% endif %}
+    {% if incentives %}
+    <div class="muted small" style="margin-top:8px">Incentivi one-shot</div>
+    <table class="tbl small">
+      {% for i in incentives %}<tr><td>{{ i.inc_date | dt }}</td><td class="num">{{ i.amount | eur }}</td><td class="muted">{{ i.reason or '' }}</td></tr>{% endfor %}
+    </table>
+    {% endif %}
   </div>
 
   <div class="card">
@@ -359,14 +388,14 @@
         <td>{{ n.perf_level }} ({{ '%.2f' | format(n.adj_perf) }})</td>
         <td>{{ n.pot_level }} ({{ '%.2f' | format(n.adj_pot) }})</td>
         <td class="muted small">{{ n.role_type }} · {{ n.seniority }}</td>
-        <td><form method="post" action="/ninebox/{{ n.id }}/void" onsubmit="return confirm('Annullare questa valutazione?')">
+        <td>{% if not is_hr() %}<form method="post" action="/ninebox/{{ n.id }}/void" onsubmit="return confirm('Annullare questa valutazione?')" class="hr-ok">
           <input type="hidden" name="back" value="/people/{{ p.id }}">
-          <button class="btn sm ghost" title="Annulla valutazione">✕</button></form></td>
+          <button class="btn sm ghost" title="Annulla valutazione">✕</button></form>{% endif %}</td>
       </tr>
       {% endfor %}
     </table>
     {% else %}<p class="muted small">Nessuna valutazione.</p>{% endif %}
-    <div class="actions"><a class="btn sm" href="/ninebox/start/{{ p.id }}">Nuova valutazione 9-box →</a></div>
+    {% if not is_hr() %}<div class="actions"><a class="btn sm" href="/ninebox/start/{{ p.id }}">Nuova valutazione 9-box →</a></div>{% endif %}
   </div>
 
   <div class="card">
@@ -419,11 +448,11 @@
       📎 <a href="/attachments/{{ a.id }}">{{ a.filename }}</a>
       <span class="muted3">{{ a.note or '' }}</span>
       <form method="post" action="/people/{{ p.id }}/attachment/{{ a.id }}/delete" style="display:inline"
-            onsubmit="return confirm('Eliminare l\'allegato {{ a.filename }}?')">
+            onsubmit="return confirm('Eliminare l\'allegato {{ a.filename }}?')" class="hr-ok">
         <button class="btn sm ghost" title="Elimina allegato">✕</button></form>
     </div>
     {% else %}<p class="muted small">Nessun allegato.</p>{% endfor %}
-    <form method="post" action="/people/{{ p.id }}/attachment" enctype="multipart/form-data" style="margin-top:8px">
+    <form method="post" action="/people/{{ p.id }}/attachment" enctype="multipart/form-data" style="margin-top:8px" class="hr-ok">
       <div class="frow">
         <input type="file" name="file" required>
         <input type="text" name="note" placeholder="nota (es. review 2026 firmata)">

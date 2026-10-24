@@ -104,8 +104,8 @@ def test_correzione_su_posizione_assunta(client):
     bid = _budget(client, "Assunzioni 2026", 2026)
     hp = _position(client, bid, "QA engineer", alfa)
     pid = db.execute("INSERT INTO person (full_name) VALUES ('Assunta Due')")
-    client.post(f"/people/{pid}/ral", data={
-        "amount": 41000, "effective_date": "2026-03-01", "change_type": "assunzione"})
+    db.execute("INSERT INTO ral_event (person_id, effective_date, amount, change_type) "   # la RAL la scrive HR (0.39)
+               "VALUES (?, '2026-03-01', 41000, 'assunzione')", (pid,))
     client.post(f"/comp/hiring/position/{hp}/status",
                 data={"status": "assunta", "person_id": pid})
 

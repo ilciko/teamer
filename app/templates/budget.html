@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% from "_filters.html" import multi %}
+{% from "_filters.html" import multi, acting_select %}
 {% block title %}Budget aumenti{% endblock %}
 
 {% macro budget_card(b, compact=false) %}
 {# ro = niente azioni: budget chiuso, oppure HR che per ora consulta (le sue scritture arrivano con la tappa 3) #}
-{% set ro = compact or hr %}
+{% set ro = compact or ro_hr %}
 <div class="card {{ 'muted3' if compact }}">
   <div class="page-head" style="margin-bottom:8px">
     <strong>{{ b.period }}</strong>
@@ -18,14 +18,14 @@
     <span class="badge green">applicato {{ b.applicato | eur }}</span>
     <span class="badge amber">impegnato {{ b.impegnato | eur }}</span>
     <span class="badge {{ 'red' if b.residuo < 0 else 'blue' }}">residuo {{ b.residuo | eur }}</span>
-    {% if hr %}
+    {% if ro_hr %}
     {% elif not compact %}
     <form method="post" action="/comp/budget/{{ b.id }}/close"
-          onsubmit="return confirm('Chiudere il budget {{ b.period }}? Sparirà dalle selezioni ma resterà nello storico.')">
+          onsubmit="return confirm('Chiudere il budget {{ b.period }}? Sparirà dalle selezioni ma resterà nello storico.')" class="hr-ok">
       <button class="btn sm ghost">Chiudi</button>
     </form>
     {% else %}
-    <form method="post" action="/comp/budget/{{ b.id }}/reopen">
+    <form method="post" action="/comp/budget/{{ b.id }}/reopen" class="hr-ok">
       <button class="btn sm ghost">Riapri</button>
     </form>
     {% endif %}
@@ -48,13 +48,13 @@
           {% if m.included %}<span class="badge green">inclusa</span>
           {% else %}<span class="badge">esclusa{{ ' — ' + m.auto_reason if m.auto_reason }}</span>{% endif %}
         </td>
-        <td>{% if not ro %}<form method="post" action="/comp/budget/{{ b.id }}/member/{{ m.id }}/toggle">
+        <td>{% if not ro %}<form method="post" action="/comp/budget/{{ b.id }}/member/{{ m.id }}/toggle" class="hr-ok">
           <button class="btn sm ghost">{{ 'Escludi' if m.included else 'Includi' }}</button></form>{% endif %}</td>
       </tr>
       {% endfor %}
     </table>
     {% if not ro %}
-    <form method="post" action="/comp/budget/{{ b.id }}/refresh-ral" style="margin-top:6px">
+    <form method="post" action="/comp/budget/{{ b.id }}/refresh-ral" style="margin-top:6px" class="hr-ok">
       <button class="btn sm ghost" title="Riallinea gli snapshot alle RAL correnti">↻ Aggiorna RAL della platea</button>
     </form>
     {% endif %}
@@ -96,9 +96,8 @@
   <h1>Budget aumenti</h1>
   {% if hr %}
   <div class="spacer"></div>
-  <form method="get" action="/comp/budget">
-    {{ multi('director', dir_opts, sel, 'Tutti i director', 'Director') }}
-  </form>
+  {{ acting_select(dir_opts, acting, '/comp/budget') }}
+  {% if ro_hr %}<form method="get" action="/comp/budget">{{ multi('director', dir_opts, sel, 'Tutti i director', 'Director') }}</form>{% endif %}
   {% endif %}
 </div>
 
@@ -118,10 +117,10 @@
 <div class="card"><p class="muted">Nessun budget aperto. I budget mettono un tetto agli aumenti di un periodo; gli eventi RAL vi si agganciano dall'analisi salary.</p></div>
 {% endfor %}
 
-{% if not hr %}
+{% if not ro_hr %}
 <div class="card" style="max-width:620px">
-  <div class="card-title">Nuovo budget</div>
-  <form method="post" action="/comp/budget">
+  <div class="card-title">Nuovo budget{% if acting_name %} <span class="badge purple">{{ acting_name }}</span>{% endif %}</div>
+  <form method="post" action="/comp/budget" class="hr-ok">
     <div class="frow">
       <div><label class="fld">Periodo (etichetta)</label><input type="text" name="period" placeholder="Aumenti 2026" required></div>
       <div><label class="fld">Anno</label><input type="number" name="year" value="{{ today()[:4] }}" required></div>

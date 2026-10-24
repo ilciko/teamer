@@ -1,5 +1,5 @@
-"""Ruolo HR, tappa 1 (0.36): vede le persone di tutti i director, in sola lettura (tappa 2, le sue
-note e azioni: tests/test_note_autore.py)."""
+"""Ruolo HR, tappa 1 (0.36): vede le persone di tutti i director; le sue scritture sono in
+tests/test_note_autore.py (tappa 2) e tests/test_tappa3_hr.py (contratti, budget, piano)."""
 import pytest
 
 from app import db, perimeter, users
@@ -71,9 +71,9 @@ def test_pagine_fuori_dal_ruolo(hr_client, path):
 
 def test_post_rifiutati_salvo_account_e_anteprime(client, client2, hr_client):
     t1, t2, p1, p2 = _seed(client, client2)
-    for path, data in [("/people", {"full_name": "Nuova"}), ("/org/team", {"name": "X"}),
-                       (f"/people/{p1}/ral", {"amount": "1", "effective_date": "2026-01-01", "change_type": "aumento"}),
-                       (f"/people/{p1}/assignment", {"team_id": t2, "role_type": "ic", "start_date": "2026-01-01"}),
+    for path, data in [("/org/team", {"name": "X"}), (f"/people/{p1}/delete", {"confirm_name": "Anna Alfa"}),
+                       (f"/people/{p1}/replacement", {"title": "X", "expected_start": "2026-01-01"}),
+                       ("/comp/bonus", {}), ("/ninebox/save", {}), ("/cycles", {}),
                        ("/settings/general", {}), ("/admin/users", {}), ("/azienda/liste", {})]:
         assert hr_client.post(path, data=data).status_code == 403, path
     assert db.sys.one("SELECT COUNT(*) AS n FROM person")["n"] == 2
@@ -91,7 +91,7 @@ def test_post_rifiutati_salvo_account_e_anteprime(client, client2, hr_client):
     assert hr_client.get("/comp/salary").status_code == 200
 
 
-def test_connessione_di_hr_in_sola_lettura(client, client2, hr_client):
+def test_connessione_di_hr_fuori_dalla_whitelist(client, client2, hr_client):
     t1, t2, p1, p2 = _seed(client, client2)
     with as_user("hr1"):
         with pytest.raises(db.sqlcipher.DatabaseError):
@@ -99,9 +99,11 @@ def test_connessione_di_hr_in_sola_lettura(client, client2, hr_client):
         with pytest.raises(db.sqlcipher.DatabaseError):
             db.execute("INSERT INTO team (name) VALUES ('Gamma')")
         with pytest.raises(db.sqlcipher.DatabaseError):
-            db.execute("UPDATE person SET full_name='X' WHERE id=?", (p1,))
+            db.execute("UPDATE team SET name='X' WHERE id=?", (t1,))
         with pytest.raises(db.sqlcipher.DatabaseError):
-            db.execute("DELETE FROM ral_event")
+            db.execute("DELETE FROM ninebox_assessment")
+        with pytest.raises(db.sqlcipher.DatabaseError):
+            db.execute("INSERT INTO bonus_pool (period, total_cap) VALUES ('x', 1)")
         with pytest.raises(db.sqlcipher.DatabaseError):
             db.execute("INSERT INTO lookup (category, code, label) VALUES ('x', 'y', 'z')")
         # la configurazione è la sua, di default (una voce sola per chiave)
@@ -113,7 +115,9 @@ def test_connessione_di_hr_in_sola_lettura(client, client2, hr_client):
 
 
 def test_whitelist_e_ruolo_nel_db(app_db):
-    assert set(perimeter.HR_WRITABLE) == set(perimeter.AUTHORED)   # 0.37: solo note e azioni
+    # 0.39: note e azioni, contratti, persone, budget e piano; mai team, configurazione, cicli, 9-box, montepremi
+    assert set(perimeter.AUTHORED) | set(perimeter.HR_CONTRACT) <= set(perimeter.HR_WRITABLE)
+    assert not {"team", "user_meta", "review_cycle", "ninebox_assessment", "bonus_pool", "lookup"} & set(perimeter.HR_WRITABLE)
     assert "hr" in users.ROLES and "hr" in perimeter.SESSION_ROLES
     with pytest.raises(db.sqlcipher.IntegrityError):
         db.sys.execute("INSERT INTO app_user (username, role, password_hash) VALUES ('x', 'boh', 'h')")

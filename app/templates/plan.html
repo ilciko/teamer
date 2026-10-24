@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_filters.html" import multi %}
+{% from "_filters.html" import multi, acting_select %}
 {% block title %}Piano aumenti{% endblock %}
 
 {% set badge_of = {'bozza':'', 'proposta':'amber', 'approvata':'blue', 'applicata':'green', 'respinta':'red'} %}
@@ -8,8 +8,9 @@
 <div class="page-head">
   <h1>Piano aumenti</h1>
   <div class="spacer"></div>
-  {% if hr %}
-  {# HR (0.38): solo le proposte che la riguardano, filtro per director al posto del selettore dei budget #}
+  {% if hr %}{{ acting_select(dir_opts, acting, '/comp/plan') }}{% endif %}
+  {% if ro_hr %}
+  {# HR in consultazione (0.38): solo le proposte che la riguardano, filtro per director al posto del selettore dei budget #}
   <form method="get" action="/comp/plan">
     {{ multi('director', dir_opts, sel, 'Tutti i director', 'Director') }}
   </form>
@@ -59,7 +60,7 @@
       <a class="btn sm ghost" href="/comp/plan/report?budget_id={{ budget_id or '' }}&status=proposta">📄 Report per HR</a>
       {% if n_approvate %}
       <form method="post" action="/comp/plan/apply-approved"
-            onsubmit="return confirm('Applicare {{ n_approvate }} proposte approvate? Diventeranno eventi RAL reali.')">
+            onsubmit="return confirm('Applicare {{ n_approvate }} proposte approvate? Diventeranno eventi RAL reali.')" class="hr-ok">
         <input type="hidden" name="budget_id" value="{{ budget_id or '' }}">
         <button class="btn green sm">Applica le {{ n_approvate }} approvate →</button>
       </form>
@@ -73,7 +74,7 @@
 </div>
 {% endif %}
 
-{% if hr %}
+{% if ro_hr %}
 <div class="card">
   <table class="tbl">
     <thead><tr>
@@ -118,9 +119,10 @@
       <td>{{ lookup_label('livello', p.new_livello) if p.new_livello else '—' }}</td>
       <td class="muted small">{{ p.note or '' }}</td>
       <td class="muted3 small">applicata il {{ p.decided_at | dt }}</td>
-      {% else %}
+      {% elif p.status == 'bozza' or (hr and p.status == 'proposta') %}
+      {# l'importo si cambia in bozza; HR cambia anche le proposte in attesa (la sua validazione) #}
       <td colspan="4" data-baseline="{{ p.baseline }}">
-        <form method="post" action="/comp/plan/{{ p.id }}/update" class="frow" style="gap:6px">
+        <form method="post" action="/comp/plan/{{ p.id }}/update" class="hr-ok frow" style="gap:6px">
           <input type="number" class="new-ral" name="new_ral" value="{{ p.new_ral }}" step="0.01"
                  title="Nuova RAL annuale confermata" style="flex:0 0 110px;text-align:right">
           <span class="delta-out small {{ 'pos' if p.amount > 0 else 'neg' if p.amount < 0 else 'muted3' }}"
@@ -137,14 +139,23 @@
           <button class="btn sm ghost" title="Salva modifiche">✓</button>
         </form>
       </td>
+      {% else %}
+      <td class="num"><strong>{{ p.new_ral | eur }}</strong>
+        <div class="small {{ 'pos' if p.amount > 0 else 'neg' if p.amount < 0 else 'muted3' }}">{{ '+' if p.amount > 0 }}{{ p.amount | eur }}</div></td>
+      <td>{{ p.effective_date | dt }}</td>
+      <td>{{ lookup_label('livello', p.new_livello) if p.new_livello else 'invariato' }}</td>
+      <td class="muted small">{{ p.note or '' }}</td>
+      {% endif %}
+      {% if p.status != 'applicata' %}
       <td>
         <div class="actions" style="margin:0;gap:4px;flex-wrap:wrap">
-          <form method="post" action="/comp/plan/{{ p.id }}/status" style="display:flex;gap:4px">
+          <form method="post" action="/comp/plan/{{ p.id }}/status" style="display:flex;gap:4px" class="hr-ok">
             {% if p.status == 'bozza' %}
             <button class="btn sm" name="status" value="proposta">Invia a HR</button>
             {% elif p.status == 'proposta' %}
             <button class="btn sm green" name="status" value="approvata">Approva</button>
             <button class="btn sm danger" name="status" value="respinta">Respingi</button>
+            <button class="btn sm ghost" name="status" value="bozza" title="Riporta in bozza per cambiare l'importo">↩ bozza</button>
             {% elif p.status == 'approvata' %}
             <button class="btn sm ghost" name="status" value="proposta" title="Torna in attesa">↩</button>
             {% elif p.status == 'respinta' %}
@@ -153,12 +164,12 @@
           </form>
           {% if p.status == 'approvata' %}
           <form method="post" action="/comp/plan/{{ p.id }}/apply"
-                onsubmit="return confirm('Applicare questa proposta? Diventerà un evento RAL reale.')">
+                onsubmit="return confirm('Applicare questa proposta? Diventerà un evento RAL reale.')" class="hr-ok">
             <button class="btn sm green">Applica</button>
           </form>
           {% endif %}
           <form method="post" action="/comp/plan/{{ p.id }}/void"
-                onsubmit="return confirm('Annullare questa proposta?')">
+                onsubmit="return confirm('Annullare questa proposta?')" class="hr-ok">
             <button class="btn sm ghost" title="Annulla">✕</button>
           </form>
         </div>

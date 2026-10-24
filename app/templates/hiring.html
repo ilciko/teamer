@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% from "_filters.html" import multi %}
+{% from "_filters.html" import multi, acting_select %}
 {% block title %}Assunzioni{% endblock %}
 
 {% macro hiring_card(b, compact=false) %}
 {# ro = niente azioni: budget chiuso, oppure HR che per ora consulta (le sue scritture arrivano con la tappa 3) #}
-{% set ro = compact or hr %}
+{% set ro = compact or ro_hr %}
 <div class="card {{ 'muted3' if compact }}">
   <div class="page-head" style="margin-bottom:8px">
     <strong>{{ b.period }}</strong>
@@ -17,14 +17,14 @@
     <span class="badge green">applicato {{ b.applicato | eur }}</span>
     <span class="badge amber">impegnato {{ b.impegnato | eur }}</span>
     <span class="badge {{ 'red' if b.residuo < 0 else 'blue' }}">residuo {{ b.residuo | eur }}</span>
-    {% if hr %}
+    {% if ro_hr %}
     {% elif compact %}
-    <form method="post" action="/comp/hiring/{{ b.id }}/reopen">
+    <form method="post" action="/comp/hiring/{{ b.id }}/reopen" class="hr-ok">
       <button class="btn sm ghost">Riapri</button>
     </form>
     {% elif not b.aperte %}
     <form method="post" action="/comp/hiring/{{ b.id }}/close"
-          onsubmit="return confirm('Chiudere il budget {{ b.period }}? Finisce nello storico, resta consultabile.')">
+          onsubmit="return confirm('Chiudere il budget {{ b.period }}? Finisce nello storico, resta consultabile.')" class="hr-ok">
       <button class="btn sm ghost">Chiudi</button>
     </form>
     {% endif %}
@@ -40,7 +40,7 @@
     Trasferito su <strong>{{ t.to_period }}</strong>: {{ t.amount | eur }}{% if t.n_positions %}, {{ t.n_positions }} posizion{{ 'e' if t.n_positions == 1 else 'i' }}{% endif %} il {{ t.created_at | dt }}{% if t.note %} — {{ t.note }}{% endif %}.
     {% if t.voided %}</s> <span class="badge red">annullato</span>{% elif not ro %}
     <form method="post" style="display:inline" action="/comp/hiring/transfer/{{ t.id }}/void"
-          onsubmit="return confirm('Annullare il trasferimento? Il riporto torna indietro e con lui le posizioni ancora aperte; il budget di origine si riapre.')">
+          onsubmit="return confirm('Annullare il trasferimento? Il riporto torna indietro e con lui le posizioni ancora aperte; il budget di origine si riapre.')" class="hr-ok">
       <button class="btn sm ghost">Annulla trasferimento</button>
     </form>
     {% endif %}
@@ -52,7 +52,8 @@
     {% for p in b.positions %}
     <tr class="{{ 'muted3' if p.status == 'annullata' }}">
       <td><strong>{{ p.title }}</strong>
-        {% if p.replaces_name %}<div class="small"><span class="badge blue">sostituisce</span> <a href="/people/{{ p.replaces_person_id }}">{{ p.replaces_name }}</a></div>{% endif %}
+        {% if p.replaces_name %}<div class="small"><span class="badge blue">sostituisce</span> <a href="/people/{{ p.replaces_person_id }}">{{ p.replaces_name }}</a></div>
+        {% else %}<div class="small"><span class="badge" title="Posizione in più, non una sostituzione">+1 al team</span></div>{% endif %}
         {% if p.transfer_id %}<div class="small"><span class="badge blue">riporto AP</span></div>{% endif %}
         {% if p.note %}<div class="muted3 small">{{ p.note }}</div>{% endif %}</td>
       <td>{{ p.team_name or '—' }}</td>
@@ -64,10 +65,17 @@
         {% if p.hired_name %}<div class="small">→ <a href="/people/{{ p.person_id }}">{{ p.hired_name }}</a></div>{% endif %}
       </td>
       <td>
-        {% if ro %}<span class="muted3 small">—</span>
+        {% if ro %}
+          {% if hr and not compact and p.status in ('pianificata', 'in_selezione') and not public() %}
+          {# HR in consultazione corregge solo la RAL prevista (0.39) #}
+          <form method="post" action="/comp/hiring/position/{{ p.id }}/ral" class="hr-ok frow" style="gap:4px;margin:0">
+            <input type="number" name="expected_ral" value="{{ p.expected_ral }}" step="0.01" style="width:110px;text-align:right" title="RAL prevista">
+            <button class="btn sm ghost" title="Correggi la RAL prevista">✓</button>
+          </form>
+          {% else %}<span class="muted3 small">—</span>{% endif %}
         {% elif p.status in ('pianificata', 'in_selezione') %}
         <div class="actions" style="margin:0;gap:4px;flex-wrap:wrap">
-          <form method="post" action="/comp/hiring/position/{{ p.id }}/status" style="display:flex;gap:4px;align-items:center">
+          <form method="post" action="/comp/hiring/position/{{ p.id }}/status" style="display:flex;gap:4px;align-items:center" class="hr-ok">
             {% if p.status == 'pianificata' %}
             <button class="btn sm" name="status" value="in_selezione">Avvia selezione</button>
             {% endif %}
@@ -83,7 +91,7 @@
         </div>
         {% else %}
         <form method="post" action="/comp/hiring/position/{{ p.id }}/void"
-              onsubmit="return confirm('Rimuovere la posizione dallo storico?')">
+              onsubmit="return confirm('Rimuovere la posizione dallo storico?')" class="hr-ok">
           <button class="btn sm ghost" title="Rimuovi">✕</button>
         </form>
         {% endif %}
@@ -95,7 +103,7 @@
         {% if not public() %}{# importi grezzi nei form: niente in modalità pubblica #}
         <details>
           <summary class="muted3 small" style="cursor:pointer">modifica «{{ p.title }}»</summary>
-          <form method="post" action="/comp/hiring/position/{{ p.id }}/update" style="margin-top:6px">
+          <form method="post" action="/comp/hiring/position/{{ p.id }}/update" style="margin-top:6px" class="hr-ok">
             <div class="frow">
               <div><label class="fld">Posizione</label>
                 <input type="text" name="title" value="{{ p.title }}" required></div>
@@ -140,7 +148,7 @@
   {% if not public() %}{# importi grezzi nei form: niente in modalità pubblica #}
   <details style="margin-top:8px">
     <summary class="muted small" style="cursor:pointer">Chiudi e riporta →</summary>
-    <form method="post" action="/comp/hiring/{{ b.id }}/transfer" style="margin-top:6px">
+    <form method="post" action="/comp/hiring/{{ b.id }}/transfer" style="margin-top:6px" class="hr-ok">
       <p class="muted3 small" style="margin-top:0">
         Il riporto entra nel tetto del budget di destinazione ma resta esposto come «riporto AP»:
         così si vede sempre quanto di quel tetto è denaro dell'anno precedente.
@@ -210,7 +218,7 @@
   {% if not public() %}{# importi grezzi nei form: niente in modalità pubblica #}
   <details style="margin-top:8px">
     <summary class="muted small" style="cursor:pointer">Modifica budget (errore di inserimento)</summary>
-    <form method="post" action="/comp/hiring/{{ b.id }}/update">
+    <form method="post" action="/comp/hiring/{{ b.id }}/update" class="hr-ok">
       <div class="frow">
         <div><label class="fld">Periodo</label><input type="text" name="period" value="{{ b.period }}" required></div>
         <div><label class="fld">Anno</label><input type="number" name="year" value="{{ b.year }}" required></div>
@@ -235,7 +243,7 @@
 
   <details style="margin-top:8px">
     <summary class="muted small" style="cursor:pointer">+ Nuova posizione</summary>
-    <form method="post" action="/comp/hiring/{{ b.id }}/position">
+    <form method="post" action="/comp/hiring/{{ b.id }}/position" class="hr-ok">
       <div class="frow">
         <div><label class="fld">Titolo posizione</label><input type="text" name="title" required placeholder="es. Sviluppatore senior"></div>
         <div><label class="fld">Team</label>
@@ -250,6 +258,13 @@
         <div><label class="fld">Inizio previsto</label><input type="date" name="expected_start"></div>
         <div><label class="fld">Nota</label><input type="text" name="note"></div>
       </div>
+      <div class="frow">
+        <div><label class="fld">Tipo di posizione</label>
+          <select name="replaces_person_id">
+            <option value="">+1 al team (posizione in più)</option>
+            {% for rp in replaceable %}<option value="{{ rp.id }}">sostituisce {{ rp.full_name }}{% if rp.status == 'cessato' %} · cessazione {{ rp.end_date | dt }}{% endif %}</option>{% endfor %}
+          </select></div>
+      </div>
       <div class="actions"><button class="btn sm">Aggiungi posizione</button></div>
     </form>
   </details>
@@ -262,9 +277,8 @@
   <h1>Budget assunzioni</h1>
   {% if hr %}
   <div class="spacer"></div>
-  <form method="get" action="/comp/hiring">
-    {{ multi('director', dir_opts, sel, 'Tutti i director', 'Director') }}
-  </form>
+  {{ acting_select(dir_opts, acting, '/comp/hiring') }}
+  {% if ro_hr %}<form method="get" action="/comp/hiring">{{ multi('director', dir_opts, sel, 'Tutti i director', 'Director') }}</form>{% endif %}
   {% endif %}
 </div>
 
@@ -288,10 +302,10 @@
 </p></div>
 {% endfor %}
 
-{% if not hr %}
+{% if not ro_hr %}
 <div class="card" style="max-width:620px">
-  <div class="card-title">Nuovo budget assunzioni</div>
-  <form method="post" action="/comp/hiring">
+  <div class="card-title">Nuovo budget assunzioni{% if acting_name %} <span class="badge purple">{{ acting_name }}</span>{% endif %}</div>
+  <form method="post" action="/comp/hiring" class="hr-ok">
     <div class="frow">
       <div><label class="fld">Periodo (etichetta)</label><input type="text" name="period" placeholder="Assunzioni 2026" required></div>
       <div><label class="fld">Anno</label><input type="number" name="year" value="{{ today()[:4] }}" required></div>

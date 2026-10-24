@@ -47,6 +47,7 @@ class Session:
     locked_at: float = 0.0
     db: object = None                           # connessione della sessione (app.db._Handle)
     closed: bool = False                        # sessione finita: niente più connessioni
+    acting: int | None = None                   # HR: director «in veste di» cui intesta ciò che crea
 
 
 # chiude la connessione di una sessione: (sessione, final=bool) -> None. La imposta app.db.

@@ -22,20 +22,20 @@ def _ral(client, pid, amount, effective_date, change_type):
         "amount": amount, "effective_date": effective_date, "change_type": change_type})
 
 
-def test_timeline_dopo_reinserimento(client):
-    """Annullare e reinserire una RAL non deve sfasare le variazioni mostrate."""
+def test_timeline_dopo_reinserimento(client, hr_client):
+    """Annullare e reinserire una RAL non deve sfasare le variazioni mostrate (gli eventi li scrive HR, 0.39)."""
     from app import db
 
     pid = db.execute("INSERT INTO person (full_name) VALUES ('Timeline Test')")
-    _ral(client, pid, 39500, "2005-02-23", "assunzione")
-    _ral(client, pid, 44000, "2021-01-01", "promozione")
-    _ral(client, pid, 47500, "2022-01-01", "aumento")
-    _ral(client, pid, 48100, "2022-07-01", "adeguamento")
+    _ral(hr_client, pid, 39500, "2005-02-23", "assunzione")
+    _ral(hr_client, pid, 44000, "2021-01-01", "promozione")
+    _ral(hr_client, pid, 47500, "2022-01-01", "aumento")
+    _ral(hr_client, pid, 48100, "2022-07-01", "adeguamento")
 
     eid = db.one("SELECT id FROM ral_event WHERE person_id=? AND effective_date='2022-01-01'",
                  (pid,))["id"]
-    client.post(f"/people/{pid}/ral/{eid}/void")
-    _ral(client, pid, 47500, "2022-01-01", "aumento")
+    hr_client.post(f"/people/{pid}/ral/{eid}/void")
+    _ral(hr_client, pid, 47500, "2022-01-01", "aumento")
 
     html = client.get(f"/people/{pid}").text
     assert "€ 3.500" in html and "€ -600" not in html
@@ -45,12 +45,12 @@ def test_timeline_dopo_reinserimento(client):
     assert rientro["delta"] == 3500
 
 
-def test_piano_conferma_nuova_ral(client):
+def test_piano_conferma_nuova_ral(client, hr_client):
     """Nel piano si digita la nuova RAL: la proposta salva la variazione."""
     from app import db
 
     pid = db.execute("INSERT INTO person (full_name) VALUES ('Proposta Test')")
-    _ral(client, pid, 40000, "2024-01-01", "assunzione")
+    _ral(hr_client, pid, 40000, "2024-01-01", "assunzione")
     prop = db.execute(
         "INSERT INTO ral_proposal (person_id, amount, effective_date, status) "
         "VALUES (?, 1500, '2026-01-01', 'bozza')", (pid,))

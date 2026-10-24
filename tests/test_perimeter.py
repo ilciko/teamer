@@ -262,7 +262,7 @@ def test_migrazione_0030_fonde_liste_e_benefit_dei_director(tmp_path):
     conn.commit()
     n_codes = conn.execute("SELECT COUNT(*) FROM lookup WHERE owner_user_id = 1").fetchone()[0]
     db._migrate(conn)
-    assert conn.execute("SELECT COUNT(*) FROM lookup").fetchone()[0] == n_codes          # una voce per codice
+    assert conn.execute("SELECT COUNT(*) FROM lookup").fetchone()[0] == n_codes + 1      # una voce per codice (+ 'ccnl' della 0033)
     assert conn.execute("SELECT COUNT(*) FROM lookup WHERE label LIKE '%(b)'").fetchone()[0] == 0
     assert [r[0] for r in conn.execute("SELECT name FROM benefit_type ORDER BY id")] == ["Auto", "Solo b"]
     assert conn.execute("SELECT benefit_type_id FROM benefit_assignment").fetchone()[0] == 10   # ripuntato

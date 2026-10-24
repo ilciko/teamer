@@ -92,6 +92,8 @@ h1, h2.serif { font-family: 'DM Serif Display', serif; font-weight: 400; }
 /* HR in sola lettura (0.36): i pulsanti di invio dei form POST spariscono e i controlli htmx che
    salvano (non le anteprime */simulate) non rispondono; il server rifiuta comunque (403). */
 /* HR (0.36): i form che HR non può inviare perdono il pulsante; .hr-ok = form suoi (note e azioni) */
+/* HR: i pulsanti dei form POST compaiono solo nei form marcati hr-ok (quelli che le sue route ammettono,
+   auth.HR_WRITE_OK); gli altri restano nascosti come rete di sicurezza anche se la pagina li contiene */
 body.hr-readonly main form[method="post" i]:not(.hr-ok) button:not([type="button"]),
 body.hr-readonly main form[method="post" i]:not(.hr-ok) input[type="submit"] { display: none !important; }
 body.hr-readonly main [hx-post]:not([hx-post$="/simulate"]),

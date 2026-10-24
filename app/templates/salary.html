@@ -1,10 +1,13 @@
 {% extends "base.html" %}
+{% from "_filters.html" import acting_select %}
 {% block title %}Analisi salary{% endblock %}
 {% block content %}
 <div class="page-head">
   <h1>Analisi salary</h1>
   <span class="badge">RAL totale {{ total | eur }}</span>
   <div class="spacer"></div>
+  {% if hr %}{{ acting_select(dir_opts, acting, '/comp/salary') }}{% endif %}
+  {% if not ro_hr %}
   <form method="get" action="/comp/salary" class="frow" style="min-width:300px;align-items:center">
     <select name="budget_id" onchange="this.form.submit()">
       <option value="">— senza budget —</option>
@@ -13,11 +16,63 @@
       {% endfor %}
     </select>
   </form>
+  {% endif %}
 </div>
 
+{% if ro_hr %}
+{# HR (0.39): RAL e livelli nuovi scritti direttamente (variazioni CCNL, scatti): eventi reali, senza piano #}
+<div class="card">
+  <div class="card-title">Nuove RAL e livelli — scrittura diretta</div>
+  <p class="muted small" style="margin-bottom:12px;line-height:1.6">
+    Per le variazioni comunicate dallo studio paghe (rinnovi CCNL, scatti, adeguamenti): quello che salvi qui
+    diventa <strong>subito</strong> un evento RAL reale, senza passare dal piano aumenti. Il livello nuovo apre una
+    nuova situazione contrattuale dalla stessa data. Per proporre aumenti a nome di un director scegli «in veste di».
+  </p>
+  {% if saved %}<div class="flash">Registrate {{ saved }} variazioni.</div>{% endif %}
+  <form method="post" action="/comp/salary/apply" class="hr-ok" id="hrform">
+    <div class="frow" style="max-width:760px;margin-bottom:10px">
+      <div><label class="fld">Decorrenza (comune)</label><input type="date" name="effective_date" value="{{ today() }}"></div>
+      <div><label class="fld">Tipo</label>
+        <select name="change_type">{% for l in lookups('change_type') %}<option value="{{ l.code }}" {{ 'selected' if l.code == 'ccnl' }}>{{ l.label }}</option>{% endfor %}</select></div>
+      <div><label class="fld">Motivo / nota</label><input type="text" name="reason" placeholder="es. rinnovo CCNL 2026"></div>
+    </div>
+    <table class="tbl">
+      <thead><tr>
+        <th>Persona</th><th>Director</th><th>Team</th><th>Livello</th><th class="num">RAL attuale</th>
+        <th class="num" style="width:120px">Nuova RAL €</th><th style="width:105px">Nuovo livello</th>
+        <th style="width:130px">Decorrenza<div class="muted3" style="font-weight:400;text-transform:none;letter-spacing:0">vuota = comune</div></th>
+      </tr></thead>
+      {% for r in rows %}
+      <tr>
+        <td><a href="/people/{{ r.id }}">{{ r.full_name }}</a>
+          {% set li = last_inc.get(r.id) %}
+          {% if li %}<div class="small{{ ' txt-' ~ li.flag if li.flag }}" title="Ultima variazione di RAL">{{ li.effective_date | dt }} : {{ '+' if li.delta > 0 }}{{ li.delta | eur }}</div>{% endif %}</td>
+        <td class="muted">{{ r.director or '—' }}</td>
+        <td class="muted">{{ r.team_name or '—' }}</td>
+        <td class="muted">{{ lookup_label('livello', r.livello) if r.livello else '—' }}</td>
+        <td class="num">{{ r.ral | eur }}</td>
+        <td class="num"><input type="number" name="ral_{{ r.id }}" step="0.01" min="0" style="text-align:right"></td>
+        <td><select name="lvl_{{ r.id }}"><option value="">invariato</option>
+          {% for l in lookups('livello') %}<option value="{{ l.code }}" {{ 'selected' if l.code == r.livello }}>{{ l.label }}</option>{% endfor %}</select></td>
+        <td><input type="date" name="date_{{ r.id }}"></td>
+      </tr>
+      {% endfor %}
+    </table>
+    <div class="actions">
+      <button type="submit" class="btn green" onclick="return confirm('Registrare le variazioni come eventi RAL reali?')">Registra le variazioni →</button>
+      <span class="muted small">Si registrano solo le righe con una nuova RAL o un nuovo livello.</span>
+    </div>
+  </form>
+</div>
+<script>
+document.getElementById('hrform').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.preventDefault();
+});
+</script>
+{% else %}
 <div class="card">
   <div class="card-title">
-    Piano aumenti — quello che scrivi qui diventa una <strong>proposta</strong>, non un aumento reale
+    Piano aumenti{% if acting_name %} di <span class="badge purple">{{ acting_name }}</span>{% endif %} — quello che scrivi qui diventa una <strong>proposta</strong>, non un aumento reale
   </div>
   <p class="muted small" style="margin-bottom:12px;line-height:1.6">
     Importo e percentuale si aggiornano a vicenda. La colonna <strong>A piano</strong> mostra ciò che è già
@@ -26,7 +81,7 @@
     L'applicazione avviene dal <a href="/comp/plan{{ '?budget_id=' ~ budget_id if budget_id }}">piano aumenti</a>, dopo il passaggio con HR.
   </p>
 
-  <form method="post" action="/comp/salary/plan" id="simform">
+  <form method="post" action="/comp/salary/plan" id="simform" class="hr-ok">
   <input type="hidden" name="budget_id" value="{{ budget_id or '' }}">
   <div class="frow" style="max-width:520px;margin-bottom:10px">
     <div><label class="fld">Decorrenza prevista (comune)</label><input type="date" name="effective_date" value="{{ today() }}"></div>
@@ -110,4 +165,5 @@ document.querySelectorAll('#simform tr[data-ral]').forEach(tr => {
   });
 });
 </script>
+{% endif %}
 {% endblock %}

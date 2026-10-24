@@ -75,7 +75,7 @@ CHILD = {
 }
 TEAM = ["team"]
 PERSON = ["person", "person_assignment", "employment", "ral_event", "benefit_assignment", "incentive",
-          "ninebox_assessment", "attachment", "listino_person_param"]
+          "ninebox_assessment", "attachment", "listino_person_param", "replacement_decision"]
 # note e azioni: di chi le scrive (`author_user_id`); per le azioni, fuori perimetro si tocca solo lo stato
 AUTHORED = {"meeting_note": (), "action_item": ("status", "closed_date")}
 COMPANY = ["lookup", "benefit_type"]
@@ -108,8 +108,16 @@ def scoped_meta(key: str) -> bool:
 # righe di persona (codici listino) restano quelli dei director
 HR_OWN = [t for t in CONFIG if t not in CATALOG_REFS]
 # scritture consentite a HR: {tabella: {colonna, ...}} ("*" = tutte, anche INSERT e DELETE;
-# altrimenti solo UPDATE di quelle colonne). Le altre arrivano nelle tappe successive.
-HR_WRITABLE: dict[str, set] = {t: {"*"} for t in AUTHORED}
+# altrimenti solo UPDATE di quelle colonne). Dalla 0.39 (tappa 3): le sue note e azioni, la parte
+# contrattuale delle persone (solo sua: contratto, RAL, benefit, incentivi, cessazione e decisione
+# di sostituzione), le persone nuove, allegati, e — «in veste di director» — budget aumenti e
+# assunzioni con le loro righe e le proposte del piano. Restano fuori team, configurazione, cicli,
+# 9-box e montepremi (quest'ultimo arriva dopo).
+HR_CONTRACT = ["employment", "ral_event", "benefit_assignment", "incentive", "replacement_decision"]
+HR_WRITABLE: dict[str, set] = {t: {"*"} for t in [
+    *AUTHORED, *HR_CONTRACT, "person", "person_assignment", "attachment",
+    "ral_budget", "ral_budget_member", "ral_proposal",
+    "hiring_budget", "hiring_position", "hiring_transfer"]}
 
 
 # ---- viste e guardie sulla connessione di una sessione ----

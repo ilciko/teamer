@@ -60,8 +60,16 @@
 
     <div class="actions">
       <button class="btn green">Crea posizione →</button>
-      <a class="btn ghost" href="/people/{{ p.id }}">Non sostituire</a>
+      <a class="btn ghost" href="/people/{{ p.id }}">Più tardi</a>
     </div>
+  </form>
+  <form method="post" action="/people/{{ p.id }}/replacement/none" style="margin-top:14px;padding-top:10px;border-top:0.5px solid var(--border)">
+    <label class="fld">Oppure: non sostituire</label>
+    <div class="frow">
+      <input type="text" name="note" placeholder="motivo (facoltativo)">
+      <button class="btn ghost">Registra «non sostituire»</button>
+    </div>
+    <p class="muted3 small" style="margin-top:4px">La decisione resta nello storico e si può annullare dalla scheda.</p>
   </form>
 </div>
 {% endblock %}

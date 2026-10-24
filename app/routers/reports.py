@@ -245,8 +245,16 @@ def dashboard(request: Request):
     recent_notes = db.query(
         """SELECT mn.*, p.full_name FROM meeting_note mn JOIN person p ON p.id=mn.person_id
            WHERE mn.archived_at IS NULL ORDER BY mn.note_date DESC LIMIT 5""")
+    # cessazioni (ultimo anno) senza posizione di sostituzione né decisione «non sostituire» (0.39)
+    da_decidere = db.query(
+        """SELECT p.id, p.full_name, p.end_date FROM person p
+           WHERE p.status='cessato' AND p.end_date >= ?
+             AND NOT EXISTS (SELECT 1 FROM hiring_position hp WHERE hp.replaces_person_id=p.id AND hp.voided=0)
+             AND NOT EXISTS (SELECT 1 FROM replacement_decision d WHERE d.person_id=p.id AND d.voided=0)
+           ORDER BY p.end_date DESC""", ((date.today() - timedelta(days=365)).isoformat(),))
 
     return _templates().TemplateResponse(request, "dashboard.html", {
+        "da_decidere": da_decidere,
         "headcount": headcount, "ral_tot": ral["tot"], "ral_media": ral["media"],
         "expiring_contracts": expiring_contracts,
         "overdue_actions": overdue_actions, "upcoming_actions": upcoming_actions,
