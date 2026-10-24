@@ -68,6 +68,13 @@ chmod 755 /usr/local/bin/teamer-update
 msg "Scarico e installo l'ultima release (installa anche l'updater richiamabile dall'app)..."
 /usr/local/bin/teamer-update --no-restart
 
+msg "Rotte per sorgente (container con due reti: ognuna risponde dal suo gateway)..."
+SRC_INSTALL="$APP_DIR/src/deploy/install"
+if [[ -f "$SRC_INSTALL/teamer-multihome" ]]; then
+  install -m 755 "$SRC_INSTALL/teamer-multihome" /usr/local/sbin/teamer-multihome
+  install -m 644 "$SRC_INSTALL/teamer-multihome.dhclient" /etc/dhcp/dhclient-exit-hooks.d/teamer-multihome
+fi
+
 msg "Servizio systemd..."
 cat > /etc/systemd/system/teamer.service <<EOF
 [Unit]

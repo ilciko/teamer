@@ -1,0 +1,11 @@
+# Teamer — a ogni lease DHCP aggiorna la rotta per sorgente dell'interfaccia (teamer-multihome).
+# Questo file viene "sourced" da /sbin/dhclient-script: niente exit, niente set -e.
+if [ -x /usr/local/sbin/teamer-multihome ] && [ -n "${interface:-}" ]; then
+  case "${reason:-}" in
+    BOUND|RENEW|REBIND|REBOOT)
+      routers=${new_routers:-}
+      /usr/local/sbin/teamer-multihome "$interface" up "${new_ip_address:-}" "${routers%% *}" || true ;;
+    EXPIRE|FAIL|RELEASE|STOP)
+      /usr/local/sbin/teamer-multihome "$interface" down || true ;;
+  esac
+fi

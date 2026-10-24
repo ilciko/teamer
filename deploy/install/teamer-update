@@ -95,6 +95,12 @@ install_units() {   # dalla cartella deploy/install della versione installata
     install -m 755 "$src/teamer-admin" /usr/local/bin/teamer-admin
   fi
   # l'updater si sostituisce per ultimo (mv: il processo in corso tiene il file vecchio)
+  # rotte per sorgente (due reti): si aggiorna solo dove l'installer l'ha messo, mai aggiunto a un container che non l'ha
+  if [[ -x /usr/local/sbin/teamer-multihome && -f "$src/teamer-multihome" ]]; then
+    cmp -s "$src/teamer-multihome" /usr/local/sbin/teamer-multihome || install -m 755 "$src/teamer-multihome" /usr/local/sbin/teamer-multihome
+    cmp -s "$src/teamer-multihome.dhclient" /etc/dhcp/dhclient-exit-hooks.d/teamer-multihome 2>/dev/null \
+      || install -m 644 "$src/teamer-multihome.dhclient" /etc/dhcp/dhclient-exit-hooks.d/teamer-multihome
+  fi
   if [[ -f "$src/teamer-update" ]] && ! cmp -s "$src/teamer-update" /usr/local/bin/teamer-update; then
     install -m 755 "$src/teamer-update" /usr/local/bin/teamer-update.new
     mv /usr/local/bin/teamer-update.new /usr/local/bin/teamer-update

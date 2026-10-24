@@ -77,9 +77,32 @@ libero, storage per il disco e per il template, bridge. **Crea** per procedere, 
 sceglierli uno per uno (storage e bridge da elenco, IP DHCP o statico con gateway, VLAN, risorse,
 porta). Le stesse impostazioni si passano come variabili d'ambiente, che fanno da valore proposto:
 `CTID`, `CT_HOSTNAME`, `DISK_GB`, `RAM_MB`, `CORES`, `STORAGE`, `TEMPLATE_STORAGE`, `BRIDGE`, `VLAN`,
-`NET_IP` (dhcp o CIDR), `GATEWAY`, `APP_PORT`; `NONINTERACTIVE=1` salta le domande, `DRY_RUN=1`
-mostra cosa verrebbe creato senza toccare nulla. Per un fork `GH_REPO=<owner>/teamer` (e `GH_TOKEN`
-solo se il fork è privato).
+`NET_IP` (dhcp o CIDR), `GATEWAY`, `BRIDGE2`, `VLAN2`, `NET_IP2`, `GATEWAY2` (seconda rete, vedi sotto),
+`APP_PORT`; `NONINTERACTIVE=1` salta le domande, `DRY_RUN=1` mostra cosa verrebbe creato senza toccare
+nulla. Per un fork `GH_REPO=<owner>/teamer` (e `GH_TOKEN` solo se il fork è privato).
+
+### Container su due reti
+
+Se il container deve rispondere da due reti (es. la LAN dei colleghi e una rete raggiunta in VPN),
+nel riepilogo si sceglie una **Seconda rete** (bridge, VLAN, IP DHCP o statico con gateway): diventa
+`eth1`. Il kernel ha un solo default gateway, quindi senza altro chi arriva dalla seconda rete da
+un'altra subnet riceverebbe la risposta dalla prima scheda e non la vedrebbe mai: il servizio è
+vivo, i colleghi sulla rete «giusta» lavorano, da fuori nemmeno il ping risponde. Per questo
+l'installer mette nel container `/usr/local/sbin/teamer-multihome` (una tabella di routing per
+interfaccia, scelta in base all'indirizzo sorgente) con un hook dhclient che la aggiorna a ogni
+lease; con IP statico la richiama `post-up` in `/etc/network/interfaces`, che Proxmox conserva
+quando rigenera la sezione. Il gateway della seconda rete **non** va nella configurazione del
+container (`gw=`): due default in `interfaces` fanno fallire `ifup`.
+
+Su un container esistente a cui si aggiunge una scheda dalla console di Proxmox:
+
+```bash
+pct exec <ctid> -- install -m 755 /opt/teamer/src/deploy/install/teamer-multihome /usr/local/sbin/teamer-multihome
+pct exec <ctid> -- install -m 644 /opt/teamer/src/deploy/install/teamer-multihome.dhclient /etc/dhcp/dhclient-exit-hooks.d/teamer-multihome
+pct exec <ctid> -- bash -c 'ifdown eth1; ifup eth1'     # DHCP; statico: post-up/pre-down come sopra
+```
+
+Da lì `teamer-update` tiene aggiornati i due file; su un container che non li ha non li aggiunge mai.
 
 ### Dimensionamento
 

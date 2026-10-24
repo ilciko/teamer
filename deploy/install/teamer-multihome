@@ -1,0 +1,24 @@
+#!/bin/sh
+# Teamer — rotte per sorgente per un container con più reti.
+#
+#   teamer-multihome IFACE up ADDR GATEWAY   ciò che parte da ADDR esce da IFACE via GATEWAY
+#   teamer-multihome IFACE down              toglie regola e tabella
+#
+# Il kernel ha un solo default gateway: con due schede chi arriva dalla seconda rete da
+# un'altra subnet (es. in VPN) riceve la risposta dalla prima scheda e non la vede mai.
+# Qui ogni interfaccia ha la sua tabella (100 + ifindex) con il suo gateway, scelta in base
+# all'indirizzo sorgente. Richiamato dall'hook dhclient (DHCP) o da post-up/pre-down
+# in /etc/network/interfaces (IP statico). Idempotente.
+set -u
+iface=${1:-}; cmd=${2:-}
+[ -n "$iface" ] && [ -n "$cmd" ] || { echo "uso: teamer-multihome IFACE up ADDR GATEWAY | IFACE down" >&2; exit 2; }
+idx=$(cat "/sys/class/net/$iface/ifindex" 2>/dev/null) || exit 0
+t=$((100 + idx))
+while ip -4 rule del pref "$t" 2>/dev/null; do :; done
+ip -4 route flush table "$t" 2>/dev/null || true
+if [ "$cmd" = up ]; then
+  addr=${3:-}; addr=${addr%/*}; gw=${4:-}
+  [ -n "$addr" ] && [ -n "$gw" ] || exit 0
+  ip -4 rule add from "$addr" lookup "$t" pref "$t"
+  ip -4 route add default via "$gw" dev "$iface" table "$t"
+fi
