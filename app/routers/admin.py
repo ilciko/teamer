@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Form, Request, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from app import config, db, perimeter, session, users
 from app.services import updater
@@ -23,7 +23,7 @@ def _back(tab: str = "users", **params) -> RedirectResponse:
     return RedirectResponse(f"/admin?{q}", status_code=302)
 
 
-def _audit_rows(user: str, event: str, date_from: str, date_to: str, page: int):
+def _audit_where(user: str, event: str, date_from: str, date_to: str) -> tuple[str, list]:
     where, params = [], []
     if user:
         where.append("username = ? COLLATE NOCASE")
@@ -37,11 +37,58 @@ def _audit_rows(user: str, event: str, date_from: str, date_to: str, page: int):
     if date_to:
         where.append("at < date(?, '+1 day')")
         params.append(date_to)
-    sql_where = f"WHERE {' AND '.join(where)}" if where else ""
+    return (f"WHERE {' AND '.join(where)}" if where else ""), params
+
+
+def _audit_rows(user: str, event: str, date_from: str, date_to: str, page: int):
+    sql_where, params = _audit_where(user, event, date_from, date_to)
     total = db.sys.one(f"SELECT COUNT(*) AS n FROM audit_event {sql_where}", params)["n"]
     rows = db.sys.query(f"SELECT * FROM audit_event {sql_where} ORDER BY id DESC LIMIT ? OFFSET ?",
                     (*params, AUDIT_PAGE, (page - 1) * AUDIT_PAGE))
     return rows, total
+
+
+AUDIT_COLS = ("at", "username", "event", "detail", "ip")
+
+
+@router.get("/admin/audit/export.{fmt}")
+def audit_export(fmt: str, user: str = "", event: str = "", date_from: str = "", date_to: str = ""):
+    """Export dell'audit con gli stessi filtri della pagina, tutto (non solo la pagina): CSV o Excel."""
+    if fmt not in ("csv", "xlsx"):
+        return _back("audit", err="Formato non previsto.")
+    sql_where, params = _audit_where(user, event, date_from, date_to)
+    rows = db.sys.query(f"SELECT {', '.join(AUDIT_COLS)} FROM audit_event {sql_where} ORDER BY id", params)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M")
+    users.audit("audit_export", f"{fmt}, {len(rows)} eventi" + (f", filtri {user=} {event=} {date_from=} {date_to=}"
+                                                             if any([user, event, date_from, date_to]) else ""))
+    if fmt == "csv":
+        import csv
+        import io
+
+        buf = io.StringIO()
+        w = csv.writer(buf, delimiter=";", lineterminator="\r\n")
+        w.writerow(["quando", "utente", "evento", "dettaglio", "ip"])
+        for r in rows:
+            w.writerow([r[c] if r[c] is not None else "" for c in AUDIT_COLS])
+        return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="teamer-audit-{stamp}.csv"'})
+    import io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Audit"
+    ws.append(["Quando", "Utente", "Evento", "Dettaglio", "IP"])
+    for r in rows:
+        ws.append([r[c] for c in AUDIT_COLS])
+    for col, width in zip("ABCDE", (20, 16, 18, 80, 16)):
+        ws.column_dimensions[col].width = width
+    out = io.BytesIO()
+    wb.save(out)
+    return Response(content=out.getvalue(),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="teamer-audit-{stamp}.xlsx"'})
 
 
 @router.get("/admin")

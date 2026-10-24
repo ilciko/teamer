@@ -108,7 +108,13 @@
   </form>
 </div>
 <div class="card">
-  <div class="card-title">{{ total }} eventi{% if pages > 1 %} · pagina {{ page }} di {{ pages }}{% endif %}</div>
+  {% set fq = 'user=' ~ (f.user | urlencode) ~ '&event=' ~ (f.event | urlencode) ~ '&date_from=' ~ f.date_from ~ '&date_to=' ~ f.date_to %}
+  <div class="page-head" style="margin-bottom:8px">
+    <div class="card-title" style="margin:0">{{ total }} eventi{% if pages > 1 %} · pagina {{ page }} di {{ pages }}{% endif %}</div>
+    <div class="spacer"></div>
+    <a class="btn sm ghost" href="/admin/audit/export.csv?{{ fq }}" title="Tutti gli eventi del filtro, non solo la pagina">↓ CSV</a>
+    <a class="btn sm ghost" href="/admin/audit/export.xlsx?{{ fq }}" title="Tutti gli eventi del filtro, non solo la pagina">↓ Excel</a>
+  </div>
   <table class="tbl small">
     <tr><th>Quando</th><th>Utente</th><th>Evento</th><th>Dettaglio</th><th>IP</th></tr>
     {% for r in rows %}
