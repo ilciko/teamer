@@ -2,10 +2,11 @@
 import json
 from datetime import date
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import RedirectResponse
 
 from app import db
+from app.routers import hrview
 from app.routers.org import current_assignment, initials, seniority_from
 from app.services import ninebox_calc
 
@@ -31,27 +32,56 @@ def _weights() -> dict:
     }
 
 
+MAX_CHIPS = 4   # oltre, la casella mostra solo il totale: l'elenco si apre a destra selezionandola
+
+
 @router.get("/ninebox")
-def ninebox_home(request: Request):
+def ninebox_home(request: Request, team: list[int] = Query(default=[])):
+    """Griglia filtrabile per team (a scelta multipla) e, per HR, per director (0.38). Una casella
+    con più di MAX_CHIPS persone mostra il totale; la Situazione parte vuota e si apre su tutte le
+    persone del filtro o sui membri della casella selezionata."""
+    ctx = hrview.context(request)
     _, config = _model()
+    # filtro sulle persone: team dell'assegnazione corrente e, per HR, director titolare
+    conds, params = [], []
+    if team:
+        conds.append(f"pa.team_id IN ({','.join('?' * len(team))})")
+        params += team
+    if ctx["sel"]:
+        conds.append(f"COALESCE(t.owner_user_id, p2.owner_user_id) IN ({','.join('?' * len(ctx['sel']))})")
+        params += sorted(ctx["sel"])
+    flt = ""
+    if conds:
+        flt = f""" AND p.id IN (SELECT p2.id FROM person p2
+                 LEFT JOIN person_assignment pa ON pa.person_id=p2.id AND pa.voided=0 AND pa.end_date IS NULL
+                 LEFT JOIN team t ON t.id=pa.team_id WHERE {' AND '.join(conds)})"""
+    team_join = """LEFT JOIN person_assignment cpa ON cpa.person_id=p.id AND cpa.voided=0 AND cpa.end_date IS NULL
+           LEFT JOIN team ct ON ct.id=cpa.team_id"""
     latest = db.query(
-        """SELECT n.*, p.full_name FROM ninebox_assessment n
-           JOIN person p ON p.id = n.person_id
-           WHERE n.voided=0 AND p.status='attivo'
+        f"""SELECT n.*, p.full_name, ct.name AS team_name FROM ninebox_assessment n
+           JOIN person p ON p.id = n.person_id {team_join}
+           WHERE n.voided=0 AND p.status='attivo' {flt}
              AND n.id = (SELECT id FROM ninebox_assessment n2
                          WHERE n2.person_id = n.person_id AND n2.voided=0
                          ORDER BY n2.eval_date DESC, n2.id DESC LIMIT 1)
-           ORDER BY p.full_name""")
+           ORDER BY p.full_name""", tuple(params))
     by_box: dict[int, list] = {}
     for r in latest:
         by_box.setdefault(r["box_number"], []).append(r)
     boxes_by_n = {b["n"]: {**b, "key": k} for k, b in config["boxes"].items()}
     unrated = db.query(
-        """SELECT p.id, p.full_name FROM person p WHERE p.status='attivo'
+        f"""SELECT p.id, p.full_name, ct.name AS team_name FROM person p {team_join}
+           WHERE p.status='attivo' {flt}
            AND NOT EXISTS (SELECT 1 FROM ninebox_assessment n WHERE n.person_id=p.id AND n.voided=0)
-           ORDER BY p.full_name""")
-    people = db.query("SELECT id, full_name FROM person WHERE status='attivo' ORDER BY full_name")
+           ORDER BY p.full_name""", tuple(params))
+    people = db.query(f"SELECT p.id, p.full_name FROM person p WHERE p.status='attivo' {flt} ORDER BY p.full_name",
+                      tuple(params))
+    teams = db.query("SELECT id, name, owner_user_id FROM team WHERE archived_at IS NULL ORDER BY name")
+    team_opts = [{"id": t["id"], "name": t["name"] + (f" · {ctx['directors'][t['owner_user_id']]}"
+                                                       if ctx["directors"].get(t["owner_user_id"]) else "")}
+                 for t in teams]
     return _templates().TemplateResponse(request, "ninebox_home.html", {
+        **ctx, "team_opts": team_opts, "team_sel": set(team), "max_chips": MAX_CHIPS,
         "by_box": by_box, "boxes_by_n": boxes_by_n, "latest": latest,
         "unrated": unrated, "people": people, "initials": initials,
     })

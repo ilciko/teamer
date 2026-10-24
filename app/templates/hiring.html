@@ -1,11 +1,15 @@
 {% extends "base.html" %}
+{% from "_filters.html" import multi %}
 {% block title %}Assunzioni{% endblock %}
 
 {% macro hiring_card(b, compact=false) %}
+{# ro = niente azioni: budget chiuso, oppure HR che per ora consulta (le sue scritture arrivano con la tappa 3) #}
+{% set ro = compact or hr %}
 <div class="card {{ 'muted3' if compact }}">
   <div class="page-head" style="margin-bottom:8px">
     <strong>{{ b.period }}</strong>
     {% if b.year %}<span class="badge">{{ b.year }}</span>{% endif %}
+    {% if hr %}<span class="badge purple" title="Director titolare del budget">{{ b.director or 'da assegnare' }}</span>{% endif %}
     {% if b.note %}<span class="muted small">{{ b.note }}</span>{% endif %}
     <div class="spacer"></div>
     <span class="badge">tetto {{ b.cap | eur }}</span>
@@ -13,7 +17,8 @@
     <span class="badge green">applicato {{ b.applicato | eur }}</span>
     <span class="badge amber">impegnato {{ b.impegnato | eur }}</span>
     <span class="badge {{ 'red' if b.residuo < 0 else 'blue' }}">residuo {{ b.residuo | eur }}</span>
-    {% if compact %}
+    {% if hr %}
+    {% elif compact %}
     <form method="post" action="/comp/hiring/{{ b.id }}/reopen">
       <button class="btn sm ghost">Riapri</button>
     </form>
@@ -33,7 +38,7 @@
   <p class="ctx-note {{ 'muted3' if t.voided }}">
     {% if t.voided %}<s>{% endif %}
     Trasferito su <strong>{{ t.to_period }}</strong>: {{ t.amount | eur }}{% if t.n_positions %}, {{ t.n_positions }} posizion{{ 'e' if t.n_positions == 1 else 'i' }}{% endif %} il {{ t.created_at | dt }}{% if t.note %} — {{ t.note }}{% endif %}.
-    {% if t.voided %}</s> <span class="badge red">annullato</span>{% elif not compact %}
+    {% if t.voided %}</s> <span class="badge red">annullato</span>{% elif not ro %}
     <form method="post" style="display:inline" action="/comp/hiring/transfer/{{ t.id }}/void"
           onsubmit="return confirm('Annullare il trasferimento? Il riporto torna indietro e con lui le posizioni ancora aperte; il budget di origine si riapre.')">
       <button class="btn sm ghost">Annulla trasferimento</button>
@@ -52,14 +57,14 @@
         {% if p.note %}<div class="muted3 small">{{ p.note }}</div>{% endif %}</td>
       <td>{{ p.team_name or '—' }}</td>
       <td class="num">{{ p.expected_ral | eur }}</td>
-      <td>{{ p.expected_start | dt }}</td>
+      <td>{{ p.expected_start | dt }}{% if p.quarter %} <span class="badge" title="Trimestre di arrivo previsto">{{ p.quarter }}</span>{% endif %}</td>
       <td>
         <span class="badge {{ 'amber' if p.status == 'in_selezione' else 'green' if p.status == 'assunta' else 'red' if p.status == 'annullata' else '' }}">
           {{ lookup_label('position_status', p.status) }}</span>
         {% if p.hired_name %}<div class="small">→ <a href="/people/{{ p.person_id }}">{{ p.hired_name }}</a></div>{% endif %}
       </td>
       <td>
-        {% if compact %}<span class="muted3 small">—</span>
+        {% if ro %}<span class="muted3 small">—</span>
         {% elif p.status in ('pianificata', 'in_selezione') %}
         <div class="actions" style="margin:0;gap:4px;flex-wrap:wrap">
           <form method="post" action="/comp/hiring/position/{{ p.id }}/status" style="display:flex;gap:4px;align-items:center">
@@ -84,7 +89,7 @@
         {% endif %}
       </td>
     </tr>
-    {% if not compact %}
+    {% if not ro %}
     <tr>
       <td colspan="6" style="padding-top:0">
         {% if not public() %}{# importi grezzi nei form: niente in modalità pubblica #}
@@ -131,7 +136,7 @@
     {% else %}<tr><td colspan="6" class="muted">Nessuna posizione su questo budget.</td></tr>{% endfor %}
   </table>
 
-  {% if not compact %}
+  {% if not ro %}
   {% if not public() %}{# importi grezzi nei form: niente in modalità pubblica #}
   <details style="margin-top:8px">
     <summary class="muted small" style="cursor:pointer">Chiudi e riporta →</summary>
@@ -253,7 +258,28 @@
 {% endmacro %}
 
 {% block content %}
-<div class="page-head"><h1>Budget assunzioni</h1></div>
+<div class="page-head">
+  <h1>Budget assunzioni</h1>
+  {% if hr %}
+  <div class="spacer"></div>
+  <form method="get" action="/comp/hiring">
+    {{ multi('director', dir_opts, sel, 'Tutti i director', 'Director') }}
+  </form>
+  {% endif %}
+</div>
+
+{% if totals %}
+<div class="card">
+  <div class="card-title">Totale dei budget aperti{% if sel %} dei director scelti{% endif %} — {{ totals.n_budget }} budget, {{ totals.n_aperte }} posizioni aperte</div>
+  <div class="page-head" style="margin:0">
+    <span class="badge">tetto {{ totals.cap | eur }}</span>
+    {% if totals.riporto %}<span class="badge blue">riporto AP {{ totals.riporto | eur }}</span>{% endif %}
+    <span class="badge green">applicato {{ totals.applicato | eur }}</span>
+    <span class="badge amber">impegnato {{ totals.impegnato | eur }}</span>
+    <span class="badge {{ 'red' if totals.residuo < 0 else 'blue' }}">residuo {{ totals.residuo | eur }}</span>
+  </div>
+</div>
+{% endif %}
 
 {% for b in open_budgets %}{{ hiring_card(b) }}{% else %}
 <div class="card"><p class="muted">
@@ -262,6 +288,7 @@
 </p></div>
 {% endfor %}
 
+{% if not hr %}
 <div class="card" style="max-width:620px">
   <div class="card-title">Nuovo budget assunzioni</div>
   <form method="post" action="/comp/hiring">
@@ -274,6 +301,7 @@
     <div class="actions"><button class="btn">Crea →</button></div>
   </form>
 </div>
+{% endif %}
 
 {% if closed_budgets %}
 <details style="margin-top:8px">

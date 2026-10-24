@@ -83,6 +83,11 @@ def all_users() -> list:
     return db.sys.query("SELECT * FROM app_user ORDER BY active DESC, role, username")
 
 
+def director_names() -> dict:
+    """{id: nome} dei director, anche disattivati (i loro dati restano intestati a loro)."""
+    return {u["id"]: u["display_name"] or u["username"] for u in all_users() if u["role"] == "director"}
+
+
 def count() -> int:
     return db.sys.one("SELECT COUNT(*) AS n FROM app_user")["n"]
 

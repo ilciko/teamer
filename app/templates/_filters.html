@@ -1,0 +1,13 @@
+{# Filtro a scelta multipla (stesso pattern dei reparti dell'organigramma): dentro un <form method="get">.
+   name = parametro ripetuto; options = righe con .id e .name; selected = set di id scelti. #}
+{% macro multi(name, options, selected, label_all, label_some) %}
+<details class="ms">
+  <summary class="btn ghost sm">{% if selected %}{{ label_some }} ({{ selected | length }}){% else %}{{ label_all }}{% endif %} ▾</summary>
+  <div class="ms-panel">
+    {% for o in options %}
+    <label><input type="checkbox" name="{{ name }}" value="{{ o.id }}" {{ 'checked' if o.id in selected }}> {{ o.name }}</label>
+    {% endfor %}
+    <div class="actions"><button class="btn sm">Applica</button></div>
+  </div>
+</details>
+{% endmacro %}

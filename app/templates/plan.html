@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_filters.html" import multi %}
 {% block title %}Piano aumenti{% endblock %}
 
 {% set badge_of = {'bozza':'', 'proposta':'amber', 'approvata':'blue', 'applicata':'green', 'respinta':'red'} %}
@@ -7,6 +8,12 @@
 <div class="page-head">
   <h1>Piano aumenti</h1>
   <div class="spacer"></div>
+  {% if hr %}
+  {# HR (0.38): solo le proposte che la riguardano, filtro per director al posto del selettore dei budget #}
+  <form method="get" action="/comp/plan">
+    {{ multi('director', dir_opts, sel, 'Tutti i director', 'Director') }}
+  </form>
+  {% else %}
   <form method="get" action="/comp/plan" class="frow" style="min-width:300px">
     <select name="budget_id" onchange="this.form.submit()">
       <option value="">— tutti i budget —</option>
@@ -15,7 +22,18 @@
       {% endfor %}
     </select>
   </form>
+  {% endif %}
 </div>
+
+{% if totals %}
+<div class="card">
+  <div class="card-title">Richieste in attesa{% if sel %} dei director scelti{% endif %} — {{ totals.n }} proposte</div>
+  <div class="page-head" style="margin:0">
+    <span class="badge amber">variazione totale {{ '+' if totals.delta > 0 }}{{ totals.delta | eur }}</span>
+    <span class="badge">nuove RAL {{ totals.new_ral | eur }}</span>
+  </div>
+</div>
+{% endif %}
 
 {% if saved %}<div class="flash">Salvate {{ saved }} proposte in bozza.</div>{% endif %}
 {% if request.query_params.get('sent') %}
@@ -55,6 +73,32 @@
 </div>
 {% endif %}
 
+{% if hr %}
+<div class="card">
+  <table class="tbl">
+    <thead><tr>
+      <th>Persona</th><th>Director</th><th>Budget</th><th class="num">RAL attuale</th><th class="num">Nuova RAL</th>
+      <th class="num">Variazione</th><th>Decorrenza</th><th>Livello</th><th>Nota</th>
+    </tr></thead>
+    {% for p in proposals %}
+    <tr>
+      <td><a href="/people/{{ p.person_id }}">{{ p.full_name }}</a>
+        {% if p.proposed_at %}<div class="muted3 small">inviata {{ p.proposed_at | dt }}</div>{% endif %}</td>
+      <td>{{ p.director or '—' }}</td>
+      <td>{{ p.budget_period or '—' }}</td>
+      <td class="num">{{ p.ral | eur }}</td>
+      <td class="num"><strong>{{ p.new_ral | eur }}</strong></td>
+      <td class="num {{ 'pos' if p.amount > 0 else 'neg' if p.amount < 0 else 'muted3' }}">{{ '+' if p.amount > 0 }}{{ p.amount | eur }}</td>
+      <td>{{ p.effective_date | dt }}</td>
+      <td>{{ lookup_label('livello', p.new_livello) if p.new_livello else (lookup_label('livello', p.livello) if p.livello else '—') }}</td>
+      <td class="muted small">{{ p.note or '' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="9" class="muted">Nessuna proposta in attesa{% if sel %} per i director scelti{% endif %}.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% else %}
 <div class="card">
   <table class="tbl">
     <thead><tr>
@@ -129,6 +173,7 @@
     {% endfor %}
   </table>
 </div>
+{% endif %}
 
 <script>
 // Si conferma la nuova RAL (è quella che decide HR); la variazione è solo un

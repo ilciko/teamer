@@ -169,15 +169,12 @@ def people_list(request: Request, show: str = "attivi", director: str = ""):
         {where} ORDER BY p.full_name"""
     )
     hr = session.current().role == "hr"
-    directors = {}
-    if hr:
-        directors = {u["id"]: u["display_name"] or u["username"] for u in users.all_users()
-                     if u["role"] == "director"}
-        if director.isdigit():
-            rows = [r for r in rows if r["director_id"] == int(director)]
+    directors = users.director_names() if hr else {}
+    if hr and director.isdigit():
+        rows = [r for r in rows if r["director_id"] == int(director)]
     people = []
     for r in rows:
-        ral = cost.current_ral(r["id"])
+        ral = None if hr else cost.current_ral(r["id"])   # HR: niente RAL in lista (0.38)
         people.append({**dict(r), "ral": ral["amount"] if ral else None,
                        "director": directors.get(r["director_id"]),
                        "initials": initials(r["full_name"]), "avatar_uri": avatar_data(r)})

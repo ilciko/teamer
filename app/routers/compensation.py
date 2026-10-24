@@ -6,6 +6,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
 
 from app import db
+from app.routers import hrview
 from app.params import OptInt
 from app.services import budget as budget_svc
 from app.services import cost, goal_score, hr_report
@@ -263,23 +264,36 @@ def _proposal_baseline(p, ral=None, pending=None) -> float:
 
 @router.get("/comp/plan")
 def plan_page(request: Request, budget_id: OptInt = None, saved: int = 0):
+    """Per HR (0.38): solo le proposte in stato «proposta» (quelle che la riguardano), con director
+    e budget per riga, filtro Director e totale delle richieste; niente selettore dei budget."""
+    ctx = hrview.context(request)
     where, params = "WHERE pr.voided=0", []
+    if ctx["hr"]:
+        budget_id = None
+        where += " AND pr.status='proposta'"
+        if ctx["sel"]:
+            where += f" AND COALESCE(b.owner_user_id, t.owner_user_id, p.owner_user_id) IN ({','.join('?' * len(ctx['sel']))})"
+            params += sorted(ctx["sel"])
     if budget_id:
         where += " AND pr.budget_id=?"
         params.append(budget_id)
     proposals = db.query(
-        f"""SELECT pr.*, p.full_name,
+        f"""SELECT pr.*, p.full_name, b.period AS budget_period,
+                   COALESCE(b.owner_user_id, t.owner_user_id, p.owner_user_id) AS director_id,
                    (SELECT amount FROM ral_event r WHERE r.person_id=pr.person_id AND r.voided=0
                     ORDER BY r.effective_date DESC, r.id DESC LIMIT 1) AS ral,
                    (SELECT livello FROM employment e WHERE e.person_id=pr.person_id
                     AND e.voided=0 AND e.end_date IS NULL ORDER BY e.start_date DESC LIMIT 1) AS livello,
                    (SELECT amount FROM ral_event r2 WHERE r2.id=pr.ral_event_id) AS applied_ral
             FROM ral_proposal pr JOIN person p ON p.id=pr.person_id
+            LEFT JOIN ral_budget b ON b.id=pr.budget_id
+            LEFT JOIN person_assignment pa ON pa.person_id=p.id AND pa.voided=0 AND pa.end_date IS NULL
+            LEFT JOIN team t ON t.id=pa.team_id
             {where}
             ORDER BY CASE pr.status WHEN 'bozza' THEN 0 WHEN 'proposta' THEN 1
                      WHEN 'approvata' THEN 2 WHEN 'applicata' THEN 3 ELSE 4 END,
                      p.full_name, pr.effective_date""", tuple(params))
-    proposals = [dict(p) for p in proposals]
+    proposals = [{**dict(p), "director": ctx["directors"].get(p["director_id"])} for p in proposals]
     pending = _pending_by_person()
     for p in proposals:
         if p["status"] == "applicata":
@@ -288,7 +302,12 @@ def plan_page(request: Request, budget_id: OptInt = None, saved: int = 0):
         new_ral = round(p["baseline"] + (p["amount"] or 0), 2)
         p["new_ral"] = int(new_ral) if new_ral == int(new_ral) else new_ral  # niente "43500.0"
     budget = db.one("SELECT * FROM ral_budget WHERE id=?", (budget_id,)) if budget_id else None
+    totals = None
+    if ctx["hr"]:
+        totals = {"n": len(proposals), "delta": sum(p["amount"] or 0 for p in proposals),
+                  "new_ral": sum(p["new_ral"] for p in proposals)}
     return _templates().TemplateResponse(request, "plan.html", {
+        **ctx, "totals": totals,
         "proposals": proposals, "budget": budget, "budget_id": budget_id,
         "budgets": db.query("SELECT * FROM ral_budget ORDER BY id DESC"),
         "summary": _budget_numbers(budget) if budget else None,
@@ -451,9 +470,14 @@ def budget_reopen(bid: int):
 
 @router.get("/comp/budget")
 def budget_page(request: Request):
+    """Per HR (0.38): director su ogni budget, filtro Director, totale dei budget aperti e delle
+    richieste (proposte non applicate) che il filtro mostra."""
+    ctx = hrview.context(request)
     budgets = []
     for b in db.query(
             "SELECT * FROM ral_budget ORDER BY year IS NULL, year DESC, id DESC"):
+        if not hrview.keep(ctx, b["owner_user_id"]):
+            continue
         events = db.query(
             "SELECT r.*, p.full_name FROM ral_event r JOIN person p ON p.id=r.person_id "
             "WHERE r.budget_id=? AND r.voided=0 ORDER BY r.effective_date", (b["id"],))
@@ -466,9 +490,17 @@ def budget_page(request: Request):
             "WHERE pr.budget_id=? AND pr.voided=0 AND pr.status IN ('bozza','proposta','approvata') "
             "ORDER BY pr.effective_date", (b["id"],))
         budgets.append({**dict(b), "events": events, "members": members, "monte": monte,
-                        "pending": pending, **_budget_numbers(b)})
+                        "pending": pending, "director": ctx["directors"].get(b["owner_user_id"]),
+                        **_budget_numbers(b)})
+    open_budgets = [b for b in budgets if b["status"] == "aperto"]
+    totals = None
+    if ctx["hr"]:
+        totals = {k: sum(b[k] for b in open_budgets) for k in ("total_cap", "applicato", "impegnato", "residuo")}
+        totals["n_budget"] = len(open_budgets)
+        totals["n_richieste"] = sum(len(b["pending"]) for b in open_budgets)
     return _templates().TemplateResponse(request, "budget.html", {
-        "open_budgets": [b for b in budgets if b["status"] == "aperto"],
+        **ctx, "totals": totals,
+        "open_budgets": open_budgets,
         "closed_budgets": [b for b in budgets if b["status"] != "aperto"],
     })
 
@@ -560,8 +592,13 @@ def _hiring_numbers(hb) -> dict:
 
 @router.get("/comp/hiring")
 def hiring_page(request: Request):
+    """Per HR (0.38) ogni budget porta il suo director, c'è il filtro Director e il totale dei
+    budget aperti che il filtro mostra; ogni posizione ha il trimestre di arrivo previsto."""
+    ctx = hrview.context(request)
     budgets = []
     for hb in db.query("SELECT * FROM hiring_budget ORDER BY id DESC"):
+        if not hrview.keep(ctx, hb["owner_user_id"]):
+            continue
         positions = db.query(
             """SELECT hp.*, t.name AS team_name, p.full_name AS hired_name,
                       rp.full_name AS replaces_name
@@ -582,12 +619,21 @@ def hiring_page(request: Request):
             "(SELECT COUNT(*) FROM hiring_position WHERE transfer_id=tr.id) AS n_positions "
             "FROM hiring_transfer tr JOIN hiring_budget hb2 ON hb2.id = tr.from_budget_id "
             "WHERE tr.to_budget_id=? AND tr.voided=0 ORDER BY tr.id", (hb["id"],))
+        positions = [{**dict(p), "quarter": hrview.quarter(p["expected_start"])} for p in positions]
         budgets.append({**dict(hb), "positions": positions, "transfers_out": transfers_out,
                         "transfers_in": transfers_in,
                         "aperte": [p for p in positions if p["status"] in OPEN_POSITIONS],
+                        "director": ctx["directors"].get(hb["owner_user_id"]),
                         **_hiring_numbers(hb)})
+    open_budgets = [b for b in budgets if b["status"] == "aperto"]
+    totals = None
+    if ctx["hr"]:
+        totals = {k: sum(b[k] for b in open_budgets) for k in ("cap", "riporto", "applicato", "impegnato", "residuo")}
+        totals["n_budget"] = len(open_budgets)
+        totals["n_aperte"] = sum(len(b["aperte"]) for b in open_budgets)
     return _templates().TemplateResponse(request, "hiring.html", {
-        "open_budgets": [b for b in budgets if b["status"] == "aperto"],
+        **ctx, "totals": totals,
+        "open_budgets": open_budgets,
         "closed_budgets": [b for b in budgets if b["status"] != "aperto"],
         "all_budgets": db.query(
             "SELECT id, period, year FROM hiring_budget ORDER BY year DESC, id DESC"),

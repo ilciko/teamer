@@ -1,10 +1,18 @@
 {% extends "base.html" %}
+{% from "_filters.html" import multi %}
 {% block title %}9-Box{% endblock %}
 {% block content %}
 <div class="page-head">
   <h1>9-Box Talent Matrix</h1>
   <span class="badge green">coefficienti dinamici</span>
   <div class="spacer"></div>
+  {# filtri (0.38): team a scelta multipla per tutti, director per HR; cumulabili #}
+  <form method="get" action="/ninebox" class="frow" style="gap:6px">
+    {% if hr %}{{ multi('director', dir_opts, sel, 'Tutti i director', 'Director') }}{% endif %}
+    {{ multi('team', team_opts, team_sel, 'Tutti i team', 'Team') }}
+    {% if sel or team_sel %}<a class="btn ghost sm" href="/ninebox">Azzera</a>{% endif %}
+  </form>
+  {% if not hr %}
   <form method="get" action="" onsubmit="location.href='/ninebox/start/'+this.pid.value; return false;">
     <div class="frow">
       <select name="pid" required>
@@ -14,11 +22,12 @@
       <button class="btn">Avvia →</button>
     </div>
   </form>
+  {% endif %}
 </div>
 
 <div class="grid2">
   <div class="card">
-    <div class="card-title">Griglia — ultima valutazione per persona</div>
+    <div class="card-title">Griglia — ultima valutazione per persona{% if sel or team_sel %} <span class="muted3 small">(filtro attivo: {{ latest | length }} valutate, {{ unrated | length }} mai valutate)</span>{% endif %}</div>
     <div style="display:flex;gap:8px">
       <div style="display:flex;flex-direction:column;justify-content:space-around">
         <div class="muted3 small" style="writing-mode:vertical-rl;transform:rotate(180deg);text-align:center">← Potenziale</div>
@@ -27,13 +36,18 @@
         <div class="g9">
           {% for n in [6,8,9,3,5,7,1,2,4] %}
           {% set b = boxes_by_n[n] %}
-          <div class="c9" data-z="{{ b.zone }}">
+          {% set members = by_box.get(n, []) %}
+          <div class="c9 pick" data-z="{{ b.zone }}" data-box="{{ n }}" title="Seleziona la casella per vedere l'elenco a destra">
             <div><span class="cn">{{ n }}</span> <span class="cl">{{ b.label }}</span></div>
-            {% for r in by_box.get(n, []) %}
+            {% if members | length <= max_chips %}
+            {% for r in members %}
             <a class="chip-person" href="/people/{{ r.person_id }}" title="{{ r.eval_date }}">
               <span class="av">{{ initials(r.full_name) }}</span>{{ r.full_name.split(' ')[0] }}
             </a>
             {% endfor %}
+            {% else %}
+            <div class="cc"><strong>{{ members | length }}</strong> persone</div>
+            {% endif %}
           </div>
           {% endfor %}
         </div>
@@ -43,26 +57,63 @@
   </div>
 
   <div class="card">
-    <div class="card-title">Situazione</div>
-    <table class="tbl">
-      <thead><tr><th>Persona</th><th>Box</th><th>Data</th><th></th></tr></thead>
+    <div class="page-head" style="margin-bottom:8px">
+      <div class="card-title" style="margin:0">Situazione <span class="muted3 small" id="sit-label"></span></div>
+      <div class="spacer"></div>
+      <button class="btn ghost sm" type="button" id="sit-all">Mostra tutte ({{ latest | length + unrated | length }})</button>
+    </div>
+    <p class="sit-empty" id="sit-empty">Seleziona una casella della griglia, oppure mostra tutte le persone del filtro.</p>
+    <table class="tbl" id="sit-table" hidden>
+      <thead><tr><th>Persona</th><th>Team</th><th>Box</th><th>Data</th>{% if not hr %}<th></th>{% endif %}</tr></thead>
       {% for r in latest %}
-      <tr>
+      <tr class="sit-row" data-box="{{ r.box_number }}" hidden>
         <td><a href="/people/{{ r.person_id }}">{{ r.full_name }}</a></td>
+        <td class="muted">{{ r.team_name or '—' }}</td>
         <td><span class="badge {{ 'green' if r.box_number >= 7 else 'red' if r.box_number == 1 else 'amber' }}">{{ r.box_number }} · {{ boxes_by_n[r.box_number].label }}</span></td>
         <td class="muted">{{ r.eval_date | dt }}</td>
-        <td><a class="btn sm ghost" href="/ninebox/start/{{ r.person_id }}">Rivaluta</a></td>
+        {% if not hr %}<td><a class="btn sm ghost" href="/ninebox/start/{{ r.person_id }}">Rivaluta</a></td>{% endif %}
       </tr>
       {% endfor %}
       {% for u in unrated %}
-      <tr>
+      <tr class="sit-row" data-box="0" hidden>
         <td>{{ u.full_name }}</td>
+        <td class="muted">{{ u.team_name or '—' }}</td>
         <td><span class="badge">mai valutato</span></td>
         <td></td>
-        <td><a class="btn sm" href="/ninebox/start/{{ u.id }}">Valuta</a></td>
+        {% if not hr %}<td><a class="btn sm" href="/ninebox/start/{{ u.id }}">Valuta</a></td>{% endif %}
       </tr>
       {% endfor %}
     </table>
   </div>
 </div>
+
+<script>
+// Situazione: vuota finché non si sceglie. «Mostra tutte» = tutte le persone del filtro;
+// una casella = solo i suoi membri (riclic = deseleziona). Solo a video, niente richieste.
+(function () {
+  const rows = document.querySelectorAll('.sit-row'), table = document.getElementById('sit-table');
+  const empty = document.getElementById('sit-empty'), label = document.getElementById('sit-label');
+  const boxes = document.querySelectorAll('.c9.pick');
+  let picked = null;
+  function show(filter, text) {
+    let n = 0;
+    rows.forEach(r => { const ok = filter(r); r.hidden = !ok; if (ok) n++; });
+    table.hidden = n === 0; empty.hidden = n > 0;
+    empty.textContent = 'Nessuna persona' + (text ? ' in ' + text : '') + ' con il filtro attuale.';
+    label.textContent = text ? '— ' + text + ' (' + n + ')' : '— tutte (' + n + ')';
+  }
+  document.getElementById('sit-all').addEventListener('click', () => {
+    picked = null; boxes.forEach(b => b.classList.remove('hl')); show(() => true, '');
+  });
+  boxes.forEach(b => b.addEventListener('click', e => {
+    if (e.target.closest('a')) return;              // il nome porta alla scheda
+    const n = b.dataset.box;
+    boxes.forEach(x => x.classList.remove('hl'));
+    if (picked === n) { picked = null; rows.forEach(r => r.hidden = true); table.hidden = true; empty.hidden = false;
+      empty.textContent = 'Seleziona una casella della griglia, oppure mostra tutte le persone del filtro.'; label.textContent = ''; return; }
+    picked = n; b.classList.add('hl');
+    show(r => r.dataset.box === n, 'casella ' + n + ' · ' + b.querySelector('.cl').textContent);
+  }));
+})();
+</script>
 {% endblock %}

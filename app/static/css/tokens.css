@@ -307,7 +307,7 @@ input[type=checkbox] { width: auto; }
 
 /* filtro reparti a scelta multipla */
 .ms { position: relative; }
-.ms > summary { list-style: none; cursor: pointer; }
+.ms > summary { list-style: none; cursor: pointer; white-space: nowrap; }
 .ms > summary::-webkit-details-marker { display: none; }
 .ms-panel {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 240px; max-height: 60vh; overflow-y: auto;
@@ -337,6 +337,10 @@ input[type=checkbox] { width: auto; }
 .c9[data-z="g"]  { background: var(--green-bg); }
 .c9[data-z="gg"] { background: #9FE1CB; }
 .c9.hl { outline: 2px solid var(--green-dark); }
+.c9.pick { cursor: pointer; }
+.c9.pick:hover { outline: 1px solid var(--border2); }
+.c9 .cc { font-size: 12px; color: var(--text2); margin-top: auto; }   /* totale al posto dei nomi, oltre max_chips */
+.sit-empty { color: var(--text3); font-size: 13px; padding: 8px 0; }
 .c9 .cn { font-size: 13px; font-weight: 600; color: var(--text2); line-height: 1; }
 .c9 .cl { font-size: 9px; color: var(--text2); line-height: 1.2; }
 

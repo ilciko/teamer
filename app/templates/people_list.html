@@ -22,7 +22,8 @@
 
 <div class="card">
   <table class="tbl">
-    <thead><tr><th></th><th>Nome</th><th>Team</th>{% if hr %}<th>Director</th>{% endif %}<th>Ruolo</th><th>Assunzione</th><th class="num">RAL</th><th></th></tr></thead>
+    {# HR (0.38): Director prima del Team e niente RAL in lista #}
+    <thead><tr><th></th><th>Nome</th>{% if hr %}<th>Director</th>{% endif %}<th>Team</th><th>Ruolo</th><th>Assunzione</th>{% if not hr %}<th class="num">RAL</th>{% endif %}<th></th></tr></thead>
     <tbody>
     {% for p in people %}
       <tr>
@@ -31,15 +32,15 @@
         </td>
         <td><a href="/people/{{ p.id }}"><strong>{{ p.full_name }}</strong></a>
           {% if p.status != 'attivo' %} <span class="badge red">cessato</span>{% endif %}</td>
-        <td>{{ p.team_name or '—' }}</td>
         {% if hr %}<td>{{ p.director or '—' }}</td>{% endif %}
+        <td>{{ p.team_name or '—' }}</td>
         <td>{{ lookup_label('role_type', p.role_type) if p.role_type else '—' }}</td>
         <td>{{ p.hire_date | dt }}</td>
-        <td class="num">{{ p.ral | eur }}</td>
+        {% if not hr %}<td class="num">{{ p.ral | eur }}</td>{% endif %}
         <td><a class="btn ghost sm" href="/people/{{ p.id }}">Apri</a></td>
       </tr>
     {% else %}
-      <tr><td colspan="{{ 8 if hr else 7 }}" class="muted">Nessuna persona{% if not hr %}. Aggiungi la prima qui sotto{% endif %}.</td></tr>
+      <tr><td colspan="7" class="muted">Nessuna persona{% if not hr %}. Aggiungi la prima qui sotto{% endif %}.</td></tr>
     {% endfor %}
     </tbody>
   </table>
