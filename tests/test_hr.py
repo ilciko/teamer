@@ -103,7 +103,7 @@ def test_post_rifiutati_salvo_account_e_anteprime(client, client2, hr_client):
     t1, t2, p1, p2 = _seed(client, client2)
     for path, data in [("/org/team", {"name": "X"}), (f"/people/{p1}/delete", {"confirm_name": "Anna Alfa"}),
                        (f"/people/{p1}/replacement", {"title": "X", "expected_start": "2026-01-01"}),
-                       ("/comp/bonus", {}), ("/ninebox/save", {}), ("/cycles", {}),
+                       ("/ninebox/save", {}), ("/cycles", {}),
                        ("/settings/general", {}), ("/admin/users", {}), ("/comp/listino/person/1/code", {})]:
         assert hr_client.post(path, data=data).status_code == 403, path
     assert db.sys.one("SELECT COUNT(*) AS n FROM person")["n"] == 2
@@ -132,7 +132,7 @@ def test_connessione_di_hr_fuori_dalla_whitelist(client, client2, hr_client):
         with pytest.raises(db.sqlcipher.DatabaseError):
             db.execute("DELETE FROM ninebox_assessment")
         with pytest.raises(db.sqlcipher.DatabaseError):
-            db.execute("INSERT INTO bonus_pool (period, total_cap) VALUES ('x', 1)")
+            db.execute("INSERT INTO review_cycle (name, year) VALUES ('x', 2026)")
         with pytest.raises(db.sqlcipher.DatabaseError):
             db.execute("INSERT INTO lookup (category, code, label) VALUES ('x', 'y', 'z')")
         # la configurazione è la sua, di default (una voce sola per chiave)
@@ -146,7 +146,7 @@ def test_connessione_di_hr_fuori_dalla_whitelist(client, client2, hr_client):
 def test_whitelist_e_ruolo_nel_db(app_db):
     # 0.39: note e azioni, contratti, persone, budget e piano; mai team, configurazione, cicli, 9-box, montepremi
     assert set(perimeter.AUTHORED) | set(perimeter.HR_CONTRACT) <= set(perimeter.HR_WRITABLE)
-    assert not {"team", "user_meta", "review_cycle", "ninebox_assessment", "bonus_pool", "lookup"} & set(perimeter.HR_WRITABLE)
+    assert not {"team", "user_meta", "review_cycle", "ninebox_assessment", "lookup"} & set(perimeter.HR_WRITABLE)
     assert "hr" in users.ROLES and "hr" in perimeter.SESSION_ROLES
     with pytest.raises(db.sqlcipher.IntegrityError):
         db.sys.execute("INSERT INTO app_user (username, role, password_hash) VALUES ('x', 'boh', 'h')")

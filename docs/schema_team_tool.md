@@ -404,6 +404,12 @@ Listino; i parametri del costo giornaliero (`listino_*`) stanno in `app_meta`.
 | total_cap | REAL | tetto montepremi |
 | status | TEXT | `bozza`/`chiuso` |
 
+### `bonus_role_factor` — moltiplicatori per ruolo del premio di ruolo *(0036, config aziendale)*
+
+Una riga per `role_type` (default ic 1, tl 2, mgr 3, sr 4), gestita da HR in Azienda → Premi. `bonus_pool`
+dalla 0036 ha `kind` (`composito` | `ruolo`), `competence_year`, `ref_date`, `teams` e `excluded_roles` (JSON);
+`bonus_allocation` ha `role_proposed` (prevalente nell'anno) e `role_type` (usato per il premio).
+
 ### `bonus_allocation` — distribuzione premio per persona
 | Campo | Tipo | Note |
 |---|---|---|

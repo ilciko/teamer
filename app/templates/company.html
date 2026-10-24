@@ -9,6 +9,7 @@
     <a class="btn sm {{ 'ghost' if tab != 'benefit' }}" href="/azienda?tab=benefit">Catalogo benefit</a>
     <a class="btn sm {{ 'ghost' if tab != 'default' }}" href="/azienda?tab=default">Valori predefiniti</a>
     <a class="btn sm {{ 'ghost' if tab != 'listino' }}" href="/azienda?tab=listino">Listino</a>
+    <a class="btn sm {{ 'ghost' if tab != 'premi' }}" href="/azienda?tab=premi">Premi</a>
   </div>
 </div>
 <p class="muted small" style="margin:-6px 0 12px">Configurazione unica per tutta l'azienda, gestita da HR: la usano tutti i director, che non la possono modificare.</p>
@@ -201,6 +202,22 @@
       <div class="actions"><button class="btn sm">Aggiungi</button></div>
     </form>
   </div>
+</div>
+
+{% elif tab == 'premi' %}
+<div class="card" style="max-width:560px">
+  <div class="card-title">Moltiplicatori per ruolo — premio di ruolo</div>
+  <p class="muted small" style="margin-bottom:10px;line-height:1.6">Il montepremi per ruolo di HR si ripartisce in proporzione a questi moltiplicatori, sul ruolo prevalente di ciascuno nell'anno di competenza. Es. junior e specialist ×1, team leader ×2, manager ×3.</p>
+  <form method="post" action="/azienda/premi" class="hr-ok">
+    <table class="tbl">
+      <thead><tr><th>Ruolo</th><th class="num" style="width:120px">× moltiplicatore</th></tr></thead>
+      {% for r in lookups('role_type') %}
+      <tr><td>{{ r.label }} <span class="muted3 small">{{ r.code }}</span></td>
+        <td class="num"><input type="number" name="f_{{ r.code }}" value="{{ '%g' % role_factors.get(r.code, 1.0) }}" step="0.1" min="0" style="text-align:right" required></td></tr>
+      {% endfor %}
+    </table>
+    <div class="actions"><button class="btn sm">Salva</button></div>
+  </form>
 </div>
 
 {% elif tab == 'default' %}

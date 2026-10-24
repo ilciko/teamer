@@ -1,14 +1,17 @@
 {% extends "base.html" %}
+{% from "_filters.html" import multi %}
 {% block title %}Montepremi{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Montepremi</h1></div>
+<div class="page-head"><h1>Montepremi{% if hr %} per ruolo{% endif %}</h1>
+  {% if hr %}<span class="badge">HR</span><div class="spacer"></div><a class="btn ghost sm" href="/azienda?tab=premi">Moltiplicatori per ruolo →</a>{% endif %}
+</div>
 
 <div class="card">
   <table class="tbl">
     <thead><tr><th>Periodo</th><th>Stato</th><th class="num">Tetto</th><th class="num">Allocato</th><th class="num">Persone</th><th></th></tr></thead>
     {% for p in pools %}
     <tr>
-      <td><strong>{{ p.period }}</strong></td>
+      <td><strong>{{ p.period }}</strong>{% if p.competence_year %} <span class="badge">competenza {{ p.competence_year }}</span>{% endif %}</td>
       <td><span class="badge {{ 'green' if p.status == 'chiuso' else 'amber' }}">{{ p.status }}</span></td>
       <td class="num">{{ p.total_cap | eur }}</td>
       <td class="num">{{ p.allocated | eur }}</td>
@@ -16,20 +19,34 @@
       <td><a class="btn sm ghost" href="/comp/bonus/{{ p.id }}">Apri</a></td>
     </tr>
     {% else %}
-    <tr><td colspan="6" class="muted">Nessun montepremi. Creane uno: la distribuzione parte dai pesi 9-box e poi si aggiusta a mano.</td></tr>
+    <tr><td colspan="6" class="muted">Nessun montepremi. Creane uno: {% if hr %}si ripartisce sui moltiplicatori di ruolo, poi si aggiusta a mano{% else %}la distribuzione parte dai pesi 9-box e poi si aggiusta a mano{% endif %}.</td></tr>
     {% endfor %}
   </table>
 </div>
 
-<div class="card" style="max-width:520px">
-  <div class="card-title">Nuovo montepremi</div>
-  <form method="post" action="/comp/bonus">
-    <label class="fld">Periodo</label><input type="text" name="period" placeholder="Premi 2026" required>
+<div class="card" style="max-width:{{ '720px' if hr else '520px' }}">
+  <div class="card-title">Nuovo montepremi{% if hr %} per ruolo{% endif %}</div>
+  <form method="post" action="/comp/bonus" class="hr-ok">
+    <div class="frow">
+      <div><label class="fld">Periodo</label><input type="text" name="period" placeholder="Premi {{ year + 1 }}" required></div>
+      {% if hr %}<div style="flex:0 0 140px"><label class="fld">Anno di competenza</label><input type="number" name="competence_year" value="{{ year }}" required></div>
+      <div style="flex:0 0 170px"><label class="fld">In organico al</label><input type="date" name="ref_date" value="{{ year }}-12-31"></div>{% endif %}
+    </div>
     <div class="frow">
       <div><label class="fld">Tetto fisso €</label><input type="number" name="total_cap" step="0.01" min="0"></div>
       <div><label class="fld">oppure cifra a testa €</label><input type="number" name="per_head" step="0.01" min="0" placeholder="es. 500"></div>
     </div>
+    {% if hr %}
+    <div class="frow" style="margin-top:10px;gap:8px;align-items:center">
+      <span class="muted small">Platea:</span>
+      {{ multi('team', team_opts, [], 'Tutti i team', 'Team') }}
+      {% set role_opts = [] %}{% for r in lookups('role_type') %}{% set _ = role_opts.append({'id': r.code, 'name': r.label}) %}{% endfor %}
+      {{ multi('excluded_role', role_opts, [], 'Nessun ruolo escluso', 'Ruoli esclusi') }}
+    </div>
+    <p class="muted3 small" style="margin-top:6px">Il ruolo di ciascuno è quello prevalente nell'anno di competenza (non l'attuale) e si può cambiare per singola allocazione. Entra chi era in organico alla data scelta; i team con un'altra misurazione si lasciano fuori. Escludi anche singole persone dalla pagina del premio.</p>
+    {% else %}
     <p class="muted3 small" style="margin-top:6px">Con la cifra a testa il tetto = cifra × persone incluse nella platea, e si ricalcola quando escludi/includi qualcuno.</p>
+    {% endif %}
     <div class="actions"><button class="btn">Crea →</button></div>
   </form>
 </div>

@@ -50,3 +50,28 @@ def bonus_proposals(total_cap: float, weights: dict[int, float]) -> dict[int, fl
 
 def pool_residual(total_cap: float, final_amounts: list[float]) -> float:
     return round(total_cap - sum(final_amounts), 2)
+
+
+def role_prevalente(assignments: list[dict], year: int) -> str | None:
+    """Il ruolo tenuto più a lungo nell'anno (0.43): per ogni assegnazione che tocca l'anno si contano
+    i giorni dentro l'anno; a parità vince quella più recente. None se nessuna assegnazione tocca l'anno.
+
+    assignments: righe con role_type, start_date, end_date (None = aperta), in qualunque ordine.
+    """
+    from datetime import date
+
+    y0, y1 = date(year, 1, 1), date(year, 12, 31)
+    days: dict[str, int] = {}
+    latest: dict[str, str] = {}
+    for a in assignments:
+        start = date.fromisoformat(str(a["start_date"])[:10])
+        end = date.fromisoformat(str(a["end_date"])[:10]) if a["end_date"] else y1
+        lo, hi = max(start, y0), min(end, y1)
+        if lo > hi:
+            continue
+        n = (hi - lo).days + 1
+        days[a["role_type"]] = days.get(a["role_type"], 0) + n
+        latest[a["role_type"]] = max(latest.get(a["role_type"], ""), str(a["start_date"]))
+    if not days:
+        return None
+    return max(days, key=lambda r: (days[r], latest[r]))

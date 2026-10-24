@@ -78,7 +78,7 @@ PERSON = ["person", "person_assignment", "employment", "ral_event", "benefit_ass
           "ninebox_assessment", "attachment", "listino_person_param", "replacement_decision"]
 # note e azioni: di chi le scrive (`author_user_id`); per le azioni, fuori perimetro si tocca solo lo stato
 AUTHORED = {"meeting_note": (), "action_item": ("status", "closed_date")}
-COMPANY = ["lookup", "benefit_type", "listino_profile"]   # listino aziendale dalla 0.41
+COMPANY = ["lookup", "benefit_type", "listino_profile", "bonus_role_factor"]   # listino 0.41, premi di ruolo 0.43
 INSTANCE = ["app_meta", "app_user", "audit_event"]
 
 CLASSES = {"owned": list(OWNED), "child": list(CHILD), "team": TEAM, "person": PERSON,
@@ -117,7 +117,8 @@ HR_CONTRACT = ["employment", "ral_event", "benefit_assignment", "incentive", "re
 HR_WRITABLE: dict[str, set] = {t: {"*"} for t in [
     *AUTHORED, *HR_CONTRACT, "person", "person_assignment", "attachment",
     "ral_budget", "ral_budget_member", "ral_proposal",
-    "hiring_budget", "hiring_position", "hiring_transfer"]}
+    "hiring_budget", "hiring_position", "hiring_transfer",
+    "bonus_pool", "bonus_allocation"]}   # 0.43: il suo montepremi per ruolo
 
 
 # ---- viste e guardie sulla connessione di una sessione ----

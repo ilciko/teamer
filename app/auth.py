@@ -35,7 +35,7 @@ HR_DENIED = ("/reports", "/org/sim", "/org/riporti", "/settings")
 # analisi salary, piano, budget aumenti e assunzioni (quelli dei director «in veste di») e il
 # selettore del director
 HR_WRITE_OK = ("/lock", "/account", "/public-mode", "/notes", "/actions", "/hr/acting",
-               "/people", "/comp/salary", "/comp/plan", "/comp/budget", "/comp/hiring")
+               "/people", "/comp/salary", "/comp/plan", "/comp/budget", "/comp/hiring", "/comp/bonus")
 # ...ma non elimina persone né decide la sostituzione di chi cessa (è del director)
 HR_WRITE_DENIED = re.compile(r"^/people/\d+/(delete|replacement)(/|$)")
 # la parte contrattuale la scrive solo HR (0.39): il director la legge

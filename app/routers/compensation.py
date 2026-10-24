@@ -902,30 +902,134 @@ def position_void(pid: int):
 
 # ---- montepremi ----
 
+def _role_factors() -> dict[str, float]:
+    """Moltiplicatori aziendali per ruolo (Azienda → Premi), per il premio di ruolo di HR (0.43)."""
+    return {r["role_type"]: r["factor"] for r in db.query("SELECT * FROM bonus_role_factor")}
+
+
 @router.get("/comp/bonus")
 def bonus_list(request: Request):
+    """HR (0.43) vede i suoi montepremi per ruolo e li crea qui; il director i suoi compositi."""
+    ctx = hrview.context(request)
     pools = []
-    for p in db.query("SELECT * FROM bonus_pool ORDER BY id DESC"):
+    for p in db.query("SELECT * FROM bonus_pool WHERE kind=? ORDER BY id DESC",
+                      ("ruolo" if ctx["hr"] else "composito",)):
         allocs = db.query(
             "SELECT COALESCE(SUM(final_amount),0) AS t, COUNT(*) AS n FROM bonus_allocation "
-            "WHERE pool_id=? AND voided=0", (p["id"],))[0]
+            "WHERE pool_id=? AND voided=0 AND included=1", (p["id"],))[0]
         pools.append({**dict(p), "allocated": allocs["t"], "n": allocs["n"]})
-    return _templates().TemplateResponse(request, "bonus_list.html", {"pools": pools})
+    teams = db.query("SELECT id, name, owner_user_id FROM team WHERE archived_at IS NULL AND holding=0 ORDER BY name")
+    return _templates().TemplateResponse(request, "bonus_list.html", {
+        **ctx, "pools": pools, "role_factors": _role_factors(), "year": date.today().year - 1,
+        "team_opts": [{"id": t["id"], "name": t["name"] + (f" · {ctx['directors'][t['owner_user_id']]}"
+                                                           if ctx["directors"].get(t["owner_user_id"]) else "")}
+                      for t in teams],
+    })
 
 
 @router.post("/comp/bonus")
-def bonus_create(period: str = Form(...), total_cap: str = Form(None),
-                 per_head: str = Form(None)):
-    """Tetto fisso oppure cifra a testa × platea (ricalcolato quando la platea cambia)."""
+async def bonus_create(request: Request):
+    """Tetto fisso oppure cifra a testa × platea (ricalcolato quando la platea cambia). Per HR (0.43)
+    nasce un pool «ruolo»: anno di competenza, team della platea, ruoli esclusi, data «in organico»."""
+    form = await request.form()
+    period = (form.get("period") or "").strip()
+    per_head = form.get("per_head")
     ph = float(per_head) if per_head else None
+    cap = float(form.get("total_cap") or 0)
+    if hrview.is_hr():
+        year = int(form.get("competence_year") or date.today().year - 1)
+        teams = json.dumps([int(t) for t in form.getlist("team") if str(t).isdigit()])
+        roles = json.dumps([r for r in form.getlist("excluded_role") if r])
+        ref_date = form.get("ref_date") or f"{year}-12-31"
+        pool_id = db.execute(
+            "INSERT INTO bonus_pool (period, total_cap, per_head, kind, competence_year, ref_date, teams, excluded_roles, "
+            "use_box, use_rating, use_goal) VALUES (?,?,?, 'ruolo', ?,?,?,?, 0, 0, 0)",
+            (period, cap, ph, year, ref_date, teams, roles))
+        return bonus_generate(pool_id)
     if ph:
         n = db.one("SELECT COUNT(*) AS n FROM person WHERE status='attivo'")["n"]
         cap = round(ph * n, 2)
-    else:
-        cap = float(total_cap or 0)
     pool_id = db.execute(
         "INSERT INTO bonus_pool (period, total_cap, per_head) VALUES (?,?,?)",
         (period, cap, ph))
+    return RedirectResponse(f"/comp/bonus/{pool_id}", status_code=302)
+
+
+def _platea_ruolo(pool) -> list[dict]:
+    """Platea del premio di ruolo: persone attive nei team scelti (tutti se nessuno), in organico alla
+    data di riferimento, col ruolo prevalente nell'anno di competenza non fra quelli esclusi."""
+    teams = json.loads(pool["teams"] or "[]")
+    excluded = set(json.loads(pool["excluded_roles"] or "[]"))
+    ref = str(pool["ref_date"] or f"{pool['competence_year']}-12-31")[:10]
+    rows = db.query(
+        """SELECT p.id, p.full_name, p.hire_date, pa.team_id, pa.role_type AS role_now,
+                  COALESCE(t.owner_user_id, p.owner_user_id) AS director_id
+           FROM person p
+           LEFT JOIN person_assignment pa ON pa.person_id = p.id AND pa.voided = 0 AND pa.end_date IS NULL
+           LEFT JOIN team t ON t.id = pa.team_id
+           WHERE p.status = 'attivo' ORDER BY p.full_name""")
+    out = []
+    for r in rows:
+        if teams and r["team_id"] not in teams:
+            continue
+        if r["hire_date"] and str(r["hire_date"])[:10] > ref:
+            continue
+        hist = db.query("SELECT role_type, start_date, end_date FROM person_assignment WHERE person_id=? AND voided=0",
+                        (r["id"],))
+        role = budget_svc.role_prevalente([dict(h) for h in hist], pool["competence_year"]) or r["role_now"]
+        if role in excluded:
+            continue
+        out.append({**dict(r), "role_proposed": role})
+    return out
+
+
+def _generate_ruolo(pool) -> None:
+    """Proposte del premio di ruolo: peso = moltiplicatore del ruolo usato (quello scelto sull'allocazione,
+    altrimenti il prevalente dell'anno). Platea ricalcolata; chi ne esce resta escluso, chi era escluso
+    a mano resta escluso; i finali ritoccati a mano restano."""
+    factors = _role_factors()
+    existing = {a["person_id"]: a for a in db.query("SELECT * FROM bonus_allocation WHERE pool_id=?", (pool["id"],))}
+    platea = {r["id"]: r for r in _platea_ruolo(pool)}
+    rows = {}
+    for pid, r in platea.items():
+        prev = existing.get(pid)
+        role = prev["role_type"] if prev and prev["role_type"] else r["role_proposed"]
+        included = prev["included"] if prev else 1
+        rows[pid] = (r["role_proposed"], role, factors.get(role, 1.0), included)
+    weights = {pid: f for pid, (_, _, f, inc) in rows.items() if inc}
+    cap = pool["total_cap"]
+    if pool["per_head"]:
+        cap = round(pool["per_head"] * len(weights), 2)
+        db.execute("UPDATE bonus_pool SET total_cap=? WHERE id=?", (cap, pool["id"]))
+    proposals = budget_svc.bonus_proposals(cap, weights)
+    with db.transaction() as conn:
+        for pid, (proposed, role, f, inc) in rows.items():
+            amount = proposals.get(pid, 0) if inc else 0
+            prev = existing.get(pid)
+            manual = prev and prev["final_amount"] is not None and prev["final_amount"] != prev["proposed_amount"]
+            final = prev["final_amount"] if manual and inc else amount
+            conn.execute(
+                "INSERT INTO bonus_allocation (pool_id, person_id, weight, proposed_amount, final_amount, included, "
+                "role_proposed, role_type, weight_detail) VALUES (?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(pool_id, person_id) DO UPDATE SET weight=excluded.weight, "
+                "proposed_amount=excluded.proposed_amount, final_amount=excluded.final_amount, "
+                "role_proposed=excluded.role_proposed, role_type=excluded.role_type, weight_detail=excluded.weight_detail",
+                (pool["id"], pid, f, amount, final, inc, proposed, role, json.dumps({"role": role, "role_f": f})))
+        # chi non è più in platea (team, data, ruolo escluso) esce, ma la riga resta visibile come esclusa
+        for pid, prev in existing.items():
+            if pid not in rows and prev["included"]:
+                conn.execute("UPDATE bonus_allocation SET included=0, proposed_amount=0, final_amount=0 WHERE id=?",
+                             (prev["id"],))
+
+
+@router.post("/comp/bonus/{pool_id}/alloc/{aid}/role")
+def bonus_alloc_role(pool_id: int, aid: int, role_type: str = Form("")):
+    """Premio di ruolo (0.43): il ruolo usato per questa allocazione (vuoto = torna al prevalente)."""
+    pool = db.one("SELECT * FROM bonus_pool WHERE id=?", (pool_id,))
+    if pool and pool["kind"] == "ruolo" and pool["status"] != "chiuso":
+        db.execute("UPDATE bonus_allocation SET role_type=? WHERE id=? AND pool_id=?",
+                   (role_type or None, aid, pool_id))
+        _generate_ruolo(pool)
     return RedirectResponse(f"/comp/bonus/{pool_id}", status_code=302)
 
 
@@ -956,8 +1060,22 @@ def bonus_detail(request: Request, pool_id: int):
         detail = json.loads(a["weight_detail"]) if a["weight_detail"] else None
         allocs.append({**dict(a), "detail": detail})
     residual = budget_svc.pool_residual(pool["total_cap"], [a["final_amount"] or 0 for a in allocs])
+    ctx = hrview.context(request)
+    if pool["kind"] == "ruolo":
+        cur = {r["id"]: dict(r) for r in db.query(
+            """SELECT p.id, t.name AS team_name, pa.role_type AS role_now, COALESCE(t.owner_user_id, p.owner_user_id) AS director_id
+               FROM person p LEFT JOIN person_assignment pa ON pa.person_id=p.id AND pa.voided=0 AND pa.end_date IS NULL
+               LEFT JOIN team t ON t.id=pa.team_id""")}
+        for a in allocs:
+            c = cur.get(a["person_id"], {})
+            a.update(team_name=c.get("team_name"), role_now=c.get("role_now"),
+                     director=ctx["directors"].get(c.get("director_id")))
+        allocs.sort(key=lambda a: (not a["included"], a["director"] or "", a["team_name"] or "", a["full_name"]))
+    teams = {t["id"]: t["name"] for t in db.query("SELECT id, name FROM team")}
     return _templates().TemplateResponse(request, "bonus_detail.html", {
-        "pool": pool, "allocs": allocs, "residual": residual,
+        **ctx, "pool": pool, "allocs": allocs, "residual": residual, "role_factors": _role_factors(),
+        "pool_teams": [teams.get(t, f"#{t}") for t in json.loads(pool["teams"] or "[]")],
+        "pool_excluded_roles": json.loads(pool["excluded_roles"] or "[]"),
     })
 
 
@@ -993,8 +1111,11 @@ def _person_bonus_inputs(pid: int) -> dict:
 @router.post("/comp/bonus/{pool_id}/generate")
 def bonus_generate(pool_id: int):
     """Proposte dal peso composito, coi soli fattori attivi sul pool e solo per gli inclusi."""
-    _pool_recompute_cap(pool_id)
     pool = db.one("SELECT * FROM bonus_pool WHERE id=?", (pool_id,))
+    if pool and pool["kind"] == "ruolo":
+        _generate_ruolo(pool)
+        return RedirectResponse(f"/comp/bonus/{pool_id}", status_code=302)
+    _pool_recompute_cap(pool_id)
     mapping = {r["box_number"]: r["weight"] for r in db.query("SELECT * FROM weight_mapping")}
     factors = {(f["kind"], f["code"]): f["factor"] for f in db.query("SELECT * FROM bonus_factor")}
     excluded = {r["person_id"] for r in db.query(
@@ -1037,8 +1158,10 @@ def bonus_generate(pool_id: int):
 
 def _redistribute(pool_id: int) -> None:
     """Ridistribuisce le proposte tra gli inclusi; i finali ritoccati a mano restano."""
-    _pool_recompute_cap(pool_id)
     pool = db.one("SELECT * FROM bonus_pool WHERE id=?", (pool_id,))
+    if pool and pool["kind"] == "ruolo":
+        return _generate_ruolo(pool)
+    _pool_recompute_cap(pool_id)
     allocs = db.query("SELECT * FROM bonus_allocation WHERE pool_id=? AND voided=0", (pool_id,))
     weights = {a["person_id"]: a["weight"] for a in allocs if a["included"]}
     proposals = budget_svc.bonus_proposals(pool["total_cap"], weights)

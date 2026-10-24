@@ -41,7 +41,27 @@ def company_page(request: Request, tab: str = "liste", saved: str = ""):
             "SELECT lp.*, (SELECT COUNT(*) FROM person_assignment pa WHERE pa.listino_profile_id=lp.id) AS n_ref "
             "FROM listino_profile lp ORDER BY lp.sort_order, lp.code"),
         "p": p, "g": listino.giorni(p),
+        "role_factors": {r["role_type"]: r["factor"] for r in db.sys.query("SELECT * FROM bonus_role_factor")},
     })
+
+
+# ---- premi di ruolo: moltiplicatori per ruolo (0.43) ----
+
+@router.post(f"{PREFIX}/premi")
+async def role_factors_save(request: Request):
+    """Un moltiplicatore per ogni ruolo della lista aziendale: junior/specialist ×1, TL ×2, manager ×3…"""
+    form = await request.form()
+    for r in db.lookups("role_type"):
+        raw = str(form.get(f"f_{r['code']}") or "").strip().replace(",", ".")
+        try:
+            v = float(raw)
+        except ValueError:
+            return _back("premi", "err")
+        if v < 0:
+            return _back("premi", "err")
+        db.sys.execute("INSERT INTO bonus_role_factor (role_type, factor) VALUES (?,?) "
+                       "ON CONFLICT(role_type) DO UPDATE SET factor=excluded.factor", (r["code"], v))
+    return _back("premi")
 
 
 # ---- listino: codici e parametri (0.41) ----
