@@ -11,6 +11,7 @@
     {% set d = direct_reports.get(n.team.lead_person_id, 0) %}
     <span class="muted3 small">{{ d }} dirett{{ 'o' if d == 1 else 'i' }}</span>{% endif %}
     <span class="spacer"></span>
+    {% if not n.team.holding %}
     <form class="tree-move" method="post" action="/org/team/{{ n.team.id }}/move">
       <button class="btn ghost sm" name="direction" value="up" title="Sposta su" {{ 'disabled' if first }}>↑</button>
       <button class="btn ghost sm" name="direction" value="down" title="Sposta giù" {{ 'disabled' if last }}>↓</button>
@@ -28,6 +29,7 @@
               title="{{ 'Non eliminabile: ' ~ (why.block + why.history) | join(', ') if why else 'Elimina team (è vuoto)' }}">✕</button>
     </form>
     {% endif %}
+    {% else %}<span class="muted3 small" title="Team tecnico: quando è vuoto sparisce da solo">non si elimina</span>{% endif %}
   </div>
   {% if n.members %}
   <div class="tree-people">

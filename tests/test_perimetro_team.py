@@ -173,7 +173,12 @@ def test_da_collocare_avviso_grafico_e_collocazione(org, client, client2, hr_cli
     beta = db.sys.one("SELECT id FROM team WHERE name='Beta'")["id"]
     client2.post(f"/people/{org['lea']}/assignment", data={"team_id": beta, "role_type": "mgr", "start_date": "2026-07-01"})
     assert "Persone da collocare" not in client2.get("/").text
-    assert "Da collocare" not in client2.get("/org/chart").text and "Da collocare" in client2.get("/org").text
+    assert "Da collocare" not in client2.get("/org/chart").text and "Da collocare" not in client2.get("/org").text   # vuoto: nascosto
+    hold = db.sys.one("SELECT id FROM team WHERE holding=1")["id"]
+    client2.post(f"/org/team/{hold}/delete", data={})
+    client2.post(f"/org/team/{hold}/archive", data={})
+    assert db.sys.one("SELECT archived_at FROM team WHERE id=?", (hold,)) is not None      # non eliminato
+    assert db.sys.one("SELECT archived_at FROM team WHERE id=?", (hold,))["archived_at"] is None   # né archiviato
     # un secondo spostamento riusa lo stesso team tecnico
     _transfer(hr_client, org["mario"])
     assert db.sys.one("SELECT COUNT(*) AS n FROM team WHERE holding=1")["n"] == 1

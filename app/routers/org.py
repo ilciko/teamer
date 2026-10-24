@@ -659,11 +659,12 @@ def _team_blockers() -> dict[int, dict[str, list[str]]]:
 
 @router.post("/org/team/{tid}/delete")
 def team_delete(tid: int):
-    """Correzione: un team creato per errore (vuoto e senza storia) si elimina."""
-    t = db.one("SELECT id FROM team WHERE id=?", (tid,))
+    """Correzione: un team creato per errore (vuoto e senza storia) si elimina. Il team tecnico
+    «Da collocare» no: vuoto si nasconde da solo, e HR potrebbe riempirlo domani."""
+    t = db.one("SELECT id, holding FROM team WHERE id=?", (tid,))
     if not t:
         return RedirectResponse("/org", status_code=302)
-    if _team_blockers().get(tid):
+    if t["holding"] or _team_blockers().get(tid):
         return RedirectResponse(f"/org?blocked={tid}#team-{tid}", status_code=302)
     with db.transaction() as conn:
         # nelle simulazioni le modifiche a questo team cadono (i riferimenti senza FK si ignorano già)
@@ -675,10 +676,10 @@ def team_delete(tid: int):
 @router.post("/org/team/{tid}/archive")
 def team_archive(tid: int):
     """Team vuoto ma con storico: sparisce dall'organigramma, la storia delle persone resta."""
-    t = db.one("SELECT id FROM team WHERE id=? AND archived_at IS NULL", (tid,))
+    t = db.one("SELECT id, holding FROM team WHERE id=? AND archived_at IS NULL", (tid,))
     if not t:
         return RedirectResponse("/org", status_code=302)
-    if _team_blockers().get(tid, {}).get("block"):
+    if t["holding"] or _team_blockers().get(tid, {}).get("block"):
         return RedirectResponse(f"/org?blocked={tid}#team-{tid}", status_code=302)
     db.execute("UPDATE team SET archived_at=datetime('now','localtime') WHERE id=?", (tid,))
     return RedirectResponse("/org#archiviati", status_code=302)
@@ -708,7 +709,10 @@ def org_tree(request: Request, blocked: str = ""):
         "SELECT pa.team_id, p.id, p.full_name, pa.role_type FROM person_assignment pa "
         "JOIN person p ON p.id = pa.person_id "
         "WHERE pa.voided=0 AND pa.end_date IS NULL AND p.status='attivo' ORDER BY p.full_name")
-    tree = org_svc.build_team_tree([dict(t) for t in teams], [dict(m) for m in members])
+    # il team tecnico «Da collocare» compare solo quando ha persone (vuoto si nasconde, non si elimina)
+    with_people = {m["team_id"] for m in members}
+    tree = org_svc.build_team_tree([dict(t) for t in teams if not t["holding"] or t["id"] in with_people],
+                                   [dict(m) for m in members])
     # riporti diretti del lead: chi lo ha come responsabile nell'assegnazione corrente
     direct_reports = {r["manager_person_id"]: r["n"] for r in db.query(
         "SELECT pa.manager_person_id, COUNT(DISTINCT pa.person_id) AS n FROM person_assignment pa "
@@ -717,7 +721,8 @@ def org_tree(request: Request, blocked: str = ""):
         "AND pa.manager_person_id IS NOT NULL GROUP BY pa.manager_person_id")}
     people_opts = db.query("SELECT id, full_name FROM person WHERE status='attivo' ORDER BY full_name")
     return _templates().TemplateResponse(request, "org_tree.html", {
-        "tree": tree, "teams": teams, "people_opts": people_opts, "direct_reports": direct_reports,
+        "tree": tree, "teams": [t for t in teams if not t["holding"]],   # mai come padre né nei form di modifica
+        "people_opts": people_opts, "direct_reports": direct_reports,
         "initials": initials, "blockers": _team_blockers(), "archived": archived,
         "blocked": next((t for t in teams if str(t["id"]) == blocked), None),
     })
