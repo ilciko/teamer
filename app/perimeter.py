@@ -49,7 +49,7 @@ def bump() -> None:
 OWNED = {
     # configurazione
     "ninebox_weight": [], "weight_mapping": [], "evaluation_model": [],
-    "bonus_factor": [], "listino_profile": [], "user_meta": [],
+    "bonus_factor": [], "user_meta": [],
     # contenitori
     "review_cycle": [],
     "ral_budget": [("cycle_id", "review_cycle")],
@@ -78,7 +78,7 @@ PERSON = ["person", "person_assignment", "employment", "ral_event", "benefit_ass
           "ninebox_assessment", "attachment", "listino_person_param", "replacement_decision"]
 # note e azioni: di chi le scrive (`author_user_id`); per le azioni, fuori perimetro si tocca solo lo stato
 AUTHORED = {"meeting_note": (), "action_item": ("status", "closed_date")}
-COMPANY = ["lookup", "benefit_type"]
+COMPANY = ["lookup", "benefit_type", "listino_profile"]   # listino aziendale dalla 0.41
 INSTANCE = ["app_meta", "app_user", "audit_event"]
 
 CLASSES = {"owned": list(OWNED), "child": list(CHILD), "team": TEAM, "person": PERSON,
@@ -87,25 +87,25 @@ CLASSES = {"owned": list(OWNED), "child": list(CHILD), "team": TEAM, "person": P
 OWNER_COL = {t: "author_user_id" for t in AUTHORED} | {t: "owner_user_id" for t in [*OWNED, *TEAM, "person"]}
 
 # configurazione: si copia dai default di fabbrica a ogni director nuovo
-CONFIG = ["ninebox_weight", "weight_mapping", "evaluation_model", "bonus_factor", "listino_profile", "user_meta"]
+CONFIG = ["ninebox_weight", "weight_mapping", "evaluation_model", "bonus_factor", "user_meta"]
 # chiave naturale delle voci di configurazione (per fondere quella esistente in quella del director)
 NATURAL_KEYS = {"ninebox_weight": ("role_type", "seniority"), "weight_mapping": ("box_number",),
-                "bonus_factor": ("kind", "code"), "user_meta": ("key",), "listino_profile": ("code",),
+                "bonus_factor": ("kind", "code"), "user_meta": ("key",),
                 "evaluation_model": ("type", "name")}
-# chi punta alle voci dei cataloghi per id
-CATALOG_REFS = {"listino_profile": [("person_assignment", "listino_profile_id")]}
-# configurazione per director che stava in app_meta (tabella user_meta); il CCNL predefinito è aziendale
+# chi punta alle voci dei cataloghi per id (nessuno dalla 0.41: i codici listino sono aziendali)
+CATALOG_REFS: dict[str, list] = {}
+# configurazione per director che stava in app_meta (tabella user_meta); CCNL predefinito e
+# parametri del listino (`listino_*`, 0.41) sono aziendali
 SCOPED_META = {"ral_stale_amber_years", "ral_stale_red_years"}
 
 
 def scoped_meta(key: str) -> bool:
-    return key in SCOPED_META or key.startswith("listino_")
+    return key in SCOPED_META
 
 
 # ---- HR ----
 
-# configurazione che HR legge come propria (di default); i cataloghi puntati per id dalle
-# righe di persona (codici listino) restano quelli dei director
+# configurazione che HR legge come propria (di default)
 HR_OWN = [t for t in CONFIG if t not in CATALOG_REFS]
 # scritture consentite a HR: {tabella: {colonna, ...}} ("*" = tutte, anche INSERT e DELETE;
 # altrimenti solo UPDATE di quelle colonne). Dalla 0.39 (tappa 3): le sue note e azioni, la parte
@@ -557,19 +557,9 @@ def transfer_person(pid: int, to_uid: int, on_date: str) -> dict:
         c.execute("UPDATE person_assignment SET end_date=? WHERE person_id=? AND voided=0 AND end_date IS NULL",
                   (prev_end, pid))
         holding = ensure_holding_team(c, to_uid)
-        # il codice listino sulla voce omonima del nuovo director (creata se manca)
-        lp = None
-        if cur and cur["listino_profile_id"]:
-            old = c.execute("SELECT code FROM listino_profile WHERE id=?", (cur["listino_profile_id"],)).fetchone()
-            if old:
-                mine = c.execute("SELECT id FROM listino_profile WHERE owner_user_id=? AND code=?",
-                                 (to_uid, old["code"])).fetchone()
-                lp = mine["id"] if mine else c.execute(
-                    "INSERT INTO listino_profile (code, description, active, sort_order, day_rate, owner_user_id) "
-                    "SELECT code, description, active, sort_order, day_rate, ? FROM listino_profile WHERE id=?",
-                    (to_uid, cur["listino_profile_id"])).lastrowid
         c.execute("INSERT INTO person_assignment (person_id, team_id, role_type, start_date, listino_profile_id) "
-                  "VALUES (?,?,?,?,?)", (pid, holding, cur["role_type"] if cur else "ic", on_date, lp))
+                  "VALUES (?,?,?,?,?)", (pid, holding, cur["role_type"] if cur else "ic", on_date,
+                                        cur["listino_profile_id"] if cur else None))   # il codice è aziendale (0.41)
         c.execute("UPDATE person SET owner_user_id=? WHERE id=?", (to_uid, pid))
         if src is None:
             bump()

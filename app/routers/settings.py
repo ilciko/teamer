@@ -1,8 +1,8 @@
-"""Configurazione del director: soglie, listino, 9-box (questionario, aggiustamenti, pesi premio),
+"""Configurazione del director: soglie, 9-box (questionario, aggiustamenti, pesi premio),
 moltiplicatori premio, import.
 
-Liste valori, catalogo benefit e CCNL sono aziendali (`app/routers/company.py`); sicurezza,
-backup e aggiornamenti sono del site admin (`app/routers/admin.py`)."""
+Liste valori, catalogo benefit, CCNL e listino (0.41) sono aziendali (`app/routers/company.py`,
+di HR); sicurezza, backup e aggiornamenti sono del site admin (`app/routers/admin.py`)."""
 import json
 
 from fastapi import APIRouter, Form, Request, UploadFile
@@ -31,9 +31,6 @@ def _context(tab: str, saved: str = "", draft: dict | None = None, errors: list 
     # aggiustamenti e moltiplicatori seguono le liste aziendali: una voce nuova compare da sola (neutra)
     weights = {(r["role_type"], r["seniority"]): r for r in db.query("SELECT * FROM ninebox_weight")}
     factors = {(r["kind"], r["code"]): r["factor"] for r in db.query("SELECT * FROM bonus_factor")}
-    listino_profiles = db.query(
-        "SELECT lp.*, (SELECT COUNT(*) FROM person_assignment pa WHERE pa.listino_profile_id=lp.id) AS n_ref "
-        "FROM listino_profile lp ORDER BY lp.sort_order, lp.code")
     amber = int(db.get_meta("ral_stale_amber_years", "2"))
     red = int(db.get_meta("ral_stale_red_years", "4"))
     amber_from, red_from = cost.ral_stale_cutoffs(amber, red)
@@ -41,7 +38,6 @@ def _context(tab: str, saved: str = "", draft: dict | None = None, errors: list 
     return {
         "tab": tab, "saved": saved, "errors": errors or [], "draft": draft is not None,
         "ral_stale_from": {"amber": amber_from.isoformat(), "red": red_from.isoformat()},
-        "listino_profiles": listino_profiles,
         "roles": roles, "seniorities": seniorities, "ratings": ratings,
         "weights": [{"role": r, "sen": sn,
                      "perf": weights[(r["code"], sn["code"])]["perf_adj"] if (r["code"], sn["code"]) in weights else 0,
@@ -56,6 +52,13 @@ def _context(tab: str, saved: str = "", draft: dict | None = None, errors: list 
         "ctx_keys": [(r["code"], r["label"]) for r in roles] + [(sn["code"], sn["label"]) for sn in seniorities],
         "tags": [ninebox_calc.tag(model["questions"], i) for i in range(len(model["questions"]))],
     }
+
+
+def _form_float(form, key: str, default: float) -> float:
+    try:
+        return float(str(form.get(key, default)).replace(",", "."))
+    except ValueError:
+        return default
 
 
 @router.get("/settings")
@@ -76,66 +79,6 @@ def general_save(ral_stale_amber_years: str = Form("2"), ral_stale_red_years: st
     db.set_meta("ral_stale_amber_years", str(amber))
     db.set_meta("ral_stale_red_years", str(red))
     return RedirectResponse("/settings?tab=general&saved=1", status_code=302)
-
-
-# ---- listino ----
-
-def _day_rate(raw: str) -> float | None:
-    """Tariffa €/gg dal form: vuota = non definita; non numerica o negativa → ValueError."""
-    raw = (raw or "").strip().replace(",", ".")
-    if not raw:
-        return None
-    v = float(raw)
-    if v < 0:
-        raise ValueError("tariffa negativa")
-    return v
-
-
-@router.post("/settings/listino")
-def listino_profile_save(code: str = Form(""), description: str = Form(""), sort_order: int = Form(0),
-                         day_rate: str = Form("")):
-    """Nuovo codice di listino; lo stesso codice aggiorna descrizione, ordine e tariffa."""
-    code, description = code.strip().upper(), description.strip()
-    try:
-        rate = _day_rate(day_rate)
-    except ValueError:
-        rate, code = None, ""
-    if not code or not description:
-        return RedirectResponse("/settings?tab=listino&saved=err", status_code=302)
-    db.execute(
-        "INSERT INTO listino_profile (code, description, sort_order, day_rate) VALUES (?,?,?,?) "
-        "ON CONFLICT(owner_user_id, code) DO UPDATE SET description=excluded.description, "
-        "sort_order=excluded.sort_order, day_rate=excluded.day_rate",
-        (code, description, sort_order, rate))
-    return RedirectResponse("/settings?tab=listino&saved=1", status_code=302)
-
-
-@router.post("/settings/listino/{lid}/update")
-def listino_profile_update(lid: int, description: str = Form(...), sort_order: int = Form(0),
-                           day_rate: str = Form("")):
-    """Il codice è stabile: si cambiano descrizione (si propaga ovunque), ordine e tariffa."""
-    try:
-        rate = _day_rate(day_rate)
-    except ValueError:
-        return RedirectResponse("/settings?tab=listino&saved=err", status_code=302)
-    db.execute("UPDATE listino_profile SET description=?, sort_order=?, day_rate=? WHERE id=?",
-               (description.strip(), sort_order, rate, lid))
-    return RedirectResponse("/settings?tab=listino&saved=1", status_code=302)
-
-
-@router.post("/settings/listino/{lid}/toggle")
-def listino_profile_toggle(lid: int):
-    db.execute("UPDATE listino_profile SET active = 1 - active WHERE id=?", (lid,))
-    return RedirectResponse("/settings?tab=listino", status_code=302)
-
-
-# ---- 9-box ----
-
-def _form_float(form, key: str, default: float) -> float:
-    try:
-        return float(str(form.get(key, default)).replace(",", "."))
-    except ValueError:
-        return default
 
 
 @router.post("/settings/ninebox-weights")

@@ -2,23 +2,22 @@
 
 Costo azienda annuo diviso per i giorni fatturabili dell'anno. Il moltiplicatore
 oneri copre INPS, INAIL e TFR: l'IRAP resta fuori perché dal 2015 il costo del
-lavoro a tempo indeterminato è interamente deducibile. Il calendario è quello
-vero dell'anno scelto (weekend e festività nazionali in giorno feriale), non
-una stima fissa. Nessun accesso al DB: il router carica RAL, benefit e
-part-time, qui si calcola e si aggrega.
+lavoro a tempo indeterminato è interamente deducibile. L'anno è quello
+convenzionale: 365 giorni, 104 di weekend e le festività feriali come numero
+medio (10), più le chiusure aziendali — nessun conteggio sull'anno vero (0.41: i
+parametri sono aziendali e uguali per tutti). Nessun accesso al DB: il router
+carica RAL, benefit e part-time, qui si calcola e si aggrega.
 """
 from collections.abc import Mapping
-from datetime import date, timedelta
 
-# festività nazionali a data fissa (mese, giorno); il lunedì dell'Angelo si calcola
-FESTIVITA_FISSE = ((1, 1), (1, 6), (4, 25), (5, 1), (6, 2), (8, 15),
-                   (11, 1), (12, 8), (12, 25), (12, 26))
+GIORNI_ANNO = 365
+WEEKEND = 104
 
 DEFAULTS = {
     "oneri_mult": 1.41,        # INPS + INAIL + TFR sulla RAL
     "premi_pct": 0.0,          # premi/MBO attesi, % RAL, soggetti a oneri
     "altri_costi": 2000.0,     # € annui a persona: postazione, PC, licenze, rimborsi non rifatturati
-    "festivita_gg": None,      # None = festività feriali dal calendario dell'anno
+    "festivita_gg": 10.0,      # festività nazionali in giorno feriale, numero medio
     "festivita_extra_gg": 1.0, # patrono / chiusura aziendale
     "ferie_gg": 33.0,          # ferie + PAR/ROL/ex festività
     "malattia_gg": 5.0,        # assenze impreviste medie
@@ -33,39 +32,6 @@ PROD_KEYS = ("formazione_pct", "interne_pct", "saturazione_pct")  # sovrascrivib
 PCT_MAX = {"premi_pct": 100.0, "formazione_pct": 100.0, "interne_pct": 100.0, "saturazione_pct": 200.0}
 
 
-def pasqua(anno: int) -> date:
-    """Domenica di Pasqua (algoritmo di Meeus/Jones/Butcher)."""
-    a, b, c = anno % 19, anno // 100, anno % 100
-    d, e = b // 4, b % 4
-    f = (b + 8) // 25
-    g = (b - f + 1) // 3
-    h = (19 * a + b - d - g + 15) % 30
-    i, k = c // 4, c % 4
-    m = (32 + 2 * e + 2 * i - h - k) % 7
-    n = (a + 11 * h + 22 * m) // 451
-    mese = (h + m - 7 * n + 114) // 31
-    giorno = (h + m - 7 * n + 114) % 31 + 1
-    return date(anno, mese, giorno)
-
-
-def festivita(anno: int) -> list[date]:
-    """Le 11 festività nazionali dell'anno, ordinate."""
-    out = [date(anno, m, d) for m, d in FESTIVITA_FISSE]
-    out.append(pasqua(anno) + timedelta(days=1))
-    return sorted(out)
-
-
-def calendario(anno: int) -> dict:
-    """Giorni dell'anno, weekend e festività contate davvero sul calendario."""
-    primo = date(anno, 1, 1)
-    giorni = (date(anno, 12, 31) - primo).days + 1
-    weekend = sum(1 for n in range(giorni) if (primo + timedelta(days=n)).weekday() >= 5)
-    fest = festivita(anno)
-    feriali = sum(1 for f in fest if f.weekday() < 5)
-    return {"giorni": giorni, "weekend": weekend,
-            "festivita_feriali": feriali, "festivita_weekend": len(fest) - feriali}
-
-
 def _num(v) -> float | None:
     if v is None:
         return None
@@ -78,15 +44,14 @@ def _num(v) -> float | None:
 def parse_params(form: Mapping, saved: Mapping[str, str] | None = None) -> dict:
     """Parametri effettivi: form → salvati (app_meta) → DEFAULTS.
 
-    Un campo vuoto o non numerico nel form ricade sul valore salvato; per
-    `festivita_gg` il vuoto è una scelta («dal calendario») e resta None.
+    Un campo vuoto o non numerico nel form ricade sul valore salvato.
     """
     saved = saved or {}
     p = {}
     for k, default in DEFAULTS.items():
         if k in form:
             v = _num(form.get(k))
-            if v is not None or k == "festivita_gg":
+            if v is not None:
                 p[k] = v
                 continue
         v = _num(saved.get(k))
@@ -100,9 +65,6 @@ def validate_params(form: Mapping) -> tuple[dict, list[str]]:
     for k, default in DEFAULTS.items():
         raw = form.get(k)
         if raw is None or str(raw).strip() == "":
-            if k == "festivita_gg":
-                p[k] = None
-                continue
             errors.append(f"{k}: mancante")
             continue
         v = _num(raw)
@@ -120,24 +82,17 @@ def validate_params(form: Mapping) -> tuple[dict, list[str]]:
 
 
 def params_to_meta(p: dict) -> dict[str, str]:
-    """Valori da scrivere in app_meta (stringhe; festività automatiche = '')."""
-    out = {}
-    for k, meta_key in META_KEYS.items():
-        v = p.get(k)
-        out[meta_key] = "" if v is None else f"{v:g}"
-    return out
+    """Valori da scrivere in app_meta (stringhe)."""
+    return {meta_key: f"{p[k]:g}" for k, meta_key in META_KEYS.items()}
 
 
-def giorni(anno: int, p: dict) -> dict:
-    """Dai giorni dell'anno ai giorni fatturabili di un full-time, con i passaggi."""
-    cal = calendario(anno)
-    auto = p["festivita_gg"] is None
-    fest_base = cal["festivita_feriali"] if auto else p["festivita_gg"]
-    fest_tot = fest_base + p["festivita_extra_gg"]
-    lavorabili = cal["giorni"] - cal["weekend"] - fest_tot
+def giorni(p: dict) -> dict:
+    """Dall'anno convenzionale (365 giorni, 104 weekend) ai giorni fatturabili di un full-time, con i passaggi."""
+    fest_tot = p["festivita_gg"] + p["festivita_extra_gg"]
+    lavorabili = GIORNI_ANNO - WEEKEND - fest_tot
     presenza = lavorabili - p["ferie_gg"] - p["malattia_gg"]
     fatturabili = fatturabili_fte(presenza, p["formazione_pct"], p["interne_pct"], p["saturazione_pct"])
-    return {**cal, "festivita_auto": auto, "festivita_base": fest_base, "festivita_tot": fest_tot,
+    return {"giorni": GIORNI_ANNO, "weekend": WEEKEND, "festivita_tot": fest_tot,
             "lavorabili": lavorabili, "presenza": presenza, "fatturabili_fte": fatturabili}
 
 

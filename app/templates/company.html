@@ -8,9 +8,10 @@
     <a class="btn sm {{ 'ghost' if tab != 'liste' }}" href="/azienda?tab=liste">Liste valori</a>
     <a class="btn sm {{ 'ghost' if tab != 'benefit' }}" href="/azienda?tab=benefit">Catalogo benefit</a>
     <a class="btn sm {{ 'ghost' if tab != 'default' }}" href="/azienda?tab=default">Valori predefiniti</a>
+    <a class="btn sm {{ 'ghost' if tab != 'listino' }}" href="/azienda?tab=listino">Listino</a>
   </div>
 </div>
-<p class="muted small" style="margin:-6px 0 12px">Configurazione unica per tutta l'azienda: la usano tutti i director, che non la possono modificare.</p>
+<p class="muted small" style="margin:-6px 0 12px">Configurazione unica per tutta l'azienda, gestita da HR: la usano tutti i director, che non la possono modificare.</p>
 {% if saved == '1' %}<div class="flash">Salvato.</div>
 {% elif saved == 'err' %}<div class="flash error">Dati non validi, nulla è stato salvato.</div>{% endif %}
 
@@ -25,13 +26,13 @@
         <tr class="{{ 'muted3' if not r.active }}">
           <td style="width:22%"><code>{{ r.code }}</code></td>
           <td colspan="2">
-            <form method="post" action="/azienda/liste/{{ r.id }}/update" class="frow" style="gap:6px">
+            <form method="post" action="/azienda/liste/{{ r.id }}/update" class="hr-ok frow" style="gap:6px">
               <input type="text" name="label" value="{{ r.label }}" style="flex:3">
               <input type="number" name="sort_order" value="{{ r.sort_order }}" style="flex:0 0 60px;text-align:right">
               <button class="btn sm ghost" title="Salva modifica">✓</button>
             </form>
           </td>
-          <td style="width:1%"><form method="post" action="/azienda/liste/{{ r.id }}/toggle">
+          <td style="width:1%"><form method="post" action="/azienda/liste/{{ r.id }}/toggle" class="hr-ok">
             <button class="btn sm ghost">{{ 'disattiva' if r.active else 'riattiva' }}</button></form></td>
         </tr>
         {% endfor %}
@@ -43,7 +44,7 @@
   <div class="card" style="align-self:start">
     <div class="card-title">Aggiungi / modifica voce</div>
     <p class="muted small" style="margin-bottom:8px">Stessa categoria + codice = la voce viene aggiornata.</p>
-    <form method="post" action="/azienda/liste">
+    <form method="post" action="/azienda/liste" class="hr-ok">
       <div class="frow">
         <div><label class="fld">Categoria</label><input type="text" name="category" list="cats" required>
           <datalist id="cats">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist></div>
@@ -68,7 +69,7 @@
       {% for b in benefit_types %}
       <tr class="{{ 'muted3' if not b.active }}">
         <td colspan="4">
-          <form method="post" action="/azienda/benefit/{{ b.id }}/update" class="frow" style="gap:6px;align-items:center">
+          <form method="post" action="/azienda/benefit/{{ b.id }}/update" class="hr-ok frow" style="gap:6px;align-items:center">
             <input type="text" name="name" value="{{ b.name }}" style="flex:2">
             <span class="badge" style="flex:0 0 auto">{{ b.value_kind }}</span>
             {% if b.value_kind == 'enum' %}
@@ -80,7 +81,7 @@
             <button class="btn sm ghost" title="Salva modifica">✓</button>
           </form>
         </td>
-        <td style="width:1%"><form method="post" action="/azienda/benefit/{{ b.id }}/toggle">
+        <td style="width:1%"><form method="post" action="/azienda/benefit/{{ b.id }}/toggle" class="hr-ok">
           <button class="btn sm ghost">{{ 'disattiva' if b.active else 'riattiva' }}</button></form></td>
       </tr>
       {% else %}<tr><td colspan="5" class="muted">Nessun benefit a catalogo (es. Auto, Rimborso pasto, MLO, Reperibilità H24…).</td></tr>{% endfor %}
@@ -89,7 +90,7 @@
   </div>
   <div class="card" style="align-self:start">
     <div class="card-title">Nuovo benefit</div>
-    <form method="post" action="/azienda/benefit">
+    <form method="post" action="/azienda/benefit" class="hr-ok">
       <label class="fld">Nome</label><input type="text" name="name" required>
       <div class="frow">
         <div><label class="fld">Tipo valore</label>
@@ -109,10 +110,103 @@
 </div>
 
 
+{% elif tab == 'listino' %}
+{% macro num(name, label, value, step='1', min='0', max='') -%}
+<div><label class="fld">{{ label }}</label>
+  <input type="number" name="{{ name }}" value="{{ '%g' % value }}" step="{{ step }}" min="{{ min }}"{% if max %} max="{{ max }}"{% endif %} style="text-align:right" required></div>
+{%- endmacro %}
+<div class="card">
+  <div class="card-title">Parametri del costo giornaliero — uguali per tutti i director</div>
+  <form method="post" action="/azienda/listino/parametri" class="hr-ok">
+    <div class="grid3">
+      <div>
+        <div class="muted3 small" style="margin-bottom:4px">Costo azienda</div>
+        <div class="frow">
+          {{ num('oneri_mult', 'Oneri × RAL', p.oneri_mult, step='0.01') }}
+          {{ num('premi_pct', 'Premi attesi % RAL', p.premi_pct, step='0.5') }}
+        </div>
+        {{ num('altri_costi', 'Altri costi annui € / persona', p.altri_costi, step='100') }}
+      </div>
+      <div>
+        <div class="muted3 small" style="margin-bottom:4px">Giorni dell'anno (365 − 104 weekend)</div>
+        <div class="frow">
+          {{ num('festivita_gg', 'Festività feriali gg', p.festivita_gg, step='0.5') }}
+          {{ num('festivita_extra_gg', 'Patrono / chiusure gg', p.festivita_extra_gg, step='0.5') }}
+        </div>
+        <div class="frow">
+          {{ num('ferie_gg', 'Ferie + permessi gg', p.ferie_gg, step='0.5') }}
+          {{ num('malattia_gg', 'Malattia gg', p.malattia_gg, step='0.5') }}
+        </div>
+      </div>
+      <div>
+        <div class="muted3 small" style="margin-bottom:4px">Produttività predefinita (per persona la cambia il director)</div>
+        <div class="frow">
+          {{ num('formazione_pct', 'Formazione %', p.formazione_pct, step='0.5') }}
+          {{ num('interne_pct', 'Attività interne %', p.interne_pct, step='0.5') }}
+        </div>
+        {{ num('saturazione_pct', 'Saturazione %', p.saturazione_pct, step='1', max='200') }}
+      </div>
+    </div>
+    <p class="muted small" style="margin-top:10px">
+      Con questi valori: 365 − 104 weekend − {{ '%g' % g.festivita_tot }} festività = {{ '%g' % g.lavorabili }} lavorabili − {{ '%g' % p.ferie_gg }} ferie e permessi − {{ '%g' % p.malattia_gg }} malattia = {{ '%g' % g.presenza }} di presenza → <strong>{{ '%.1f' % g.fatturabili_fte }}</strong> giorni fatturabili per un full-time.
+    </p>
+    <div class="actions"><button class="btn sm">Salva i parametri</button></div>
+    <details style="margin-top:8px">
+      <summary class="muted small" style="cursor:pointer">Come leggere i parametri</summary>
+      <ul class="muted small" style="line-height:1.6;margin:6px 0 0 18px">
+        <li><strong>Oneri × RAL</strong>: 1,41 copre INPS, INAIL e TFR. L'IRAP non c'entra: il costo del lavoro a tempo indeterminato è interamente deducibile dal 2015. I <strong>premi</strong> attesi sono soggetti agli stessi oneri; i benefit a costo vengono dalla scheda persona; gli <strong>altri costi</strong> (postazione, PC, licenze, rimborsi non rifatturati) si sommano secchi.</li>
+        <li><strong>Festività</strong>: numero medio di festività nazionali che cadono in giorno feriale (10); «Patrono / chiusure» aggiunge le giornate aziendali. I weekend sono 104 fissi: l'anno è convenzionale, uguale per tutti.</li>
+        <li><strong>Ferie + permessi</strong>: ferie più PAR/ROL/ex festività (metalmeccanico 20+13, commercio ≈ 34). <strong>Malattia</strong>: assenze impreviste medie.</li>
+        <li><strong>Formazione</strong> e <strong>attività interne</strong> sono quote dei giorni di presenza; la <strong>saturazione</strong> è la quota di giorni fatturabili che si vende davvero (sotto 100 il bench si spalma, sopra 100 per chi lavora oltre lo standard). Il director può cambiarle per singola persona dalla pagina Listino.</li>
+      </ul>
+    </details>
+  </form>
+</div>
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Codici di listino</div>
+    <table class="tbl">
+      <thead><tr><th>Codice</th><th>Descrizione</th><th class="num" title="tariffa giornaliera di vendita a listino">Listino €/gg</th><th class="num">Ordine</th><th></th><th title="assegnazioni che lo usano, anche storiche">Usato</th><th></th></tr></thead>
+      {% for lp in listino_profiles %}
+      <tr class="{{ 'muted3' if not lp.active }}">
+        <td><code>{{ lp.code }}</code></td>
+        <td colspan="4">
+          <form method="post" action="/azienda/listino/{{ lp.id }}/update" class="hr-ok frow" style="gap:6px;align-items:center">
+            <input type="text" name="description" value="{{ lp.description }}" style="flex:3" required>
+            <input type="number" name="day_rate" value="{{ '%g' % lp.day_rate if lp.day_rate is not none else '' }}" step="1" min="0" placeholder="€/gg" style="flex:0 0 90px;text-align:right">
+            <input type="number" name="sort_order" value="{{ lp.sort_order }}" style="flex:0 0 70px;text-align:right">
+            <button class="btn sm ghost" title="Salva modifica">✓</button>
+          </form>
+        </td>
+        <td class="muted small">{{ lp.n_ref }}</td>
+        <td style="width:1%"><form method="post" action="/azienda/listino/{{ lp.id }}/toggle" class="hr-ok">
+          <button class="btn sm ghost">{{ 'disattiva' if lp.active else 'riattiva' }}</button></form></td>
+      </tr>
+      {% else %}<tr><td colspan="7" class="muted">Nessun codice. Es. GE040 · Consultant PM, PS010 · Professional Service.</td></tr>{% endfor %}
+    </table>
+    <p class="muted3 small" style="margin-top:6px">Il codice è stabile e la descrizione si propaga ovunque. La tariffa è quella del listino commerciale corrente: il <a href="/comp/listino">listino</a> la confronta col costo giornaliero calcolato. Un codice disattivato resta sulle assegnazioni che lo usano, ma non si propone più.</p>
+  </div>
+  <div class="card" style="align-self:start">
+    <div class="card-title">Nuovo codice</div>
+    <form method="post" action="/azienda/listino" class="hr-ok">
+      <div class="frow">
+        <div style="flex:0 0 120px"><label class="fld">Codice</label><input type="text" name="code" placeholder="GE040" required></div>
+        <div><label class="fld">Descrizione</label><input type="text" name="description" placeholder="Consultant PM" required></div>
+      </div>
+      <div class="frow">
+        <div><label class="fld">Listino €/gg (corrente)</label><input type="number" name="day_rate" step="1" min="0" placeholder="es. 450" style="text-align:right"></div>
+        <div style="flex:0 0 80px"><label class="fld">Ordine</label><input type="number" name="sort_order" value="0" style="text-align:right"></div>
+      </div>
+      <p class="muted3 small" style="margin-top:6px">È la categoria d'offerta commerciale, più larga del ruolo: un junior dev e un senior hardware possono stare nello stesso codice se la policy li pone allo stesso livello d'offerta.</p>
+      <div class="actions"><button class="btn sm">Aggiungi</button></div>
+    </form>
+  </div>
+</div>
+
 {% elif tab == 'default' %}
 <div class="card" style="max-width:520px">
   <div class="card-title">Valori predefiniti</div>
-  <form method="post" action="/azienda/default">
+  <form method="post" action="/azienda/default" class="hr-ok">
     <label class="fld">CCNL predefinito</label>
     <input type="text" name="default_ccnl" value="{{ default_ccnl }}">
     <p class="muted3 small" style="margin-top:6px">Precompilato nei nuovi inserimenti contrattuali e nell'import Excel (se la colonna è vuota). Modificabile caso per caso.</p>

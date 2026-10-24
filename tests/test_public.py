@@ -12,8 +12,7 @@ def _setup(client):
 
     client.post("/org/team", data={"name": "Factory", "parent_team_id": "", "lead_person_id": ""})
     tid = db.one("SELECT id FROM team WHERE name='Factory'")["id"]
-    client.post("/settings/listino", data={"code": "GE040", "description": "Consultant PM", "day_rate": "457"})
-    lp = db.one("SELECT id FROM listino_profile WHERE code='GE040'")["id"]
+    lp = db.sys.execute("INSERT INTO listino_profile (code, description, day_rate) VALUES ('GE040', 'Consultant PM', 457)")
     client.post("/people", data={"full_name": "Rita Riservata", "team_id": tid, "role_type": "ic",
                                  "ral": "38123.45", "listino_profile_id": lp})
     pid = db.one("SELECT id FROM person WHERE full_name='Rita Riservata'")["id"]

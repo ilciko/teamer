@@ -70,9 +70,9 @@ def main() -> None:
         "INSERT INTO benefit_type (name, value_kind, enum_options, is_cost) "
         "VALUES ('Auto aziendale', 'enum', '[\"si\",\"no\",\"addebito\"]', 1)")
 
-    listino = {}
+    listino = {}   # codici di listino: aziendali (0.41), li scrive la connessione di sistema
     for code, description, order, rate in LISTINO:
-        listino[code] = db.execute(
+        listino[code] = db.sys.execute(
             "INSERT INTO listino_profile (code, description, sort_order, day_rate) VALUES (?,?,?,?)",
             (code, description, order, rate))
 

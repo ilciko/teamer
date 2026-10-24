@@ -47,7 +47,7 @@ def org(client, client2):
     bt = db.sys.execute("INSERT INTO benefit_type (name) VALUES ('Auto aziendale')")   # catalogo aziendale
     db.execute("INSERT INTO benefit_assignment (person_id, benefit_type_id, value, effective_date) "
                "VALUES (?,?,'1','2025-01-01')", (luca, bt))
-    lp = db.execute("INSERT INTO listino_profile (code, description, day_rate) VALUES ('GE040', 'Consultant', 450)")
+    lp = db.sys.execute("INSERT INTO listino_profile (code, description, day_rate) VALUES ('GE040', 'Consultant', 450)")
     db.execute("UPDATE person_assignment SET listino_profile_id=? WHERE person_id=?", (lp, luca))
     ids["budget"] = db.execute("INSERT INTO ral_budget (period, total_cap) VALUES ('Aumenti 2026', 10000)")
     db.execute("INSERT INTO ral_proposal (person_id, budget_id, amount, effective_date, status) "
@@ -148,7 +148,7 @@ def test_spostamento_passa_la_persona_e_lo_storico(org, client, client2, hr_clie
         assert cyc["name"] == "Review 2026" and cyc["owner_user_id"] == users.by_username("dir2")["id"]
         lp = db.one("SELECT lp.code FROM person_assignment pa JOIN listino_profile lp ON lp.id=pa.listino_profile_id "
                     "WHERE pa.person_id=? AND pa.end_date IS NULL", (org["luca"],))
-        assert lp["code"] == "GE040"                                             # voce omonima di dir2
+        assert lp["code"] == "GE040"                                             # il codice è aziendale: resta
     # contenitori economici di chi cede: righe staccate, pendenti annullate, nessuna quota spostata
     prop = db.sys.one("SELECT * FROM ral_proposal WHERE person_id=?", (org["luca"],))
     assert prop["voided"] == 1 and prop["budget_id"] is None

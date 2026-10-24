@@ -204,80 +204,64 @@ class TestRalAgeFlag:
 
 
 class TestListino:
-    def test_pasqua(self):
-        assert listino.pasqua(2024) == date(2024, 3, 31)
-        assert listino.pasqua(2025) == date(2025, 4, 20)
-        assert listino.pasqua(2026) == date(2026, 4, 5)
-        assert listino.pasqua(2027) == date(2027, 3, 28)
-
-    def test_calendario_conta_davvero(self):
-        c = listino.calendario(2026)
-        assert (c["giorni"], c["weekend"], c["festivita_feriali"]) == (365, 104, 7)
-        assert c["festivita_weekend"] == 4  # 25/4, 15/8, 1/11, 26/12
-        c = listino.calendario(2025)
-        assert (c["giorni"], c["weekend"], c["festivita_feriali"]) == (365, 104, 10)
-        c = listino.calendario(2028)  # bisestile che parte di sabato: mai fissare 104
-        assert (c["giorni"], c["weekend"], c["festivita_feriali"]) == (366, 106, 10)
-
-    def test_giorni_default_2026(self):
-        g = listino.giorni(2026, dict(listino.DEFAULTS))
-        assert g["festivita_auto"] and g["festivita_tot"] == 8
-        assert g["lavorabili"] == 253 and g["presenza"] == 215
-        assert g["fatturabili_fte"] == pytest.approx(193.5)
+    def test_giorni_convenzionali(self):
+        """365 − 104 weekend − (10 + 1) festività = 250 lavorabili − 33 − 5 = 212 di presenza → 190,8 fatturabili (0.41)."""
+        g = listino.giorni(dict(listino.DEFAULTS))
+        assert (g["giorni"], g["weekend"], g["festivita_tot"]) == (365, 104, 11)
+        assert g["lavorabili"] == 250 and g["presenza"] == 212
+        assert g["fatturabili_fte"] == pytest.approx(190.8)
 
     def test_costo_esempio(self):
         p = dict(listino.DEFAULTS)
-        c = listino.costo_persona(50000, 0, 100, p, listino.giorni(2026, p))
+        c = listino.costo_persona(50000, 0, 100, p, listino.giorni(p))
         assert c["costo_annuo"] == pytest.approx(72500)
-        assert c["costo_gg"] == pytest.approx(374.68, abs=0.01)
-        c = listino.costo_persona(50000, 0, 100, p, listino.giorni(2025, p))
         assert c["fatturabili"] == pytest.approx(190.8)
         assert c["costo_gg"] == pytest.approx(379.98, abs=0.01)
 
     def test_part_time_dimezza_i_giorni_non_il_costo(self):
         p = dict(listino.DEFAULTS)
-        g = listino.giorni(2026, p)
+        g = listino.giorni(p)
         full = listino.costo_persona(50000, 0, None, p, g)
         half = listino.costo_persona(50000, 0, 50, p, g)
-        assert half["fatturabili"] == pytest.approx(96.75)
+        assert half["fatturabili"] == pytest.approx(95.4)
         assert half["costo_annuo"] == full["costo_annuo"]
         assert half["costo_gg"] == pytest.approx(full["costo_gg"] * 2)
 
     def test_premi_con_oneri_benefit_e_altri_senza(self):
         p = {**listino.DEFAULTS, "premi_pct": 10.0, "altri_costi": 2000.0}
-        c = listino.costo_persona(50000, 1200, 100, p, listino.giorni(2026, p))
+        c = listino.costo_persona(50000, 1200, 100, p, listino.giorni(p))
         assert c["costo_annuo"] == pytest.approx(50000 * 1.41 * 1.1 + 1200 + 2000)
 
-    def test_festivita_override_e_extra(self):
-        p = {**listino.DEFAULTS, "festivita_gg": 10.0, "festivita_extra_gg": 1.0}
-        g = listino.giorni(2026, p)
-        assert not g["festivita_auto"] and g["festivita_tot"] == 11 and g["lavorabili"] == 250
-        p["festivita_gg"] = None
-        assert listino.giorni(2026, p)["lavorabili"] == 253
+    def test_festivita_e_chiusure(self):
+        p = {**listino.DEFAULTS, "festivita_gg": 8.0, "festivita_extra_gg": 3.0}
+        g = listino.giorni(p)
+        assert g["festivita_tot"] == 11 and g["lavorabili"] == 250
+        assert listino.giorni({**p, "festivita_extra_gg": 0.0})["lavorabili"] == 253
 
     def test_fatturabili_non_positivi(self):
         p = {**listino.DEFAULTS, "saturazione_pct": 0.0}
-        c = listino.costo_persona(50000, 0, 100, p, listino.giorni(2026, p))
+        c = listino.costo_persona(50000, 0, 100, p, listino.giorni(p))
         assert c["costo_gg"] is None and c["motivo"] == "giorni"
         p = {**listino.DEFAULTS, "formazione_pct": 60.0, "interne_pct": 50.0}
-        assert listino.costo_persona(50000, 0, 100, p, listino.giorni(2026, p))["motivo"] == "giorni"
+        assert listino.costo_persona(50000, 0, 100, p, listino.giorni(p))["motivo"] == "giorni"
         p = dict(listino.DEFAULTS)
-        assert listino.costo_persona(50000, 0, 0, p, listino.giorni(2026, p))["motivo"] == "giorni"
-        assert listino.costo_persona(None, 0, 100, p, listino.giorni(2026, p))["motivo"] == "ral"
+        assert listino.costo_persona(50000, 0, 0, p, listino.giorni(p))["motivo"] == "giorni"
+        assert listino.costo_persona(None, 0, 100, p, listino.giorni(p))["motivo"] == "ral"
 
     def test_parse_params_fallback(self):
         saved = {"ferie_gg": "30", "oneri_mult": "", "festivita_gg": ""}
         p = listino.parse_params({"ferie_gg": "", "oneri_mult": "abc", "malattia_gg": "7,5"}, saved)
         assert p["ferie_gg"] == 30 and p["oneri_mult"] == 1.41 and p["malattia_gg"] == 7.5
-        assert p["festivita_gg"] is None
-        assert listino.parse_params({"festivita_gg": ""}, {"festivita_gg": "9"})["festivita_gg"] is None
+        assert p["festivita_gg"] == 10                                              # default fisso (0.41)
+        assert listino.parse_params({"festivita_gg": ""}, {"festivita_gg": "9"})["festivita_gg"] == 9
         assert listino.parse_params({}, {"festivita_gg": "9"})["festivita_gg"] == 9
 
     def test_validate_params(self):
-        ok = {k: "" if v is None else str(v) for k, v in listino.DEFAULTS.items()}
+        ok = {k: str(v) for k, v in listino.DEFAULTS.items()}
         p, err = listino.validate_params(ok)
-        assert not err and p["festivita_gg"] is None and p["ferie_gg"] == 33
-        assert listino.params_to_meta(p)["listino_festivita_gg"] == ""
+        assert not err and p["festivita_gg"] == 10 and p["ferie_gg"] == 33
+        assert listino.params_to_meta(p)["listino_festivita_gg"] == "10"
+        assert listino.validate_params({**ok, "festivita_gg": ""})[1] == ["festivita_gg: mancante"]
         assert listino.params_to_meta(p)["listino_altri_costi"] == "2000"
         _, err = listino.validate_params({**ok, "oneri_mult": "abc"})
         assert err
@@ -327,10 +311,10 @@ class TestListino:
 
     def test_override_produttivita(self):
         p = dict(listino.DEFAULTS)
-        g = listino.giorni(2026, p)
+        g = listino.giorni(p)
         base = listino.costo_persona(50000, 0, 100, p, g)
         ov = listino.costo_persona(50000, 0, 100, p, g, {"saturazione_pct": 50, "formazione_pct": None})
-        assert ov["fatturabili"] == pytest.approx(96.75) and ov["prod_custom"]
+        assert ov["fatturabili"] == pytest.approx(95.4) and ov["prod_custom"]
         assert ov["costo_gg"] == pytest.approx(base["costo_gg"] * 2)
         assert not base["prod_custom"]
         assert listino.prod_persona(p, None)["saturazione_pct"] == 100

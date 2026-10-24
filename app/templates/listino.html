@@ -1,128 +1,96 @@
 {% extends "base.html" %}
+{% from "_filters.html" import multi %}
 {% block title %}Listino{% endblock %}
 {% block content %}
-{% macro num(name, label, value, step='1', min='0', placeholder='', width='', max='') -%}
-<div{% if width %} style="max-width:{{ width }}"{% endif %}><label class="fld">{{ label }}</label>
-  <input type="number" name="{{ name }}" value="{{ '%g' % value if value is not none else '' }}" step="{{ step }}" min="{{ min }}"{% if max %} max="{{ max }}"{% endif %}
-         placeholder="{{ placeholder }}" style="text-align:right"
-         hx-post="/comp/listino/simulate" hx-target="#listino-out" hx-include="#listino-form" hx-trigger="change, keyup delay:400ms"></div>
-{%- endmacro %}
 <div class="page-head">
   <h1>Listino</h1>
-  <span class="badge">costo giornaliero di vendita · {{ anno }}</span>
+  <span class="badge">costo giornaliero di vendita</span>
   <div class="spacer"></div>
+  {# filtri cumulabili (0.41): codice, team, ruolo e, per HR, director #}
+  <form method="get" action="/comp/listino" class="frow" style="gap:6px">
+    {% if hr %}{{ multi('director', dir_opts, sel, 'Tutti i director', 'Director') }}{% endif %}
+    {{ multi('codice', code_opts, flt.codice, 'Tutti i codici', 'Codici') }}
+    {{ multi('team', team_opts, flt.team, 'Tutti i team', 'Team') }}
+    {{ multi('ruolo', role_opts, flt.ruolo, 'Tutti i ruoli', 'Ruoli') }}
+    {% if filtro_attivo %}<a class="btn ghost sm" href="/comp/listino">Azzera</a>{% endif %}
+  </form>
 </div>
 
-{% if saved == '1' %}<div class="flash">Parametri salvati come predefiniti.</div>
-{% elif saved == 'err' %}<div class="flash error">Dati non validi, nulla è stato salvato.</div>{% endif %}
-
 <div class="card">
-  <div class="card-title">Parametri — ogni modifica ricalcola il listino; «Salva» li rende predefiniti</div>
-  <form id="listino-form" method="post" action="/comp/listino/defaults">
-    <div class="grid3">
-      <div>
-        <div class="muted3 small" style="margin-bottom:4px">Costo azienda</div>
-        <div class="frow">
-          {{ num('oneri_mult', 'Oneri × RAL', p.oneri_mult, step='0.01') }}
-          {{ num('premi_pct', 'Premi attesi % RAL', p.premi_pct, step='0.5') }}
-        </div>
-        {% if public() %}<input type="hidden" name="altri_costi" value="{{ '%g' % p.altri_costi if p.altri_costi is not none else '' }}">
-        {% else %}{{ num('altri_costi', 'Altri costi annui € / persona', p.altri_costi, step='100') }}{% endif %}
-      </div>
-      <div>
-        <div class="muted3 small" style="margin-bottom:4px">Giorni dell'anno</div>
-        <div class="frow">
-          <div><label class="fld">Anno</label>
-            <select name="anno" hx-post="/comp/listino/simulate" hx-target="#listino-out" hx-include="#listino-form">
-              {% for a in anni %}<option value="{{ a }}" {{ 'selected' if a == anno }}>{{ a }}</option>{% endfor %}
-            </select></div>
-          {{ num('festivita_gg', 'Festività feriali', p.festivita_gg, placeholder='auto: ' ~ g.festivita_feriali) }}
-          {{ num('festivita_extra_gg', 'Patrono / chiusure', p.festivita_extra_gg) }}
-        </div>
-        <div class="frow">
-          {{ num('ferie_gg', 'Ferie + permessi gg', p.ferie_gg, step='0.5') }}
-          {{ num('malattia_gg', 'Malattia gg', p.malattia_gg, step='0.5') }}
-        </div>
-      </div>
-      <div>
-        <div class="muted3 small" style="margin-bottom:4px">Produttività (predefinita: per persona nella tabella in basso)</div>
-        <div class="frow">
-          {{ num('formazione_pct', 'Formazione %', p.formazione_pct, step='0.5') }}
-          {{ num('interne_pct', 'Attività interne %', p.interne_pct, step='0.5') }}
-        </div>
-        {{ num('saturazione_pct', 'Saturazione %', p.saturazione_pct, step='1', max='200') }}
-      </div>
-    </div>
-    <div class="actions">
-      <button type="submit" class="btn">Salva come predefiniti</button>
-      <a class="btn ghost" href="/comp/listino?anno={{ anno }}">Ripristina i salvati</a>
-    </div>
-    <details style="margin-top:8px">
-      <summary class="muted small" style="cursor:pointer">Come leggere i parametri</summary>
-      <ul class="muted small" style="line-height:1.6;margin:6px 0 0 18px">
-        <li><strong>Oneri × RAL</strong>: 1,41 copre INPS, INAIL e TFR. L'IRAP non c'entra: il costo del lavoro a tempo indeterminato è interamente deducibile dal 2015. I <strong>premi</strong> attesi sono soggetti agli stessi oneri; i benefit a costo vengono dalla scheda persona; gli <strong>altri costi</strong> (postazione, PC, licenze, rimborsi non rifatturati) si sommano secchi.</li>
-        <li><strong>Festività</strong>: delle 11 nazionali contano solo quelle che cadono in giorno feriale, lette dal calendario dell'anno (nel {{ anno }}: {{ g.festivita_feriali }}); il campo vuoto lascia fare al calendario. «Patrono / chiusure» aggiunge le giornate aziendali. Anche i weekend sono contati davvero: 104 di norma, 106 in un bisestile che parte di sabato.</li>
-        <li><strong>Ferie + permessi</strong>: ferie più PAR/ROL/ex festività (metalmeccanico 20+13, commercio ≈ 34). <strong>Malattia</strong>: assenze impreviste medie.</li>
-        <li><strong>Formazione</strong> e <strong>attività interne</strong> (riunioni, pre-sales, amministrazione) sono quote dei giorni di presenza. La <strong>saturazione</strong> è la quota di giorni fatturabili che si vende davvero: sotto 100 il costo del bench si spalma sui giorni venduti, sopra 100 (fino a 200) per chi lavora oltre lo standard, ad esempio con MLO. Il <strong>part-time</strong> arriva dalla situazione contrattuale e riduce i giorni, non il costo.</li>
-      </ul>
-    </details>
-  </form>
+  <div class="card-title">Parametri aziendali{% if hr %} — <a href="/azienda?tab=listino">si modificano in Azienda → Listino</a>{% else %} — li fissa HR, uguali per tutti i director{% endif %}</div>
+  <div class="frow" style="gap:18px;flex-wrap:wrap">
+    <span class="badge">oneri × {{ '%g' % p.oneri_mult }}</span>
+    {% if p.premi_pct %}<span class="badge">premi {{ '%g' % p.premi_pct }}%</span>{% endif %}
+    <span class="badge">altri costi {{ p.altri_costi | eur }}</span>
+    <span class="badge">festività {{ '%g' % p.festivita_gg }} + {{ '%g' % p.festivita_extra_gg }} gg</span>
+    <span class="badge">ferie e permessi {{ '%g' % p.ferie_gg }} gg</span>
+    <span class="badge">malattia {{ '%g' % p.malattia_gg }} gg</span>
+    <span class="badge">formazione {{ '%g' % p.formazione_pct }}%</span>
+    <span class="badge">interne {{ '%g' % p.interne_pct }}%</span>
+    <span class="badge">saturazione {{ '%g' % p.saturazione_pct }}%</span>
+  </div>
 </div>
 
 <div id="listino-out">{% include "_listino_out.html" %}</div>
 
 <div class="card">
-  <div class="card-title">Codice di listino per persona</div>
+  <div class="card-title">Codice di listino e produttività per persona</div>
   <p class="muted small" style="margin-bottom:10px;line-height:1.6">
     Il codice è la categoria d'offerta, non il ruolo: entra nel listino chi ne ha uno sull'assegnazione corrente.
-    Qui si compila o si corregge; il cambio reale si registra con una nuova assegnazione dalla scheda persona.
-    {% if not is_hr() %}I codici si gestiscono in <a href="/settings?tab=listino">Configurazione → Listino</a>.{% endif %}
+    {% if hr %}Codice e produttività li imposta il director di ciascuna persona; i codici si gestiscono in <a href="/azienda?tab=listino">Azienda → Listino</a>.
+    {% else %}Qui si compila o si corregge; il cambio reale si registra con una nuova assegnazione dalla scheda persona. Le tre percentuali vuote seguono i parametri aziendali; un valore qui vale solo per la persona.{% endif %}
   </p>
-  {% if not profiles %}<div class="flash error">Nessun codice di listino attivo{% if not is_hr() %}: creane uno in <a href="/settings?tab=listino">Configurazione → Listino</a>{% endif %}.</div>{% endif %}
+  {% if not profiles %}<div class="flash error">Nessun codice di listino attivo{% if hr %}: creane uno in <a href="/azienda?tab=listino">Azienda → Listino</a>{% else %}: li crea HR in Azienda → Listino{% endif %}.</div>{% endif %}
   {% macro prod(r, name, label) -%}
-  <td class="num"><input type="number" name="pp_{{ name }}" step="0.5" min="0" max="{{ 200 if name == 'saturazione_pct' else 100 }}" aria-label="{{ label }}"
+  <td class="num">{% if hr %}{{ '%g' % r.override[name] if r.override[name] is not none else '—' }}{% else %}<input type="number" name="pp_{{ name }}" step="0.5" min="0" max="{{ 200 if name == 'saturazione_pct' else 100 }}" aria-label="{{ label }}"
          value="{{ '%g' % r.override[name] if r.override[name] is not none else '' }}" placeholder="{{ '%g' % p[name] }}"
          style="width:72px;text-align:right" title="{{ label }}: vuoto = predefinito {{ '%g' % p[name] }}%"
-         hx-post="/comp/listino/person/{{ r.id }}/prod" hx-target="#listino-out" hx-include="#listino-form, #prow-{{ r.id }}" hx-trigger="change, keyup delay:400ms"></td>
+         hx-post="/comp/listino/person/{{ r.id }}/prod{{ '?' ~ request.url.query if request.url.query }}" hx-target="#listino-out" hx-include="#prow-{{ r.id }}" hx-trigger="change, keyup delay:400ms">{% endif %}</td>
   {%- endmacro %}
   <table class="tbl">
-    <thead><tr><th>Persona</th><th>Team</th><th>Ruolo</th><th style="width:240px">Codice di listino</th>
+    <thead><tr><th>Persona</th>{% if hr %}<th>Director</th>{% endif %}<th>Team</th><th>Ruolo</th><th style="width:240px">Codice di listino</th>
       <th class="num" title="quota dei giorni di presenza; vuoto = predefinito">Formazione %</th>
       <th class="num" title="quota dei giorni di presenza; vuoto = predefinito">Interne %</th>
       <th class="num" title="quota venduta dei giorni fatturabili; vuoto = predefinito">Saturazione %</th></tr></thead>
+    {% set ncol = 8 if hr else 7 %}
     {% for r in senza_codice + platea %}
-    {% if loop.first and senza_codice %}<tr><td colspan="7" class="txt-amber small" style="text-transform:uppercase;letter-spacing:.04em">Senza codice ({{ senza_codice|length }}) — fuori listino</td></tr>{% endif %}
-    {% if senza_codice and loop.index0 == senza_codice|length %}<tr><td colspan="7" class="muted3 small" style="text-transform:uppercase;letter-spacing:.04em">Con codice ({{ platea|length }})</td></tr>{% endif %}
+    {% if loop.first and senza_codice %}<tr><td colspan="{{ ncol }}" class="txt-amber small" style="text-transform:uppercase;letter-spacing:.04em">Senza codice ({{ senza_codice|length }}) — fuori listino</td></tr>{% endif %}
+    {% if senza_codice and loop.index0 == senza_codice|length %}<tr><td colspan="{{ ncol }}" class="muted3 small" style="text-transform:uppercase;letter-spacing:.04em">Con codice ({{ platea|length }})</td></tr>{% endif %}
     <tr id="prow-{{ r.id }}">
       <td><a href="/people/{{ r.id }}">{{ r.full_name }}</a></td>
+      {% if hr %}<td class="muted">{{ r.director or '—' }}</td>{% endif %}
       <td class="muted">{{ r.team_name or '—' }}</td>
       <td class="muted">{{ lookup_label('role_type', r.role_type) if r.role_type else '—' }}</td>
       <td>
-        <select name="listino_profile_id" hx-post="/comp/listino/person/{{ r.id }}/code" hx-target="#listino-out" hx-include="#listino-form">
+        {% if hr %}{% if r.listino_code %}<code>{{ r.listino_code }}</code> <span class="muted">{{ r.listino_desc }}</span>{% else %}<span class="muted3">—</span>{% endif %}
+        {% else %}
+        <select name="listino_profile_id" hx-post="/comp/listino/person/{{ r.id }}/code{{ '?' ~ request.url.query if request.url.query }}" hx-target="#listino-out">
           <option value="">— senza codice —</option>
           {% for lp in profiles %}<option value="{{ lp.id }}" {{ 'selected' if lp.id == r.listino_profile_id }}>{{ lp.code }} · {{ lp.description }}</option>{% endfor %}
           {% if r.listino_profile_id and not r.listino_active %}<option value="{{ r.listino_profile_id }}" selected>{{ r.listino_code }} · {{ r.listino_desc }} (disattivato)</option>{% endif %}
         </select>
+        {% endif %}
       </td>
       {{ prod(r, 'formazione_pct', 'Formazione %') }}
       {{ prod(r, 'interne_pct', 'Attività interne %') }}
       {{ prod(r, 'saturazione_pct', 'Saturazione %') }}
     </tr>
     {% else %}
-    <tr><td colspan="7" class="muted">Nessuna persona attiva con un'assegnazione corrente.</td></tr>
+    <tr><td colspan="{{ ncol }}" class="muted">Nessuna persona attiva con un'assegnazione corrente{% if filtro_attivo %} nel filtro{% endif %}.</td></tr>
     {% endfor %}
   </table>
-  <p class="muted3 small" style="margin-top:6px">Le tre percentuali vuote seguono i predefiniti del form in alto; un valore qui vale solo per la persona e sopravvive ai cambi di predefinito.</p>
   {% if senza_assegnazione %}
   <p class="muted3 small" style="margin-top:8px">Senza team, quindi senza codice: il codice si imposta dopo l'assegnazione —
     {% for r in senza_assegnazione %}<a href="/people/{{ r.id }}">{{ r.full_name }}</a>{{ ', ' if not loop.last }}{% endfor %}.</p>
   {% endif %}
 </div>
 
+{% if not hr %}
 <script>
-// Invio dentro un campo ricalcola soltanto: i predefiniti si salvano col pulsante.
-document.querySelectorAll('#listino-form, [id^="prow-"]').forEach(el => el.addEventListener('keydown', e => {
+// Invio dentro un campo ricalcola soltanto.
+document.querySelectorAll('[id^="prow-"]').forEach(el => el.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.preventDefault();
 }));
 </script>
+{% endif %}
 {% endblock %}

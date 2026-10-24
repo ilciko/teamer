@@ -8,9 +8,8 @@ from tests.conftest import PASSWORD, as_user, login
 # pagine che HR legge (tutte quelle dei director tranne dashboard, report, simulazioni, riporti, configurazione)
 HR_PAGES = ["/people", "/people?show=tutti", "/org", "/org/chart", "/comp/hiring", "/comp/salary",
             "/comp/plan", "/comp/plan/report", "/comp/budget", "/comp/bonus", "/comp/listino",
-            "/ninebox", "/cycles", "/notes", "/notes/report", "/actions", "/account"]
-HR_DENIED = ["/", "/reports", "/org/sim", "/org/riporti", "/settings", "/settings?tab=listino",
-             "/admin", "/azienda"]
+            "/ninebox", "/cycles", "/notes", "/notes/report", "/actions", "/account", "/azienda", "/azienda?tab=listino"]
+HR_DENIED = ["/", "/reports", "/org/sim", "/org/riporti", "/settings", "/admin"]
 
 
 def _seed(client, client2):
@@ -74,13 +73,12 @@ def test_post_rifiutati_salvo_account_e_anteprime(client, client2, hr_client):
     for path, data in [("/org/team", {"name": "X"}), (f"/people/{p1}/delete", {"confirm_name": "Anna Alfa"}),
                        (f"/people/{p1}/replacement", {"title": "X", "expected_start": "2026-01-01"}),
                        ("/comp/bonus", {}), ("/ninebox/save", {}), ("/cycles", {}),
-                       ("/settings/general", {}), ("/admin/users", {}), ("/azienda/liste", {})]:
+                       ("/settings/general", {}), ("/admin/users", {}), ("/comp/listino/person/1/code", {})]:
         assert hr_client.post(path, data=data).status_code == 403, path
     assert db.sys.one("SELECT COUNT(*) AS n FROM person")["n"] == 2
     assert db.sys.one("SELECT COUNT(*) AS n FROM team")["n"] == 2
     # anteprime htmx e account restano suoi
     assert hr_client.post("/comp/salary/simulate", data={}).status_code == 200
-    assert hr_client.post("/comp/listino/simulate", data={}).status_code == 200
     r = hr_client.post("/account/password", data={"current": PASSWORD, "new": "nuova-password-hr",
                                                   "confirm": "nuova-password-hr"}, follow_redirects=False)
     assert r.headers["location"] == "/account?saved=1"
@@ -127,8 +125,9 @@ def test_barra_laterale_e_avviso(hr_client):
     html = hr_client.get("/org").text
     nav = html.split('class="sidebar"')[1].split("</nav>")[0]
     assert 'href="/people"' in nav and 'href="/comp/plan"' in nav and 'href="/notes"' in nav
-    for href in ('href="/"', 'href="/reports"', 'href="/settings"', 'href="/admin"', 'href="/azienda"'):
+    for href in ('href="/"', 'href="/reports"', 'href="/settings"', 'href="/admin"'):
         assert href not in nav, href
+    assert 'href="/azienda"' in nav                                             # Azienda è di HR (0.41)
     assert "hr1 · HR" in nav and "public-switch" in nav
     assert "hr-readonly" in html and "Profilo HR" in html
     for page in (html, hr_client.get("/org/chart").text):

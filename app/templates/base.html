@@ -28,20 +28,19 @@
                         ('Listino', '/comp/listino', '/comp/listino', false)]),
       ('Valutazione', [('9-Box', '/ninebox', '/ninebox', true), ('Cicli &amp; obiettivi', '/cycles', '/cycles', true)]),
       ('Interazioni', [('Note 1:1', '/notes', '/notes', true), ('Azioni', '/actions', '/actions', true)]),
-      ('Sistema', [('Configurazione', '/settings', '/settings', true)]),
+      ('Sistema', [('Azienda', '/azienda', '/azienda', true)] if hr_nav else [('Configurazione', '/settings', '/settings', true)]),
     ] %}
     <div class="sidebar-nav">
       {% if is_admin %}
       {# il site admin non vede i dati del personale: solo il suo pannello #}
       <a class="nav-link {{ 'active' if path.startswith('/admin') }}" href="/admin">Amministrazione</a>
-      <a class="nav-link {{ 'active' if path.startswith('/azienda') }}" href="/azienda">Azienda</a>
       {% elif me %}
       {% if not pub and not hr_nav %}
       <a class="nav-link {{ 'active' if path == '/' }}" href="/">Dashboard</a>
       <a class="nav-link {{ 'active' if path.startswith('/reports') }}" href="/reports">Report</a>
       {% endif %}
-      {# HR (0.36): niente dashboard, report né configurazione #}
-      {% for title, links in nav_groups if not (hr_nav and title == 'Sistema') %}
+      {# HR (0.36): niente dashboard né report; in Sistema ha Azienda (0.41) al posto della Configurazione #}
+      {% for title, links in nav_groups %}
       {% set visible = links | rejectattr(3) | list if pub else links %}
       {% if visible %}
       {% set here = namespace(open=false) %}

@@ -340,7 +340,10 @@ Dalla 0.39 la cessazione la registra HR; il director decide se sostituire (posiz
 
 > Il riporto **non** viene sommato dentro `total_cap`: il tetto mostrato è `total_cap + Σ amount` dei trasferimenti entranti non annullati, e il "riporto AP" resta un badge a sé. Così un trasferimento sbagliato si annulla (`voided=1`) senza ricalcolare i tetti a mano: torna indietro il denaro e con lui le posizioni ancora aperte, mentre chi è già stato assunto resta dov'è.
 
-### `listino_profile` — codici di listino di vendita *(config)*
+### `listino_profile` — codici di listino di vendita *(config aziendale, 0035)*
+
+Dalla 0.41 è unico per l'istanza (niente `owner_user_id`, `UNIQUE(code)`), gestito da HR in Azienda →
+Listino; i parametri del costo giornaliero (`listino_*`) stanno in `app_meta`.
 | Campo | Tipo | Note |
 |---|---|---|
 | id | INTEGER PK | |

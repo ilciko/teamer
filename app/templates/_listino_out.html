@@ -1,4 +1,4 @@
-{# Frammento rigenerato a ogni modifica dei parametri: nessun bottone, nessun select. #}
+{# Frammento rigenerato a ogni modifica di codice o produttività di una persona: nessun bottone, nessun select. #}
 {% macro gg(v) -%}{{ ('%.1f' % v) | replace('.', ',') if v is not none else '—' }}{%- endmacro %}
 {# Listino per codice: in chiaro anche in modalità pubblica (eur_plain); per team e per persona lì non si mostrano. #}
 {% macro delta(sc) -%}
@@ -7,7 +7,7 @@
 {% macro gruppo(rows, label_col, listino=false) -%}
 <table class="tbl">
   <thead><tr><th>{{ label_col }}</th><th class="num">n</th><th class="num">min</th><th class="num">media</th><th class="num" title="Σ costi annui ÷ Σ giorni fatturabili: la tariffa vera del gruppo. Coincide con la media quando tutti hanno gli stessi giorni fatturabili; si stacca con part-time o giorni diversi">blended</th><th class="num">max</th>
-    {% if listino %}<th class="num" title="tariffa corrente del listino commerciale (Configurazione → Listino)">listino</th><th class="num" title="listino − costo blended; tra parentesi il margine sul prezzo">Δ vs blended</th>{% endif %}</tr></thead>
+    {% if listino %}<th class="num" title="tariffa corrente del listino commerciale (Azienda → Listino)">listino</th><th class="num" title="listino − costo blended; tra parentesi il margine sul prezzo">Δ vs blended</th>{% endif %}</tr></thead>
   {% for r in rows %}
   <tr{% if r.key == '__tot__' %} style="font-weight:600;border-top:2px solid var(--border, #ddd)"{% endif %}>
     <td>{{ caller(r) }}{% if r.n_escluse %} <span class="badge amber" title="senza RAL o senza giorni: non contano nelle medie">{{ r.n_escluse }} escl.</span>{% endif %}</td>
@@ -32,13 +32,13 @@
   <div class="flash error">Valore non valido per {{ prod_errori.persona }} ({{ prod_errori.campi | join(', ') | replace('_pct', '') }}): formazione e interne tra 0 e 100, saturazione tra 0 e 200. Resta il valore precedente.</div>
   {% endif %}
   {% if not platea %}
-  <div class="flash">Nessuna assegnazione corrente ha un codice di listino: assegnali nella tabella qui sotto.</div>
+  <div class="flash">Nessuna assegnazione corrente ha un codice di listino{% if filtro_attivo %} nel filtro{% elif not is_hr() %}: assegnali nella tabella qui sotto{% endif %}.</div>
   {% elif escluse %}
   <div class="flash">{{ escluse }} person{{ 'a' if escluse == 1 else 'e' }} con codice ma senza RAL censita: elencat{{ 'a' if escluse == 1 else 'e' }} nel dettaglio, fuori dalle medie.</div>
   {% endif %}
 
   <p class="muted small" style="margin:0 0 10px;line-height:1.6">
-    {{ anno }}: {{ g.giorni }} giorni − {{ g.weekend }} weekend − {{ gg(g.festivita_tot) }} festività ({{ 'dal calendario' if g.festivita_auto else 'impostate' }}) = {{ gg(g.lavorabili) }} lavorabili
+    {{ g.giorni }} giorni − {{ g.weekend }} weekend − {{ gg(g.festivita_tot) }} festività = {{ gg(g.lavorabili) }} lavorabili
     − {{ gg(p.ferie_gg) }} ferie e permessi − {{ gg(p.malattia_gg) }} malattia = {{ gg(g.presenza) }} di presenza
     → {{ gg(g.fatturabili_fte) }} fatturabili per un full-time con la produttività predefinita ·
     costo annuo = RAL × {{ '%g' % p.oneri_mult }}{% if p.premi_pct %} × (1 + {{ '%g' % p.premi_pct }}% premi){% endif %} + benefit a costo + {{ p.altri_costi | eur }}
@@ -49,7 +49,7 @@
     {% set righe = per_codice + ([dict(totale, key='__tot__', listino_rate=none, scost=none, max_sopra=false)] if totale and per_codice|length > 1 else []) %}
     {% call(r) gruppo(righe, 'Codice', listino=true) %}{% if r.key == '__tot__' %}Tutta la platea{% else %}<code>{{ r.key }}</code> <span class="muted">{{ r.label }}</span>{% endif %}{% endcall %}
     {% if per_codice and per_codice | rejectattr('listino_rate') | list | length %}
-    <p class="muted3 small" style="margin-top:6px">Per i codici senza tariffa non c'è confronto{% if not is_hr() %}: impostala in <a href="/settings?tab=listino">Configurazione → Listino</a>{% endif %}.</p>
+    <p class="muted3 small" style="margin-top:6px">Per i codici senza tariffa non c'è confronto{% if is_hr() %}: impostala in <a href="/azienda?tab=listino">Azienda → Listino</a>{% endif %}.</p>
     {% endif %}
   </div>
 

@@ -1,11 +1,14 @@
-"""Listino: costo giornaliero di vendita per codice di listino, team e ruolo."""
-from datetime import date
+"""Listino: costo giornaliero di vendita per codice di listino, team e ruolo.
 
-from fastapi import APIRouter, HTTPException, Request
+Dalla 0.41 codici e parametri sono aziendali (Azienda → Listino, di HR): qui tutti leggono gli
+stessi numeri. Il director imposta il codice e la produttività delle sue persone; HR consulta.
+Filtri cumulabili: codice, team, ruolo e, per HR, director.
+"""
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 
 from app import db
-from app.params import OptInt
+from app.routers import hrview
 from app.services import cost, listino
 
 router = APIRouter()
@@ -26,9 +29,10 @@ def _profiles() -> list:
 
 
 def _rows() -> list[dict]:
-    """Persone attive con assegnazione corrente, codice, part-time, RAL e benefit a costo."""
+    """Persone attive con assegnazione corrente, codice, part-time, RAL, benefit a costo e director."""
     rows = db.query(
-        """SELECT p.id, p.full_name, pa.id AS assignment_id, pa.role_type, t.name AS team_name,
+        """SELECT p.id, p.full_name, pa.id AS assignment_id, pa.role_type, t.name AS team_name, t.id AS team_id,
+                  COALESCE(t.owner_user_id, p.owner_user_id) AS director_id,
                   pa.listino_profile_id, lp.code AS listino_code, lp.description AS listino_desc,
                   lp.active AS listino_active, lp.day_rate AS listino_rate,
                   COALESCE(e.part_time_pct, 100) AS part_time_pct,
@@ -54,22 +58,31 @@ def _rows() -> list[dict]:
     return out
 
 
-def _anno(form, default: int | None = None) -> int:
-    try:
-        return int(form.get("anno") or 0) or (default or date.today().year)
-    except (TypeError, ValueError):
-        return default or date.today().year
-
-
 def _sorted(groups: list[dict]) -> list[dict]:
     return sorted(groups, key=lambda g: (g["key"] is None, str(g["key"] or "")))
 
 
-def _compute(form, anno: int) -> dict:
-    p = listino.parse_params(form, _saved_params())
-    g = listino.giorni(anno, p)
+def _filters(request) -> dict:
+    q = request.query_params
+    ints = lambda name: {int(v) for v in q.getlist(name) if str(v).isdigit()}
+    return {"codice": set(q.getlist("codice")), "team": ints("team"), "ruolo": set(q.getlist("ruolo"))}
+
+
+def _compute(ctx: dict, flt: dict) -> dict:
+    """Costi con i parametri aziendali salvati; i filtri restringono platea e aggregati."""
+    p = listino.parse_params({}, _saved_params())
+    g = listino.giorni(p)
     platea, senza_codice, senza_assegnazione = [], [], []
     for r in _rows():
+        if not hrview.keep(ctx, r["director_id"]):
+            continue
+        if flt["team"] and r["team_id"] not in flt["team"]:
+            continue
+        if flt["ruolo"] and r["role_type"] not in flt["ruolo"]:
+            continue
+        if flt["codice"] and r["listino_code"] not in flt["codice"]:
+            continue
+        r["director"] = ctx["directors"].get(r["director_id"])
         if r["assignment_id"] is None:
             senza_assegnazione.append(r)
         elif r["listino_profile_id"] is None:
@@ -85,7 +98,7 @@ def _compute(form, anno: int) -> dict:
                           and c["max"] > c["listino_rate"])
     totale = listino.aggregate(platea, "_tutti")
     return {
-        "anno": anno, "p": p, "g": g,
+        "p": p, "g": g, "flt": flt, "filtro_attivo": any(flt.values()) or bool(ctx["sel"]),
         "platea": platea, "senza_codice": senza_codice, "senza_assegnazione": senza_assegnazione,
         "escluse": sum(1 for r in platea if r["motivo"] == "ral"),
         "per_codice": per_codice,
@@ -95,33 +108,24 @@ def _compute(form, anno: int) -> dict:
 
 
 @router.get("/comp/listino")
-def listino_page(request: Request, anno: OptInt = None, saved: str = ""):
-    oggi = date.today().year
-    anno = anno or oggi
-    anni = sorted({anno, *range(oggi - 1, oggi + 3)})
-    ctx = _compute({}, anno)  # parametri = quelli salvati
+def listino_page(request: Request):
+    ctx = hrview.context(request)
+    flt = _filters(request)
+    teams = db.query("SELECT id, name, owner_user_id FROM team WHERE archived_at IS NULL ORDER BY name")
+    team_opts = [{"id": t["id"], "name": t["name"] + (f" · {ctx['directors'][t['owner_user_id']]}"
+                                                       if ctx["directors"].get(t["owner_user_id"]) else "")}
+                 for t in teams]
     return _templates().TemplateResponse(request, "listino.html", {
-        **ctx, "saved": saved, "anni": anni, "profiles": _profiles(),
+        **ctx, **_compute(ctx, flt), "profiles": _profiles(),
+        "team_opts": team_opts,
+        "code_opts": [{"id": lp["code"], "name": f"{lp['code']} · {lp['description']}"} for lp in _profiles()],
+        "role_opts": [{"id": r["code"], "name": r["label"]} for r in db.lookups("role_type")],
     })
 
 
-@router.post("/comp/listino/simulate")
-async def listino_simulate(request: Request):
-    form = await request.form()
-    return _templates().TemplateResponse(request, "_listino_out.html", _compute(form, _anno(form)))
-
-
-@router.post("/comp/listino/defaults")
-async def listino_defaults(request: Request):
-    """Rende predefiniti i parametri del form: tutto o niente."""
-    form = await request.form()
-    anno = _anno(form)
-    p, errors = listino.validate_params(form)
-    if errors:
-        return RedirectResponse(f"/comp/listino?anno={anno}&saved=err", status_code=302)
-    for key, value in listino.params_to_meta(p).items():
-        db.set_meta(key, value)
-    return RedirectResponse(f"/comp/listino?anno={anno}&saved=1", status_code=302)
+def _fragment(request: Request):
+    ctx = hrview.context(request)
+    return _templates().TemplateResponse(request, "_listino_out.html", _compute(ctx, _filters(request)))
 
 
 @router.post("/comp/listino/person/{pid}/code")
@@ -145,7 +149,7 @@ async def listino_person_code(request: Request, pid: int):
     if not cur:
         raise HTTPException(400, "la persona non ha un'assegnazione corrente")
     db.execute("UPDATE person_assignment SET listino_profile_id=? WHERE id=?", (lp_id, cur["id"]))
-    return _templates().TemplateResponse(request, "_listino_out.html", _compute(form, _anno(form)))
+    return _fragment(request)
 
 
 @router.post("/comp/listino/person/{pid}/prod")
@@ -167,8 +171,9 @@ async def listino_person_prod(request: Request, pid: int):
             conn.execute(
                 "DELETE FROM listino_person_param WHERE person_id=? AND formazione_pct IS NULL "
                 "AND interne_pct IS NULL AND saturazione_pct IS NULL", (pid,))
-    ctx = _compute(form, _anno(form))
+    ctx = hrview.context(request)
+    out = _compute(ctx, _filters(request))
     if errors:
         persona = db.one("SELECT full_name FROM person WHERE id=?", (pid,))["full_name"]
-        ctx["prod_errori"] = {"persona": persona, "campi": errors}
-    return _templates().TemplateResponse(request, "_listino_out.html", ctx)
+        out["prod_errori"] = {"persona": persona, "campi": errors}
+    return _templates().TemplateResponse(request, "_listino_out.html", out)

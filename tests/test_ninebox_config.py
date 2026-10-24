@@ -97,8 +97,8 @@ def test_ogni_director_ha_il_suo_questionario(client, client2):
     assert "Domanda solo di coo" not in client2.get("/settings?tab=ninebox").text
 
 
-def test_aggiustamenti_e_moltiplicatori_seguono_le_liste_aziendali(client, admin_client):
-    admin_client.post("/azienda/liste", data={"category": "role_type", "code": "dir", "label": "Direttore",
+def test_aggiustamenti_e_moltiplicatori_seguono_le_liste_aziendali(client, hr_client):
+    hr_client.post("/azienda/liste", data={"category": "role_type", "code": "dir", "label": "Direttore",
                                               "sort_order": 50})
     html = client.get("/settings?tab=ninebox").text
     assert 'name="p|dir|new"' in html                                       # riga nuova, valore neutro

@@ -6,7 +6,6 @@
   <div class="spacer"></div>
   <div class="actions" style="margin:0">
     <a class="btn sm {{ 'ghost' if tab != 'general' }}" href="/settings?tab=general">Generale</a>
-    <a class="btn sm {{ 'ghost' if tab != 'listino' }}" href="/settings?tab=listino">Listino</a>
     <a class="btn sm {{ 'ghost' if tab != 'ninebox' }}" href="/settings?tab=ninebox">9-box</a>
     <a class="btn sm {{ 'ghost' if tab != 'premi' }}" href="/settings?tab=premi">Premi</a>
     <a class="btn sm {{ 'ghost' if tab != 'import' }}" href="/settings?tab=import">Import</a>
@@ -35,48 +34,6 @@
       Con i valori salvati, oggi è <span class="txt-amber">arancio</span> chi è fermo da prima del {{ ral_stale_from.amber | dt }} e <span class="txt-red">rosso</span> da prima del {{ ral_stale_from.red | dt }}.</p>
     <div class="actions"><button class="btn sm">Salva</button></div>
   </form>
-</div>
-
-{% elif tab == 'listino' %}
-<div class="grid2">
-  <div class="card">
-    <div class="card-title">Codici di listino</div>
-    <table class="tbl">
-      <thead><tr><th>Codice</th><th>Descrizione</th><th class="num" title="tariffa giornaliera di vendita a listino">Listino €/gg</th><th class="num">Ordine</th><th></th><th title="assegnazioni che lo usano, anche storiche">Usato</th><th></th></tr></thead>
-      {% for lp in listino_profiles %}
-      <tr class="{{ 'muted3' if not lp.active }}">
-        <td><code>{{ lp.code }}</code></td>
-        <td colspan="4">
-          <form method="post" action="/settings/listino/{{ lp.id }}/update" class="frow" style="gap:6px;align-items:center">
-            <input type="text" name="description" value="{{ lp.description }}" style="flex:3" required>
-            <input type="number" name="day_rate" value="{{ '%g' % lp.day_rate if lp.day_rate is not none else '' }}" step="1" min="0" placeholder="€/gg" style="flex:0 0 90px;text-align:right">
-            <input type="number" name="sort_order" value="{{ lp.sort_order }}" style="flex:0 0 70px;text-align:right">
-            <button class="btn sm ghost" title="Salva modifica">✓</button>
-          </form>
-        </td>
-        <td class="muted small">{{ lp.n_ref }}</td>
-        <td style="width:1%"><form method="post" action="/settings/listino/{{ lp.id }}/toggle">
-          <button class="btn sm ghost">{{ 'disattiva' if lp.active else 'riattiva' }}</button></form></td>
-      </tr>
-      {% else %}<tr><td colspan="7" class="muted">Nessun codice. Es. GE040 · Consultant PM, PS010 · Professional Service.</td></tr>{% endfor %}
-    </table>
-    <p class="muted3 small" style="margin-top:6px">Il codice è stabile e la descrizione si propaga ovunque. La tariffa è quella del listino commerciale corrente: il <a href="/comp/listino">listino</a> la confronta col costo giornaliero calcolato. Un codice disattivato resta sulle assegnazioni che lo usano, ma non si propone più.</p>
-  </div>
-  <div class="card" style="align-self:start">
-    <div class="card-title">Nuovo codice</div>
-    <form method="post" action="/settings/listino">
-      <div class="frow">
-        <div style="flex:0 0 120px"><label class="fld">Codice</label><input type="text" name="code" placeholder="GE040" required></div>
-        <div><label class="fld">Descrizione</label><input type="text" name="description" placeholder="Consultant PM" required></div>
-      </div>
-      <div class="frow">
-        <div><label class="fld">Listino €/gg (corrente)</label><input type="number" name="day_rate" step="1" min="0" placeholder="es. 450" style="text-align:right"></div>
-        <div style="flex:0 0 80px"><label class="fld">Ordine</label><input type="number" name="sort_order" value="0" style="text-align:right"></div>
-      </div>
-      <p class="muted3 small" style="margin-top:6px">È la categoria d'offerta commerciale, più larga del ruolo: un junior dev e un senior hardware possono stare nello stesso codice se la policy li pone allo stesso livello d'offerta.</p>
-      <div class="actions"><button class="btn sm">Aggiungi</button></div>
-    </form>
-  </div>
 </div>
 
 {% elif tab == 'ninebox' %}

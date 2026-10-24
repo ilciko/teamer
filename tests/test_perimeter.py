@@ -59,11 +59,11 @@ def test_director_nuovo_parte_dalla_configurazione_di_default(client, client2):
         assert db.one("SELECT 1 FROM evaluation_model WHERE type='nine_box'")
 
 
-def test_liste_valori_e_benefit_sono_aziendali(client, client2, admin_client):
-    """Una lista sola per tutti: la gestisce l'admin, i director la leggono e non la scrivono."""
-    admin_client.post("/azienda/liste", data={"category": "livello", "code": "Q9", "label": "Quadro super"})
-    admin_client.post("/azienda/benefit", data={"name": "Buoni pasto", "value_kind": "amount", "is_cost": "1"})
-    admin_client.post("/azienda/default", data={"default_ccnl": "Commercio"})
+def test_liste_valori_e_benefit_sono_aziendali(client, client2, admin_client, hr_client):
+    """Una lista sola per tutti: la gestisce HR (0.41), i director la leggono e non la scrivono."""
+    hr_client.post("/azienda/liste", data={"category": "livello", "code": "Q9", "label": "Quadro super"})
+    hr_client.post("/azienda/benefit", data={"name": "Buoni pasto", "value_kind": "amount", "is_cost": "1"})
+    hr_client.post("/azienda/default", data={"default_ccnl": "Commercio"})
     for u in ("coo", "dir2"):
         with as_user(u):
             assert db.one("SELECT label FROM lookup WHERE code='Q9'")["label"] == "Quadro super"
@@ -76,16 +76,16 @@ def test_liste_valori_e_benefit_sono_aziendali(client, client2, admin_client):
             db.execute("INSERT INTO benefit_type (name) VALUES ('Mio')")
     assert client.get("/azienda", follow_redirects=False).status_code == 403
     assert client.post("/azienda/liste", data={"category": "x", "code": "y", "label": "z"}).status_code == 403
-    assert admin_client.get("/azienda?tab=liste").status_code == 200
+    assert admin_client.get("/azienda?tab=liste").status_code == 403           # Azienda è di HR (0.41)
+    assert hr_client.get("/azienda?tab=liste").status_code == 200
 
 
 def test_configurazione_isolata_in_scrittura(client, client2):
-    client2.post("/settings/listino", data={"code": "DIR2", "description": "Solo dir2", "day_rate": "300"})
+    client2.post("/settings/general", data={"ral_stale_amber_years": "3", "ral_stale_red_years": "6"})
     with as_user("coo"):
-        assert not db.query("SELECT 1 FROM listino_profile WHERE code='DIR2'")
+        assert db.get_meta("ral_stale_amber_years", "2") == "2"
     with as_user("dir2"):
-        assert db.one("SELECT owner_user_id FROM listino_profile WHERE code='DIR2'")["owner_user_id"] == \
-            users.by_username("dir2")["id"]
+        assert db.get_meta("ral_stale_amber_years", "2") == "3"
     # dir2 cambia un peso di coo per id: la guardia salta la riga altrui
     coo_w = db.sys.one("SELECT id, weight FROM weight_mapping WHERE owner_user_id=? AND box_number=9",
                        (users.by_username("coo")["id"],))
@@ -120,11 +120,9 @@ def _dati_senza_proprietario():
     """Come dopo la 0028: righe create dalla connessione di sistema (proprietario NULL)."""
     db.sys.execute("INSERT INTO team (name) VALUES ('Team Esistente')")
     db.sys.execute("INSERT INTO review_cycle (name, year) VALUES ('Ciclo Esistente', 2025)")
-    lp = db.sys.execute("INSERT INTO listino_profile (code, description, day_rate) VALUES ('GE040', 'Esistente', 450)")
     db.sys.execute("UPDATE user_meta SET value='7' WHERE key='ral_stale_amber_years' AND owner_user_id IS NULL")
     if not db.sys.one("SELECT 1 FROM user_meta WHERE key='ral_stale_amber_years' AND owner_user_id IS NULL"):
         db.sys.execute("INSERT INTO user_meta (key, value) VALUES ('ral_stale_amber_years', '7')")
-    return lp
 
 
 def test_dati_senza_proprietario_non_li_vede_nessuno(client, client2):
@@ -138,23 +136,12 @@ def test_dati_senza_proprietario_non_li_vede_nessuno(client, client2):
 
 def test_assegnazione_fonde_la_configurazione(client, admin_client):
     coo = users.by_username("coo")["id"]
-    # coo aveva già un suo codice di listino usato da una persona
-    with as_user("coo"):
-        t = db.execute("INSERT INTO team (name) VALUES ('Suo')")
-        mio = db.execute("INSERT INTO listino_profile (code, description) VALUES ('GE040', 'Mio')")
-        pid = db.execute("INSERT INTO person (full_name) VALUES ('Con Codice')")
-        db.execute("INSERT INTO person_assignment (person_id, team_id, role_type, start_date, listino_profile_id) "
-                   "VALUES (?,?, 'ic', '2026-01-01', ?)", (pid, t, mio))
-    incoming = _dati_senza_proprietario()
+    _dati_senza_proprietario()
     r = admin_client.post("/admin/assign", data={"user_id": coo, "confirm": "ASSEGNA"})
     assert r.status_code == 200 and "Fatto" in r.text
     with as_user("coo"):
         assert db.one("SELECT 1 FROM review_cycle WHERE name='Ciclo Esistente'")
         assert db.get_meta("ral_stale_amber_years") == "7"                          # l'esistente vince
-        assert [r["description"] for r in db.query("SELECT description FROM listino_profile WHERE code='GE040'")] \
-            == ["Esistente"]
-        assert db.one("SELECT listino_profile_id FROM person_assignment WHERE person_id=?",
-                      (pid,))["listino_profile_id"] == incoming                     # riferimento ripuntato
     assert not perimeter.unassigned()["any"]
     assert db.sys.one("SELECT 1 FROM audit_event WHERE event='assign_unassigned'")
 
