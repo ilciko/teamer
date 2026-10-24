@@ -174,9 +174,10 @@ def people_list(request: Request, show: str = "attivi", director: str = ""):
     if hr and director.isdigit():
         rows = [r for r in rows if r["director_id"] == int(director)]
     people = []
+    linked = users.linked_users()
     for r in rows:
         ral = None if hr else cost.current_ral(r["id"])   # HR: niente RAL in lista (0.38)
-        people.append({**dict(r), "ral": ral["amount"] if ral else None,
+        people.append({**dict(r), "ral": ral["amount"] if ral else None, "user": linked.get(r["id"]),
                        "director": directors.get(r["director_id"]),
                        "initials": initials(r["full_name"]), "avatar_uri": avatar_data(r)})
     teams = db.query("SELECT * FROM team WHERE archived_at IS NULL ORDER BY name")
@@ -370,6 +371,7 @@ def person_card(request: Request, pid: int):
         "teams": teams, "people_opts": people_opts,
         "listino_profiles": db.query("SELECT * FROM listino_profile WHERE active=1 ORDER BY sort_order, code"),
         "prev_p": prev_p, "next_p": next_p, "replacement": replacement, "decision": decision,
+        "linked_user": users.linked_user(pid),
         "report_mismatch": report_mismatch,
         "total_cost": cost.total_cost(pid, year), "year": year,
     })
@@ -395,6 +397,9 @@ async def person_avatar(pid: int, avatar: UploadFile):
 
 @router.post("/people/{pid}/cessation")
 def person_cessation(pid: int, end_date: str = Form(...)):
+    linked = users.linked_user(pid)
+    if linked:   # un utente director: prima IT lo scollega (e di norma lo disattiva)
+        return RedirectResponse(f"/people/{pid}?err=utente&u={quote(linked['username'])}", status_code=302)
     with db.transaction() as conn:
         conn.execute("UPDATE person SET status='cessato', end_date=? WHERE id=?", (end_date, pid))
         conn.execute(

@@ -37,11 +37,13 @@
           <span class="av">{% if p.avatar_uri %}<img src="{{ p.avatar_uri }}">{% else %}{{ p.initials }}{% endif %}</span>
         </td>
         <td><a href="/people/{{ p.id }}"><strong>{{ p.full_name }}</strong></a>
+          {% if p.user %} <span class="badge purple" title="Persona collegata a un utente director: non si sposta, prima IT la scollega">utente director · {{ p.user }}</span>{% endif %}
           {% if p.status != 'attivo' %} <span class="badge red">cessato</span>{% endif %}</td>
         {% if hr %}<td>
           {# HR (0.40): cambio director inline, con conferma e data #}
           {% if p.status == 'attivo' %}
-          <select class="mv-director" data-pid="{{ p.id }}" data-name="{{ p.full_name }}" data-current="{{ p.director_id or '' }}" aria-label="Director di {{ p.full_name }}" style="min-width:150px">
+          <select class="mv-director" data-pid="{{ p.id }}" data-name="{{ p.full_name }}" data-current="{{ p.director_id or '' }}" aria-label="Director di {{ p.full_name }}" style="min-width:150px"
+                  {% if p.user %}disabled title="È l'utente director {{ p.user }}: prima IT lo scollega (Amministrazione → Utenti)"{% endif %}>
             {% if not p.director_id %}<option value="" selected>—</option>{% endif %}
             {% for o in dir_opts %}<option value="{{ o.id }}" {{ 'selected' if o.id == p.director_id }}>{{ o.name }}</option>{% endfor %}
           </select>

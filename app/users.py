@@ -4,7 +4,9 @@ La password di un utente non apre il DB (lo apre la chiave di sistema, vedi `db`
 qui ne sta solo l'hash scrypt. Ruoli:
 
 - `admin`: site admin (IT). Utenti, audit, backup, aggiornamenti; nessun dato del personale.
-- `director`: vede e gestisce i suoi team (perimetri, `app.perimeter`).
+- `director`: vede e gestisce i suoi team (perimetri, `app.perimeter`). Dalla 0.47.3 IT lo collega
+  alla persona che lo rappresenta (`app_user.person_id`, una persona Director+ non ancora collegata):
+  nessun director è sopra gli altri, l'app non presume gerarchie fra loro.
 - `hr`: profilo aziendale trasversale, vede le persone di tutti i director (0.36: in sola
   lettura; 0.37: note e azioni proprie; il resto arriva nelle tappe successive, docs/perimetri.md).
 
@@ -92,6 +94,55 @@ def count() -> int:
     return db.sys.one("SELECT COUNT(*) AS n FROM app_user")["n"]
 
 
+# ---- utente ↔ persona (0.47.3) ----
+
+DIRECTOR_ROLE = "sr"   # il ruolo persona «Senior Manager / Director+» della lista aziendale
+
+
+def linkable_people(keep: int | None = None) -> list:
+    """Persone attive col ruolo Director+ nell'assegnazione corrente e non collegate a un utente;
+    `keep` tiene anche quella già collegata all'utente in modifica. Letto con `db.sys`: è l'unico
+    dato del personale (nome e cognome) che IT vede, e solo per queste persone."""
+    return db.sys.query(
+        """SELECT p.id, p.full_name FROM person p
+           JOIN person_assignment pa ON pa.person_id = p.id AND pa.voided = 0 AND pa.end_date IS NULL
+           WHERE p.status = 'attivo' AND pa.role_type = ?
+             AND (p.id = ? OR NOT EXISTS (SELECT 1 FROM app_user u WHERE u.person_id = p.id))
+           ORDER BY p.full_name""", (DIRECTOR_ROLE, keep))
+
+
+def linked_user(person_id: int):
+    """L'utente director collegato alla persona, se c'è."""
+    return db.sys.one("SELECT id, username, display_name, active FROM app_user WHERE person_id=?", (person_id,))
+
+
+def linked_users() -> dict:
+    """{person_id: username} di tutte le persone collegate (per liste e badge)."""
+    return {u["person_id"]: u["username"] for u in db.sys.query("SELECT person_id, username FROM app_user WHERE person_id IS NOT NULL")}
+
+
+def _check_linkable(person_id: int, keep: int | None = None) -> str:
+    """Il nome della persona, se collegabile; altrimenti UserError."""
+    for p in linkable_people(keep):
+        if p["id"] == person_id:
+            return p["full_name"]
+    raise UserError("Persona non collegabile: dev'essere attiva, col ruolo Director+ e senza un altro utente.")
+
+
+def link_person(uid: int, person_id: int | None) -> None:
+    """Collega (o scollega, con None) l'utente director alla persona che lo rappresenta."""
+    u = get(uid)
+    if u is None or u["role"] != "director":
+        raise UserError("Si collega una persona solo a un utente director.")
+    if person_id:
+        name = _check_linkable(person_id, keep=u["person_id"])
+        db.sys.execute("UPDATE app_user SET person_id=? WHERE id=?", (person_id, uid))
+        audit("user_link", f"{_target(u)} ↔ {name}")
+    elif u["person_id"]:
+        db.sys.execute("UPDATE app_user SET person_id=NULL WHERE id=?", (uid,))
+        audit("user_unlink", _target(u))
+
+
 def active_admins() -> int:
     return db.sys.one("SELECT COUNT(*) AS n FROM app_user WHERE role='admin' AND active=1")["n"]
 
@@ -144,7 +195,8 @@ def authenticate(username: str, password: str, ip: str | None = None):
 # ---- gestione ----
 
 def create(username: str, role: str, password: str, display_name: str | None = None,
-           must_change: bool = False) -> int:
+           must_change: bool = False, person_id: int | None = None) -> int:
+    """`person_id` (0.47.3): per un director, la persona Director+ che lo rappresenta; ignorato per gli altri ruoli."""
     username = (username or "").strip()
     if not username or len(username) > 64 or any(c.isspace() for c in username):
         raise UserError("Nome utente non valido (niente spazi, massimo 64 caratteri).")
@@ -152,12 +204,14 @@ def create(username: str, role: str, password: str, display_name: str | None = N
         raise UserError("Ruolo non valido.")
     if by_username(username):
         raise UserError(f"Il nome utente {username} esiste già.")
+    person_id = person_id if role == "director" else None
+    person_name = _check_linkable(person_id) if person_id else None
     uid = db.sys.execute(
         "INSERT INTO app_user (username, display_name, role, password_hash, must_change_password, "
-        "password_changed_at) VALUES (?,?,?,?,?,?)",
+        "password_changed_at, person_id) VALUES (?,?,?,?,?,?,?)",
         (username, (display_name or "").strip() or None, role, hash_password(password),
-         1 if must_change else 0, _ts(_now())))
-    audit("user_create", f"utente {username} ({ROLES[role]})")
+         1 if must_change else 0, _ts(_now()), person_id))
+    audit("user_create", f"utente {username} ({ROLES[role]})" + (f", persona {person_name}" if person_name else ""))
     if role in perimeter.SESSION_ROLES:
         perimeter.ensure_config(uid)  # parte dalla configurazione di default
     return uid
@@ -175,6 +229,9 @@ def update(uid: int, display_name: str | None, role: str) -> None:
         session.drop_user(uid)  # il ruolo decide le pagine: si rientra
         if role in perimeter.SESSION_ROLES:
             perimeter.ensure_config(uid)
+        if role != "director" and u["person_id"]:   # la persona collegata vale solo per un director
+            db.sys.execute("UPDATE app_user SET person_id=NULL WHERE id=?", (uid,))
+            audit("user_unlink", f"{_target(u)}: cambio ruolo")
     audit("user_update", f"{_target(u)}: ruolo {ROLES[role]}")
 
 

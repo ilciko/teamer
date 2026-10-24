@@ -3,7 +3,8 @@
 #
 #   teamer-admin init [--admin NOME]   crea la chiave di sistema del DB (se manca) e il primo site admin
 #   teamer-admin create-admin NOME     nuovo site admin (password provvisoria)
-#   teamer-admin create-user NOME --role admin|director|hr
+#   teamer-admin create-user NOME --role admin|director|hr [--person "Nome Cognome"]
+#   teamer-admin link-person NOME "Nome Cognome" | unlink-person NOME
 #   teamer-admin reset-password NOME   password provvisoria, da cambiare al primo accesso
 #   teamer-admin unlock NOME           toglie il blocco per troppi tentativi
 #   teamer-admin enable|disable NOME

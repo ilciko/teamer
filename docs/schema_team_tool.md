@@ -499,6 +499,8 @@ In `app_meta` restano `schema_version`, `instance_id` e `default_ccnl` (identifi
 ## Area 5 — Utenti e audit *(0026)*
 
 ### `app_user` — utenti dell'app *(config: si corregge in place, si disattiva)*
+
+`person_id` (0038): per un director, la persona Director+ che lo rappresenta (UNIQUE: una persona, un utente); la collega IT.
 | Campo | Tipo | Note |
 |---|---|---|
 | id | INTEGER PK | |

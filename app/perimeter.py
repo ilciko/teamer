@@ -559,6 +559,9 @@ def transfer_person(pid: int, to_uid: int, on_date: str, correct: bool = False) 
             raise TransferError("Persona inesistente.")
         if p["status"] != "attivo":
             raise TransferError("La persona è cessata: non si sposta.")
+        linked = c.execute("SELECT username FROM app_user WHERE person_id=?", (pid,)).fetchone()
+        if linked:
+            raise TransferError(f"È l'utente director «{linked['username']}»: prima IT la scollega (Amministrazione → Utenti).")
         src = director_of(c, pid)
         if src == to_uid:
             raise TransferError("La persona è già di quel director.")

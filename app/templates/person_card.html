@@ -25,9 +25,13 @@
     </div>
   </div>
   <div class="spacer"></div>
+  {% if linked_user %}<span class="badge purple" title="Persona collegata a un utente director: non si sposta né si cessa finché IT non la scollega">utente director · {{ linked_user.username }}</span>{% endif %}
   {% if p.status == 'attivo' %}<span class="badge green">attivo</span>
   {% else %}<span class="badge red">cessato il {{ p.end_date | dt }}</span>{% endif %}
 </div>
+{% if request.query_params.get('err') == 'utente' %}
+<div class="flash error">Questa persona è l'utente director «{{ request.query_params.get('u') }}»: prima IT la scollega (e di norma disattiva l'utente) da Amministrazione → Utenti.</div>
+{% endif %}
 
 {% if p.status == 'cessato' %}
 <div class="ctx-note">

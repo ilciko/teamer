@@ -21,12 +21,13 @@
 <div class="card">
   <div class="card-title">Utenti</div>
   <table class="tbl">
-    <tr><th>Utente</th><th>Ruolo</th><th>Stato</th><th>Ultimo accesso</th><th>Password</th><th>Sessioni</th><th></th></tr>
+    <tr><th>Utente</th><th>Ruolo</th><th>Persona</th><th>Stato</th><th>Ultimo accesso</th><th>Password</th><th>Sessioni</th><th></th></tr>
     {% for u in users %}
     {% set ss = sessions[u.id] %}
     <tr{% if not u.active %} class="muted"{% endif %}>
       <td><strong>{{ u.username }}</strong>{% if u.display_name %}<div class="muted small">{{ u.display_name }}</div>{% endif %}</td>
       <td>{{ roles[u.role] }}</td>
+      <td class="small">{% if u.role == 'director' %}{% if person_of.get(u.id) %}{{ person_of[u.id] }}{% else %}<span class="badge amber" title="Collega la persona Director+ che lo rappresenta (Gestisci)">da collegare</span>{% endif %}{% else %}—{% endif %}</td>
       <td>
         {% if not u.active %}<span class="badge">disattivato</span>
         {% elif u.locked_until and u.locked_until > now %}<span class="badge red" title="fino alle {{ u.locked_until[11:16] }}">bloccato ({{ u.failed_logins }} errori)</span>
@@ -44,6 +45,16 @@
               <select name="role">{% for code, label in roles.items() %}<option value="{{ code }}" {{ 'selected' if code == u.role }}>{{ label }}</option>{% endfor %}</select>
               <div class="actions"><button class="btn sm">Correggi</button></div>
             </form>
+            {% if u.role == 'director' %}
+            <form method="post" action="/admin/users/{{ u.id }}/person">
+              <label class="fld">Persona (Director+)</label>
+              <select name="person_id">
+                <option value="">— nessuna —</option>
+                {% for p in linkable_for[u.id] %}<option value="{{ p.id }}" {{ 'selected' if p.id == u.person_id }}>{{ p.full_name }}</option>{% endfor %}
+              </select>
+              <div class="actions"><button class="btn sm">{{ 'Collega' if not u.person_id else 'Aggiorna' }}</button></div>
+            </form>
+            {% endif %}
             <div class="actions" style="flex-wrap:wrap">
               <form method="post" action="/admin/users/{{ u.id }}/reset" onsubmit="return confirm('Generare una password provvisoria per {{ u.username }}? Le sue sessioni aperte si chiudono.')"><button class="btn sm ghost">Reset password</button></form>
               {% if u.locked_until or u.failed_logins %}<form method="post" action="/admin/users/{{ u.id }}/unlock"><button class="btn sm ghost">Sblocca</button></form>{% endif %}
@@ -87,10 +98,25 @@
     <div class="frow">
       <div><label class="fld">Nome utente</label><input type="text" name="username" required autocomplete="off"></div>
       <div><label class="fld">Ruolo</label>
-        <select name="role">{% for code, label in roles.items() %}<option value="{{ code }}" {{ 'selected' if code == 'director' }}>{{ label }}</option>{% endfor %}</select></div>
+        <select name="role" id="nu-role">{% for code, label in roles.items() %}<option value="{{ code }}" {{ 'selected' if code == 'director' }}>{{ label }}</option>{% endfor %}</select></div>
+    </div>
+    <div id="nu-person">
+      <label class="fld">Persona (Director+ non ancora collegata)</label>
+      <select name="person_id">
+        <option value="">— scegli —</option>
+        {% for p in linkable %}<option value="{{ p.id }}">{{ p.full_name }}</option>{% endfor %}
+      </select>
+      {% if not linkable %}<p class="muted3 small">Nessuna persona Director+ libera: HR la censisce con quel ruolo, poi la colleghi qui.</p>{% endif %}
     </div>
     <label class="fld">Nome visualizzato</label><input type="text" name="display_name">
-    <p class="muted3 small">Nasce con una password provvisoria, mostrata una volta sola: al primo accesso l'utente la cambia.</p>
+    <p class="muted3 small">Nasce con una password provvisoria, mostrata una volta sola: al primo accesso l'utente la cambia. Un director è una persona dell'organigramma: nessuno è sopra gli altri.</p>
+    <script>
+    (function () {
+      const r = document.getElementById('nu-role'), p = document.getElementById('nu-person');
+      const sync = () => { p.hidden = r.value !== 'director'; };
+      r.addEventListener('change', sync); sync();
+    })();
+    </script>
     <div class="actions"><button class="btn sm">Crea utente</button></div>
   </form>
 </div>

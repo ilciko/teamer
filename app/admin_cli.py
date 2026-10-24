@@ -5,7 +5,11 @@ come root e poi lancia questi comandi come utente `teamer`. Comandi:
 
     init [--admin NOME]         chiave di sistema (se manca) + primo site admin
     create-admin NOME           nuovo site admin con password provvisoria
-    create-user NOME --role R   nuovo utente (admin | director | hr) con password provvisoria
+    create-user NOME --role R [--person "Nome Cognome"]
+                                nuovo utente (admin | director | hr) con password provvisoria;
+                                un director si collega alla persona Director+ che lo rappresenta
+    link-person NOME "Nome Cognome" / unlink-person NOME
+                                collega o scollega la persona di un utente director
     reset-password NOME         password provvisoria, da cambiare al primo accesso
     unlock NOME                 toglie il blocco per troppi tentativi
     enable NOME / disable NOME  riattiva / disattiva
@@ -54,13 +58,39 @@ def _print_temp(username: str, temp: str) -> None:
     print(f"Utente: {username}\nPassword provvisoria: {temp}\n(da cambiare al primo accesso)")
 
 
-def _create(username: str, role: str) -> int:
+def _person_id(name: str | None, keep: int | None = None) -> int | None:
+    """La persona Director+ collegabile con quel nome (esatto, senza maiuscole); errore se non c'è."""
+    if not name:
+        return None
+    for p in users.linkable_people(keep):
+        if p["full_name"].strip().lower() == name.strip().lower():
+            return p["id"]
+    raise users.UserError(f"persona «{name}» non collegabile: dev'essere attiva, Director+ e senza utente "
+                          "(nomi disponibili: " + ", ".join(p["full_name"] for p in users.linkable_people(keep)) + ")")
+
+
+def _create(username: str, role: str, person: str | None = None) -> int:
     temp = users.temporary_password()
     try:
-        users.create(username, role, temp, must_change=True)
+        if role == "director" and not person and users.linkable_people():
+            raise users.UserError("un utente director si collega alla persona che lo rappresenta: --person \"Nome Cognome\" "
+                                  "(disponibili: " + ", ".join(p["full_name"] for p in users.linkable_people()) + ")")
+        users.create(username, role, temp, must_change=True, person_id=_person_id(person))
+        if role == "director" and not person:
+            print("Nessuna persona Director+ da collegare: quando HR la censisce, link-person.")
     except users.UserError as exc:
         return _fail(str(exc))
     _print_temp(username, temp)
+    return 0
+
+
+def _link(username: str, person: str | None) -> int:
+    u = _user(username)
+    try:
+        users.link_person(u["id"], _person_id(person, keep=u["person_id"]) if person else None)
+    except users.UserError as exc:
+        return _fail(str(exc))
+    print(f"{u['username']}: " + (f"collegato a {person}" if person else "scollegato"))
     return 0
 
 
@@ -92,6 +122,11 @@ def main(argv=None) -> int:
     p = sub.add_parser("create-user")
     p.add_argument("username")
     p.add_argument("--role", choices=sorted(users.ROLES), required=True)
+    p.add_argument("--person", help="per un director: la persona Director+ che lo rappresenta (nome e cognome)")
+    p = sub.add_parser("link-person", help="collega un utente director alla sua persona")
+    p.add_argument("username")
+    p.add_argument("person")
+    sub.add_parser("unlink-person", help="scollega la persona di un utente director").add_argument("username")
     for cmd in ("reset-password", "unlock", "enable", "disable"):
         sub.add_parser(cmd).add_argument("username")
     sub.add_parser("list-users")
@@ -120,14 +155,22 @@ def main(argv=None) -> int:
         if args.cmd == "create-admin":
             return _create(args.username, "admin")
         if args.cmd == "create-user":
-            return _create(args.username, args.role)
+            return _create(args.username, args.role, args.person)
+        if args.cmd == "link-person":
+            return _link(args.username, args.person)
+        if args.cmd == "unlink-person":
+            return _link(args.username, None)
         if args.cmd == "list-users":
+            linked = {u["id"]: name for u, name in ((u, next((p["full_name"] for p in users.linkable_people(keep=u["person_id"])
+                                                              if p["id"] == u["person_id"]), None))
+                                                    for u in users.all_users() if u["person_id"]) if name}
             for u in users.all_users():
                 stato = "attivo" if u["active"] else "disattivato"
                 if u["locked_until"]:
                     stato += f", bloccato fino a {u['locked_until']}"
+                persona = f" persona: {linked[u['id']]}" if u["id"] in linked else (" persona: da collegare" if u["role"] == "director" else "")
                 print(f"{u['username']:<20} {users.ROLES[u['role']]:<12} {stato:<12} "
-                      f"ultimo accesso: {u['last_login_at'] or 'mai'}")
+                      f"ultimo accesso: {u['last_login_at'] or 'mai'}{persona}")
             return 0
         if args.cmd == "restore":
             return _restore(args)

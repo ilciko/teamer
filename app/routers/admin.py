@@ -1,7 +1,9 @@
 """Pannello del site admin (IT): utenti, audit, sistema (backup, aggiornamenti).
 
 Nessun dato del personale passa da qui: il middleware tiene l'admin dentro `/admin`
-e `/account`, il director fuori da `/admin`.
+e `/account`, il director fuori da `/admin`. Unica eccezione (0.47.3): per collegare un
+utente director alla persona che lo rappresenta, IT vede nome e cognome delle sole
+persone con ruolo Director+ (`users.linkable_people`).
 """
 from datetime import datetime
 from pathlib import Path
@@ -105,6 +107,11 @@ def admin_page(request: Request, tab: str = "users", saved: str = "", err: str =
         ctx["now"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ctx["unassigned"] = perimeter.unassigned()
         ctx["directors"] = [u for u in rows if u["role"] == "director" and u["active"]]
+        ctx["linkable"] = users.linkable_people()
+        ctx["linkable_for"] = {u["id"]: users.linkable_people(keep=u["person_id"]) for u in rows if u["role"] == "director"}
+        ctx["person_of"] = {u["id"]: name for u, name in
+                            ((u, next((p["full_name"] for p in ctx["linkable_for"][u["id"]] if p["id"] == u["person_id"]), None))
+                             for u in rows if u["role"] == "director") if name}
     elif tab == "audit":
         page = max(page, 1)
         rows, total = _audit_rows(user, event, date_from, date_to, page)
@@ -136,13 +143,28 @@ def _with_temp(resp: RedirectResponse, username: str, temp: str) -> RedirectResp
 
 
 @router.post("/admin/users")
-def user_create(username: str = Form(...), display_name: str = Form(""), role: str = Form(...)):
+def user_create(username: str = Form(...), display_name: str = Form(""), role: str = Form(...),
+                person_id: str = Form("")):
     temp = users.temporary_password()
     try:
-        users.create(username, role, temp, display_name, must_change=True)
+        if role == "director" and not person_id.isdigit() and users.linkable_people():
+            # obbligatoria quando c'è una persona Director+ libera; a istanza vuota (nessuna persona) si collega dopo
+            raise users.UserError("Un utente director si collega alla persona che lo rappresenta: scegline una.")
+        users.create(username, role, temp, display_name, must_change=True,
+                     person_id=int(person_id) if person_id.isdigit() else None)
     except users.UserError as exc:
         return _back(err=str(exc))
     return _with_temp(_back(saved="creato"), username.strip(), temp)
+
+
+@router.post("/admin/users/{uid}/person")
+def user_person(uid: int, person_id: str = Form("")):
+    """Collega o scollega (vuoto) la persona di un utente director."""
+    try:
+        users.link_person(uid, int(person_id) if person_id.isdigit() else None)
+    except users.UserError as exc:
+        return _back(err=str(exc))
+    return _back(saved="1")
 
 
 @router.post("/admin/users/{uid}/update")

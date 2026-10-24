@@ -53,9 +53,10 @@ assegna una provvisoria (*Amministrazione → Utenti*, o `python -m app.admin_cl
   a chi cede non resta nulla di loro; budget e montepremi non si spostano. La separazione la applica
   il database stesso (viste, guardie e authorizer per sessione), non le singole pagine; resta
   visibile solo quante righe ha una tabella in totale, mai il loro contenuto.
-- **`teamer-admin`** (root, sul container): `init`, `create-admin`, `create-user --role`,
-  `reset-password`, `unlock`, `enable`/`disable`, `list-users`, `assign-unassigned`, `list-teams`,
-  `restore`. Ogni azione finisce nell'audit come `cli`. Una persona passa a un altro director per
+- **`teamer-admin`** (root, sul container): `init`, `create-admin`, `create-user --role [--person]`,
+  `link-person`/`unlink-person`, `reset-password`, `unlock`, `enable`/`disable`, `list-users`,
+  `assign-unassigned`, `list-teams`, `restore`. Ogni azione finisce nell'audit come `cli`. Un utente
+  director si collega alla persona Director+ che lo rappresenta (anche dal pannello). Una persona passa a un altro director per
   mano di HR, dalla pagina Persone (nel team «Da collocare» del destinatario).
 
 ## Produzione (LXC su Proxmox)

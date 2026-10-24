@@ -305,6 +305,7 @@ erDiagram
     PERSON ||--o{ REPLACEMENT_DECISION : non_sostituita
     APP_USER ||--o{ REPLACEMENT_DECISION : decide
 
+    PERSON ||--o| APP_USER : rappresenta
     APP_USER ||--o{ AUDIT_EVENT : registra
     APP_USER ||--o{ USER_META : configura
     APP_USER ||--o{ TEAM : titolare
