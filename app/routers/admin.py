@@ -159,24 +159,6 @@ def assign(user_id: int = Form(...), confirm: str = Form("")):
     return _back(saved="assegnati")
 
 
-@router.post("/admin/teams/{tid}/transfer")
-def team_transfer(tid: int, user_id: int = Form(...), confirm: str = Form("")):
-    """Passa un team (con i sotto-team dello stesso titolare, le persone e il loro storico) a un altro director."""
-    u = users.get(user_id)
-    if u is None or u["role"] != "director" or not u["active"]:
-        return _back("teams", err="Scegli un director attivo.")
-    if confirm != "TRASFERISCI":
-        return _back("teams", err="Per trasferire scrivi TRASFERISCI nel campo di conferma.")
-    name = db.sys.one("SELECT name FROM team WHERE id=?", (tid,))
-    try:
-        n = perimeter.transfer_team(tid, user_id)
-    except perimeter.TransferError as exc:
-        return _back("teams", err=str(exc))
-    summary = ", ".join(f"{k} {v}" for k, v in n.items() if v)
-    users.audit("team_transfer", f"{name['name'] if name else tid} → {u['username']}: {summary}")
-    return _back("teams", restored=f"trasferito a {u['username']} ({summary})")
-
-
 # ---- sistema ----
 
 @router.post("/admin/backup")

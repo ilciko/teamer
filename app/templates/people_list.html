@@ -19,6 +19,12 @@
   {% if show == 'attivi' %}<a class="btn ghost sm" href="/people?show=tutti{{ qs }}">Mostra cessati</a>
   {% else %}<a class="btn ghost sm" href="/people?{{ qs[1:] }}">Solo attivi</a>{% endif %}
 </div>
+{% if request.query_params.get('moved') %}
+<div class="flash">{{ request.query_params.get('moved') }} è passat{{ 'a' if request.query_params.get('moved', '').endswith('a') else 'o' }} a <strong>{{ request.query_params.get('to') }}</strong>, nel suo team «Da collocare»: sarà lui ad assegnarl{{ 'a' if request.query_params.get('moved', '').endswith('a') else 'o' }} a un team.</div>
+{% endif %}
+{% if request.query_params.get('err') %}
+<div class="flash error">{{ 'Scegli un director attivo.' if request.query_params.get('err') == 'director' else request.query_params.get('err') }}</div>
+{% endif %}
 
 <div class="card">
   <table class="tbl">
@@ -32,7 +38,15 @@
         </td>
         <td><a href="/people/{{ p.id }}"><strong>{{ p.full_name }}</strong></a>
           {% if p.status != 'attivo' %} <span class="badge red">cessato</span>{% endif %}</td>
-        {% if hr %}<td>{{ p.director or '—' }}</td>{% endif %}
+        {% if hr %}<td>
+          {# HR (0.40): cambio director inline, con conferma e data #}
+          {% if p.status == 'attivo' %}
+          <select class="mv-director" data-pid="{{ p.id }}" data-name="{{ p.full_name }}" data-current="{{ p.director_id or '' }}" aria-label="Director di {{ p.full_name }}" style="min-width:150px">
+            {% if not p.director_id %}<option value="" selected>—</option>{% endif %}
+            {% for o in dir_opts %}<option value="{{ o.id }}" {{ 'selected' if o.id == p.director_id }}>{{ o.name }}</option>{% endfor %}
+          </select>
+          {% else %}{{ p.director or '—' }}{% endif %}
+        </td>{% endif %}
         <td>{{ p.team_name or '—' }}</td>
         <td>{{ lookup_label('role_type', p.role_type) if p.role_type else '—' }}</td>
         <td>{{ p.hire_date | dt }}</td>
@@ -99,6 +113,38 @@
   </form>
 </div>
 {% if hr %}
+<dialog id="mv-dialog" style="border:0.5px solid var(--border);border-radius:var(--radius);padding:18px 20px;max-width:440px">
+  <form method="post" action="" class="hr-ok" id="mv-form">
+    <div class="card-title">Spostare a un altro director</div>
+    <p class="small" id="mv-text" style="margin:6px 0 10px;line-height:1.5"></p>
+    <input type="hidden" name="director_id" id="mv-director">
+    <label class="fld">Dal</label><input type="date" name="on_date" id="mv-date" required>
+    <p class="muted3 small" style="margin-top:6px">L'assegnazione corrente si chiude il giorno prima; la persona arriva nel team «Da collocare» del nuovo director con tutto lo storico. Le proposte pendenti del vecchio director si annullano, le sue note restano sue.</p>
+    <div class="actions">
+      <button class="btn">Sposta →</button>
+      <button class="btn ghost" type="button" id="mv-cancel">Annulla</button>
+    </div>
+  </form>
+</dialog>
+<script>
+// cambio director: il select apre la conferma; «Annulla» rimette il valore di prima
+(function () {
+  const dlg = document.getElementById('mv-dialog'), form = document.getElementById('mv-form');
+  let active = null;
+  document.querySelectorAll('select.mv-director').forEach(sel => sel.addEventListener('change', () => {
+    if (!sel.value || sel.value === sel.dataset.current) { sel.value = sel.dataset.current; return; }
+    active = sel;
+    form.action = '/people/' + sel.dataset.pid + '/director';
+    document.getElementById('mv-director').value = sel.value;
+    document.getElementById('mv-text').innerHTML = '<strong>' + sel.dataset.name + '</strong> passa a <strong>' + sel.options[sel.selectedIndex].text + '</strong>.';
+    document.getElementById('mv-date').value = '{{ today() }}';
+    dlg.showModal();
+  }));
+  const reset = () => { if (active) active.value = active.dataset.current; active = null; dlg.close(); };
+  document.getElementById('mv-cancel').addEventListener('click', reset);
+  dlg.addEventListener('cancel', e => { e.preventDefault(); reset(); });
+})();
+</script>
 <script>
 // il team si sceglie fra quelli del director scelto
 (function () {

@@ -9,6 +9,19 @@
   <div class="stat"><div class="v">{{ ral_media | eur }}</div><div class="k">RAL media</div></div>
 </div>
 
+{% if da_collocare %}
+<div class="card" style="border-left:3px solid var(--blue-border)">
+  <div class="card-title">Persone da collocare — {{ da_collocare | length }}</div>
+  <p class="muted small" style="margin-bottom:6px">HR le ha spostate nel tuo perimetro: dalla scheda, «Nuova assegnazione» le mette nel team giusto.</p>
+  {% for c in da_collocare %}
+  <div class="small" style="margin-bottom:4px">
+    <span class="badge blue">dal {{ c.start_date | dt }}</span>
+    <a href="/people/{{ c.id }}"><strong>{{ c.full_name }}</strong></a>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if da_decidere %}
 <div class="card" style="border-left:3px solid var(--amber-border)">
   <div class="card-title">Cessazioni da decidere — {{ da_decidere | length }}</div>

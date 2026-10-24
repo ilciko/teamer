@@ -6,6 +6,7 @@
   <div class="tree-team">
     <a class="tname" href="/org/team/{{ n.team.id }}">{{ n.team.name }}</a>
     <span class="muted small">{{ n.total }} person{{ 'a' if n.total == 1 else 'e' }}</span>
+    {% if n.team.holding %}<span class="badge amber" title="Team tecnico: persone spostate qui da HR, da assegnare a un team">da collocare</span>{% endif %}
     {% if n.team.lead_name %}<span class="badge blue">lead: {{ n.team.lead_name }}</span>
     {% set d = direct_reports.get(n.team.lead_person_id, 0) %}
     <span class="muted3 small">{{ d }} dirett{{ 'o' if d == 1 else 'i' }}</span>{% endif %}

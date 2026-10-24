@@ -55,7 +55,8 @@ assegna una provvisoria (*Amministrazione → Utenti*, o `python -m app.admin_cl
   visibile solo quante righe ha una tabella in totale, mai il loro contenuto.
 - **`teamer-admin`** (root, sul container): `init`, `create-admin`, `create-user --role`,
   `reset-password`, `unlock`, `enable`/`disable`, `list-users`, `assign-unassigned`, `list-teams`,
-  `transfer-team`, `restore`. Ogni azione finisce nell'audit come `cli`.
+  `restore`. Ogni azione finisce nell'audit come `cli`. Una persona passa a un altro director per
+  mano di HR, dalla pagina Persone (nel team «Da collocare» del destinatario).
 
 ## Produzione (LXC su Proxmox)
 

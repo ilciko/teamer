@@ -33,10 +33,11 @@ def luca(client, client2, hr_client):
     return {"log": log, "luca": _person(client, "Luca Logistica", log)}
 
 
-def _transfer(admin_client, team):
-    r = admin_client.post(f"/admin/teams/{team}/transfer",
-                          data={"user_id": users.by_username("dir2")["id"], "confirm": "TRASFERISCI"})
-    assert r.status_code == 200 and "trasferito a" in r.text
+def _transfer(hr_client, pid):
+    """HR sposta la persona a dir2 (0.40): arriva nel suo team «Da collocare»."""
+    r = hr_client.post(f"/people/{pid}/director", data={"director_id": users.by_username("dir2")["id"],
+                                                        "on_date": "2027-01-01"}, follow_redirects=False)
+    assert r.status_code == 302 and "moved=" in r.headers["location"], r.headers.get("location")
 
 
 # ---- ognuno le sue ----
@@ -119,7 +120,7 @@ def test_dopo_il_trasferimento_le_note_restano_a_chi_le_ha_scritte(client, clien
     nid = _note(client, pid, "Prima del passaggio", "da ricordare", action="verificare obiettivi")
     aid = db.sys.one("SELECT id FROM action_item WHERE meeting_note_id=?", (nid,))["id"]
     hr_nid = _note(hr_client, pid, "Nota HR", "resta a HR")
-    _transfer(admin_client, luca["log"])
+    _transfer(hr_client, luca["luca"])
     # chi cede le legge nella sezione apposita, senza link alla scheda né modifica
     html = client.get("/notes").text
     assert "Persone non più nel tuo perimetro" in html and "Prima del passaggio" in html

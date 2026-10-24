@@ -99,7 +99,7 @@
 {% elif tab == 'teams' %}
 <div class="card">
   <div class="card-title">Team e titolari</div>
-  <p class="small" style="margin-bottom:8px">Ogni team appartiene a un director, che vede solo i suoi team e le persone che ci lavorano. Trasferire un team lo passa con i sotto-team dello stesso titolare, le persone e tutto il loro storico; a chi lo cede non resta nulla di quelle persone. Budget e montepremi non si toccano: le righe delle persone si staccano dai suoi e le proposte pendenti si annullano.</p>
+  <p class="small" style="margin-bottom:8px">Ogni team appartiene a un director, che vede solo i suoi team e le persone che ci lavorano. Una persona passa a un altro director per mano di HR (pagina Persone): arriva nel suo team «Da collocare» con tutto lo storico. I team non si spostano.</p>
   <table class="tbl">
     <tr><th>Team</th><th>Titolare</th><th></th></tr>
     {% for t in teams %}
@@ -107,17 +107,6 @@
       <td style="padding-left:{{ 8 + t.depth * 18 }}px">{{ t.name }}{% if t.archived_at %} <span class="muted small">(archiviato)</span>{% endif %}</td>
       <td>{% if t.owner %}{{ t.owner }}{% else %}<span class="badge amber">da assegnare</span>{% endif %}</td>
       <td>
-        {% if t.owner and directors | length > 1 %}
-        <details><summary class="btn sm ghost">Trasferisci</summary>
-          <form method="post" action="/admin/teams/{{ t.id }}/transfer" class="frow" style="align-items:end; padding:8px 0"
-                onsubmit="return confirm('Trasferire {{ t.name }} con persone e storico?')">
-            <div><label class="fld">A</label>
-              <select name="user_id">{% for d in directors if d.username != t.owner %}<option value="{{ d.id }}">{{ d.username }}</option>{% endfor %}</select></div>
-            <div><label class="fld">Scrivi TRASFERISCI</label><input type="text" name="confirm" autocomplete="off" required></div>
-            <div><button class="btn sm">Trasferisci</button></div>
-          </form>
-        </details>
-        {% endif %}
       </td>
     </tr>
     {% else %}<tr><td colspan="3" class="muted">Nessun team.</td></tr>{% endfor %}

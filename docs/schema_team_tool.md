@@ -31,6 +31,9 @@ App web per il COO (ruolo *director*) con un site admin IT (ruolo *admin*). Pyth
 | notes | TEXT | note libere anagrafiche |
 
 ### `team` — nodi dell'organigramma (albero)
+
+`holding` (0034): 1 = team tecnico «Da collocare» del director (uno per director), dove HR mette le
+persone spostate da un altro director finché non vengono assegnate.
 | Campo | Tipo | Note |
 |---|---|---|
 | id | INTEGER PK | |

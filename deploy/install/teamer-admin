@@ -10,7 +10,6 @@
 #   teamer-admin list-users
 #   teamer-admin assign-unassigned NOME  assegna al director NOME i dati senza proprietario
 #   teamer-admin list-teams              albero dei team con il titolare
-#   teamer-admin transfer-team TEAM --to NOME
 #   teamer-admin restore FILE [--source-key | --password]
 #                                      sostituisce i dati con quelli del file (backup, altra istanza,
 #                                      DB della 0.29); utenti e audit restano. Ferma e riavvia il servizio.

@@ -253,8 +253,15 @@ def dashboard(request: Request):
              AND NOT EXISTS (SELECT 1 FROM replacement_decision d WHERE d.person_id=p.id AND d.voided=0)
            ORDER BY p.end_date DESC""", ((date.today() - timedelta(days=365)).isoformat(),))
 
+    # persone arrivate da un altro director (HR, 0.40): stanno nel team «Da collocare» finché non le assegno
+    da_collocare = db.query(
+        """SELECT p.id, p.full_name, pa.start_date FROM person p
+           JOIN person_assignment pa ON pa.person_id = p.id AND pa.voided = 0 AND pa.end_date IS NULL
+           JOIN team t ON t.id = pa.team_id
+           WHERE p.status = 'attivo' AND t.holding = 1 ORDER BY pa.start_date DESC""")
+
     return _templates().TemplateResponse(request, "dashboard.html", {
-        "da_decidere": da_decidere,
+        "da_decidere": da_decidere, "da_collocare": da_collocare,
         "headcount": headcount, "ral_tot": ral["tot"], "ral_media": ral["media"],
         "expiring_contracts": expiring_contracts,
         "overdue_actions": overdue_actions, "upcoming_actions": upcoming_actions,

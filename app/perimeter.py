@@ -500,42 +500,87 @@ def team_tree() -> list[dict]:
     return out
 
 
-def transfer_team(team_id: int, to_uid: int) -> dict:
-    """Passa il team (e i sotto-team dello stesso titolare) a un altro director, con le persone e
-    tutto il loro storico. A chi cede non resta nulla di quelle persone (salvo le sue note e azioni,
-    che restano sue in sola lettura): le righe nei suoi cicli
-    passano a un ciclo del nuovo director con lo stesso nome e anno; quelle nei suoi budget e
-    montepremi si staccano (le proposte pendenti si annullano); le sue posizioni aperte in quei
-    team si annullano; le sue simulazioni li dimenticano. Nessuna quota o tetto si sposta."""
-    n = {"team": 0, "persone": 0, "righe nei cicli": 0, "righe staccate": 0, "annullate": 0}
+HOLDING_TEAM = "Da collocare"
+
+
+def ensure_holding_team(c, uid: int) -> int:
+    """Il team tecnico «Da collocare» del director `uid` (uno per director, creato al volo, riaperto
+    se archiviato): ci arrivano le persone spostate da HR, finché il director non le assegna."""
+    row = c.execute("SELECT id, archived_at FROM team WHERE owner_user_id=? AND holding=1 ORDER BY id LIMIT 1",
+                    (uid,)).fetchone()
+    if row is None:
+        return c.execute("INSERT INTO team (name, holding, sort_order, owner_user_id) VALUES (?, 1, 999, ?)",
+                         (HOLDING_TEAM, uid)).lastrowid
+    if row["archived_at"]:
+        c.execute("UPDATE team SET archived_at=NULL WHERE id=?", (row["id"],))
+    return row["id"]
+
+
+def director_of(c, pid: int):
+    """Il director titolare della persona: quello del team dell'ultima assegnazione valida, altrimenti
+    chi l'ha creata (`person.owner_user_id`)."""
+    row = c.execute(
+        """SELECT COALESCE((SELECT t.owner_user_id FROM person_assignment pa JOIN team t ON t.id = pa.team_id
+                             WHERE pa.person_id = p.id AND pa.voided = 0
+                             ORDER BY pa.start_date DESC, pa.id DESC LIMIT 1), p.owner_user_id) AS uid
+           FROM person p WHERE p.id = ?""", (pid,)).fetchone()
+    return row["uid"] if row else None
+
+
+def transfer_person(pid: int, to_uid: int, on_date: str) -> dict:
+    """HR sposta una persona a un altro director (0.40): l'assegnazione corrente si chiude il giorno
+    prima e ne nasce una nuova, storicizzata, nel team «Da collocare» del destinatario (stesso ruolo,
+    senza riporto: lo calcola il director quando la colloca). Tutto lo storico segue la persona. A chi
+    cede non resta nulla di lei, salvo le sue note e azioni (classe `authored`, in sola lettura):
+    le righe nei suoi cicli passano a un ciclo del nuovo director con lo stesso nome e anno; quelle
+    nei suoi budget e montepremi si staccano (le proposte pendenti si annullano); le sue simulazioni
+    la dimenticano; se era responsabile di un suo team, il team resta senza responsabile. Nessuna
+    quota o tetto si sposta. I team non si muovono mai."""
+    n = {"righe nei cicli": 0, "righe staccate": 0, "annullate": 0}
     with db.sys.transaction() as c:
-        root = c.execute("SELECT owner_user_id FROM team WHERE id=?", (team_id,)).fetchone()
-        if root is None:
-            raise TransferError("Team inesistente.")
-        src = root["owner_user_id"]
-        if src is None:
-            raise TransferError("Il team non è di nessuno: usa «Dati da assegnare».")
+        p = c.execute("SELECT id, status, full_name FROM person WHERE id=?", (pid,)).fetchone()
+        if p is None:
+            raise TransferError("Persona inesistente.")
+        if p["status"] != "attivo":
+            raise TransferError("La persona è cessata: non si sposta.")
+        src = director_of(c, pid)
         if src == to_uid:
-            raise TransferError("Il team è già di quel director.")
-        teams = [r[0] for r in c.execute(
-            "WITH RECURSIVE sub(id) AS (SELECT ? UNION SELECT t.id FROM team t JOIN sub ON t.parent_team_id = sub.id "
-            "WHERE t.owner_user_id = ?) SELECT id FROM sub", (team_id, src))]
-        tq = ",".join(str(int(t)) for t in teams)
-        people = [r[0] for r in c.execute(
-            f"""SELECT p.id FROM person p
-                 WHERE (SELECT pa.team_id FROM person_assignment pa WHERE pa.person_id = p.id AND pa.voided = 0
-                         ORDER BY pa.start_date DESC, pa.id DESC LIMIT 1) IN ({tq})""")]
-        pq = ",".join(str(int(p)) for p in people) or "NULL"
-        n["team"] = c.execute(f"UPDATE team SET owner_user_id=? WHERE id IN ({tq})", (to_uid,)).rowcount
-        c.execute(f"UPDATE person SET owner_user_id=? WHERE id IN ({pq})", (to_uid,))
-        n["persone"] = len(people)
+            raise TransferError("La persona è già di quel director.")
+        cur = c.execute(
+            "SELECT * FROM person_assignment WHERE person_id=? AND voided=0 AND end_date IS NULL "
+            "ORDER BY start_date DESC, id DESC LIMIT 1", (pid,)).fetchone()
+        if cur and str(cur["start_date"]) >= on_date:
+            raise TransferError("La data deve essere successiva all'inizio dell'assegnazione corrente.")
+        from datetime import date, timedelta
+
+        prev_end = (date.fromisoformat(on_date) - timedelta(days=1)).isoformat()
+        c.execute("UPDATE person_assignment SET end_date=? WHERE person_id=? AND voided=0 AND end_date IS NULL",
+                  (prev_end, pid))
+        holding = ensure_holding_team(c, to_uid)
+        # il codice listino sulla voce omonima del nuovo director (creata se manca)
+        lp = None
+        if cur and cur["listino_profile_id"]:
+            old = c.execute("SELECT code FROM listino_profile WHERE id=?", (cur["listino_profile_id"],)).fetchone()
+            if old:
+                mine = c.execute("SELECT id FROM listino_profile WHERE owner_user_id=? AND code=?",
+                                 (to_uid, old["code"])).fetchone()
+                lp = mine["id"] if mine else c.execute(
+                    "INSERT INTO listino_profile (code, description, active, sort_order, day_rate, owner_user_id) "
+                    "SELECT code, description, active, sort_order, day_rate, ? FROM listino_profile WHERE id=?",
+                    (to_uid, cur["listino_profile_id"])).lastrowid
+        c.execute("INSERT INTO person_assignment (person_id, team_id, role_type, start_date, listino_profile_id) "
+                  "VALUES (?,?,?,?,?)", (pid, holding, cur["role_type"] if cur else "ic", on_date, lp))
+        c.execute("UPDATE person SET owner_user_id=? WHERE id=?", (to_uid, pid))
+        if src is None:
+            bump()
+            return n
 
         # cicli di review: le righe passano a un ciclo del nuovo director con lo stesso nome e anno
         cycles = c.execute(
-            f"""SELECT DISTINCT rc.id, rc.name, rc.year, rc.status, rc.note FROM review_cycle rc
+            """SELECT DISTINCT rc.id, rc.name, rc.year, rc.status, rc.note FROM review_cycle rc
                  WHERE rc.owner_user_id = ? AND rc.id IN (
-                     SELECT cycle_id FROM goal WHERE person_id IN ({pq})
-                     UNION SELECT cycle_id FROM performance_review WHERE person_id IN ({pq}))""", (src,)).fetchall()
+                     SELECT cycle_id FROM goal WHERE person_id = ?
+                     UNION SELECT cycle_id FROM performance_review WHERE person_id = ?)""", (src, pid, pid)).fetchall()
         for cyc in cycles:
             twin = c.execute("SELECT id FROM review_cycle WHERE owner_user_id=? AND name=? AND year=?",
                              (to_uid, cyc["name"], cyc["year"])).fetchone()
@@ -544,46 +589,24 @@ def transfer_team(team_id: int, to_uid: int) -> dict:
                 (cyc["name"], cyc["year"], cyc["status"], cyc["note"], to_uid)).lastrowid
             for t in ("goal", "performance_review"):
                 n["righe nei cicli"] += c.execute(
-                    f"UPDATE {t} SET cycle_id=? WHERE cycle_id=? AND person_id IN ({pq})", (target, cyc["id"])).rowcount
+                    f"UPDATE {t} SET cycle_id=? WHERE cycle_id=? AND person_id=?", (target, cyc["id"], pid)).rowcount
 
-        # budget e montepremi: le righe si staccano, i fatti restano alla persona
+        # budget e montepremi di chi cede: le righe si staccano, i fatti restano alla persona
         budgets = f"SELECT id FROM ral_budget WHERE owner_user_id = {int(src)}"
         n["annullate"] += c.execute(
-            f"UPDATE ral_proposal SET voided=1, void_reason='persona trasferita' WHERE person_id IN ({pq}) "
-            f"AND budget_id IN ({budgets}) AND voided=0 AND status IN ('bozza','proposta','approvata')").rowcount
+            f"UPDATE ral_proposal SET voided=1, void_reason='persona spostata' WHERE person_id=? "
+            f"AND budget_id IN ({budgets}) AND voided=0 AND status IN ('bozza','proposta','approvata')", (pid,)).rowcount
         for t in ("ral_proposal", "ral_event"):
             n["righe staccate"] += c.execute(
-                f"UPDATE {t} SET budget_id=NULL WHERE person_id IN ({pq}) AND budget_id IN ({budgets})").rowcount
+                f"UPDATE {t} SET budget_id=NULL WHERE person_id=? AND budget_id IN ({budgets})", (pid,)).rowcount
         n["righe staccate"] += c.execute(
-            f"DELETE FROM ral_budget_member WHERE person_id IN ({pq}) AND budget_id IN ({budgets})").rowcount
+            f"DELETE FROM ral_budget_member WHERE person_id=? AND budget_id IN ({budgets})", (pid,)).rowcount
         n["righe staccate"] += c.execute(
-            f"UPDATE bonus_allocation SET pool_id=NULL WHERE person_id IN ({pq}) "
-            f"AND pool_id IN (SELECT id FROM bonus_pool WHERE owner_user_id = {int(src)})").rowcount
-        positions = f"SELECT id FROM hiring_position WHERE owner_user_id = {int(src)} AND team_id IN ({tq})"
-        n["annullate"] += c.execute(
-            f"UPDATE hiring_position SET voided=1, void_reason='team trasferito' WHERE id IN ({positions}) "
-            f"AND voided=0 AND status IN ('pianificata','in_selezione')").rowcount
-
-        # simulazioni di chi cede: dimenticano persone e team trasferiti
-        c.execute(f"DELETE FROM reorg_move WHERE owner_user_id=? AND person_id IN ({pq})", (src,))
-        c.execute(f"DELETE FROM reorg_team WHERE owner_user_id=? AND team_id IN ({tq})", (src,))
-        c.execute(f"DELETE FROM reorg_position_move WHERE owner_user_id=? AND (team_ref IN ({tq}) "
-                  f"OR position_id IN ({positions}))", (src,))
-        c.execute(f"DELETE FROM reorg_position WHERE owner_user_id=? AND team_ref IN ({tq})", (src,))
-
-        # codici listino delle persone sulle voci omonime del nuovo director (liste e benefit sono aziendali)
-        for table, key, ref_table, ref_col, copy_cols in (
-                ("listino_profile", "code", "person_assignment", "listino_profile_id",
-                 "code, description, active, sort_order, day_rate"),):
-            used = c.execute(
-                f"SELECT DISTINCT x.id, x.{key} FROM {table} x JOIN {ref_table} r ON r.{ref_col} = x.id "
-                f"WHERE r.person_id IN ({pq}) AND x.owner_user_id = ?", (src,)).fetchall()
-            for old_id, k in used:
-                mine = c.execute(f"SELECT id FROM {table} WHERE owner_user_id=? AND {key}=?", (to_uid, k)).fetchone()
-                target = mine["id"] if mine else c.execute(
-                    f"INSERT INTO {table} ({copy_cols}, owner_user_id) SELECT {copy_cols}, ? FROM {table} WHERE id=?",
-                    (to_uid, old_id)).lastrowid
-                c.execute(f"UPDATE {ref_table} SET {ref_col}=? WHERE {ref_col}=? AND person_id IN ({pq})",
-                          (target, old_id))
+            f"UPDATE bonus_allocation SET pool_id=NULL WHERE person_id=? "
+            f"AND pool_id IN (SELECT id FROM bonus_pool WHERE owner_user_id = {int(src)})", (pid,)).rowcount
+        # simulazioni e team di chi cede la dimenticano
+        c.execute("DELETE FROM reorg_move WHERE owner_user_id=? AND person_id=?", (src, pid))
+        c.execute("UPDATE reorg_team SET lead_person_id=NULL WHERE owner_user_id=? AND lead_person_id=?", (src, pid))
+        c.execute("UPDATE team SET lead_person_id=NULL WHERE owner_user_id=? AND lead_person_id=?", (src, pid))
     bump()
     return n

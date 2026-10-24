@@ -1,7 +1,7 @@
 """Organigramma: persone, team, assegnazioni, situazione contrattuale."""
 import base64
 from datetime import date, timedelta
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
@@ -365,6 +365,25 @@ def person_cessation(pid: int, end_date: str = Form(...)):
     return RedirectResponse(f"/people/{pid}/replacement", status_code=302)
 
 
+@router.post("/people/{pid}/director")
+def person_transfer(pid: int, director_id: str = Form(""), on_date: str = Form(None)):
+    """HR (0.40) sposta la persona a un altro director: arriva nel suo team «Da collocare»."""
+    if not hrview.is_hr():
+        raise HTTPException(403)
+    u = users.get(int(director_id)) if director_id.isdigit() else None
+    if u is None or u["role"] != "director" or not u["active"]:
+        return RedirectResponse("/people?err=director", status_code=302)
+    try:
+        n = perimeter.transfer_person(pid, u["id"], on_date or date.today().isoformat())
+    except (perimeter.TransferError, ValueError) as exc:
+        return RedirectResponse(f"/people?err={quote(str(exc))}", status_code=302)
+    name = db.one("SELECT full_name FROM person WHERE id=?", (pid,))
+    summary = ", ".join(f"{k} {v}" for k, v in n.items() if v)
+    users.audit("person_transfer", f"{name['full_name'] if name else pid} → {u['username']}: {summary or 'nessun dato staccato'}")
+    return RedirectResponse(f"/people?moved={quote(name['full_name'] if name else str(pid))}&to={quote(u['display_name'] or u['username'])}",
+                            status_code=302)
+
+
 @router.post("/people/{pid}/replacement/none")
 def replacement_none(pid: int, note: str = Form(None)):
     """Il director decide di non sostituire chi è cessato: decisione registrata (append-only)."""
@@ -694,7 +713,9 @@ def org_chart(request: Request, team_id: list[str] = Query([]), pos: str = "1"):
     """
     show_pos = pos != "0"
     teams = [dict(t) for t in db.query(
-        "SELECT id, name, parent_team_id, lead_person_id, sort_order FROM team WHERE archived_at IS NULL")]
+        """SELECT id, name, parent_team_id, lead_person_id, sort_order FROM team WHERE archived_at IS NULL
+           AND (holding = 0 OR EXISTS (SELECT 1 FROM person_assignment pa JOIN person p ON p.id = pa.person_id
+                WHERE pa.team_id = team.id AND pa.voided = 0 AND pa.end_date IS NULL AND p.status = 'attivo'))""")]
     people = db.query(
         """SELECT p.id, p.full_name, pa.role_type, pa.team_id, pa.manager_person_id
            FROM person p

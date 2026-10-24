@@ -1,4 +1,5 @@
-"""Perimetri, parte 0.33: ogni director vede solo i suoi team e le loro persone; trasferimenti."""
+"""Perimetri, parte 0.33: ogni director vede solo i suoi team e le loro persone; spostamento di una
+persona a un altro director (0.40, fatto da HR: `perimeter.transfer_person`)."""
 import pytest
 
 from app import db, perimeter, users
@@ -71,10 +72,10 @@ def _visible(username, pids):
                 for t in PERSON_TABLES}
 
 
-def _transfer(admin_client, team, to="dir2"):
-    r = admin_client.post(f"/admin/teams/{team}/transfer",
-                          data={"user_id": users.by_username(to)["id"], "confirm": "TRASFERISCI"})
-    assert r.status_code == 200 and "trasferito a" in r.text, r.text[-500:]
+def _transfer(hr_client, pid, to="dir2", on_date="2026-06-01"):
+    r = hr_client.post(f"/people/{pid}/director", data={"director_id": users.by_username(to)["id"], "on_date": on_date},
+                       follow_redirects=False)
+    assert r.status_code == 302 and "moved=" in r.headers["location"], r.headers.get("location")
 
 
 # ---- un director vede solo i suoi ----
@@ -116,24 +117,28 @@ def test_persona_senza_team_resta_di_chi_la_crea(client, client2):
 
 # ---- trasferimento ----
 
-def test_trasferimento_passa_persone_e_storico(org, client, client2, admin_client):
-    _transfer(admin_client, org["log"])
-    moved = [org["lea"], org["luca"], org["mario"]]
-    # a chi cede non resta niente delle persone trasferite, in nessuna tabella
-    assert all(n == 0 for n in _visible("coo", moved).values()), _visible("coo", moved)
+def test_spostamento_passa_la_persona_e_lo_storico(org, client, client2, hr_client):
+    _transfer(hr_client, org["luca"])
+    # a chi cede non resta niente di Luca, in nessuna tabella; i team restano suoi
+    assert all(n == 0 for n in _visible("coo", [org["luca"]]).values()), _visible("coo", [org["luca"]])
     with as_user("coo"):
-        assert not db.query("SELECT 1 FROM team WHERE id IN (?,?)", (org["log"], org["mag"]))
+        assert db.one("SELECT 1 FROM team WHERE id=?", (org["log"],))
         assert not db.query("SELECT 1 FROM reorg_move WHERE person_id=?", (org["luca"],))
-        assert db.one("SELECT 1 FROM team WHERE id=?", (org["ven"],))           # Vendite resta sua
     html = client.get("/org").text
-    assert "Logistica" not in html and "Magazzino" not in html and "Vendite" in html
-    # chi riceve vede tutto
+    assert "Logistica" in html and "Luca" not in html and "Lea Logistica" in client.get("/people").text
+    # chi riceve vede tutto, nel team «Da collocare»
     seen = _visible("dir2", [org["luca"]])
     for t in ("person", "person_assignment", "ral_event", "goal", "performance_review",
               "ninebox_assessment", "benefit_assignment", "bonus_allocation"):
         assert seen[t] >= 1, t
     html = client2.get(f"/people/{org['luca']}").text
-    assert "Luca Logistica" in html and "Review 2026" in html
+    assert "Luca Logistica" in html and "Review 2026" in html and "Da collocare" in html
+    cur = db.sys.one("SELECT pa.*, t.name, t.holding FROM person_assignment pa JOIN team t ON t.id=pa.team_id "
+                     "WHERE pa.person_id=? AND pa.end_date IS NULL", (org["luca"],))
+    assert cur["holding"] == 1 and str(cur["start_date"]) == "2026-06-01" and cur["role_type"] == "ic" \
+        and cur["manager_person_id"] is None
+    old = db.sys.one("SELECT end_date FROM person_assignment WHERE person_id=? AND team_id=?", (org["luca"], org["log"]))
+    assert str(old["end_date"]) == "2026-05-31"                                 # storicizzata, non riscritta
     # la nota resta a chi l'ha scritta (in sola lettura), non passa a chi riceve
     assert "Colloquio Luca" not in client2.get("/notes?q=magazzino").text
     assert "Colloquio Luca" in client.get("/notes?q=magazzino").text
@@ -141,65 +146,61 @@ def test_trasferimento_passa_persone_e_storico(org, client, client2, admin_clien
         cyc = db.one("SELECT c.name, c.owner_user_id FROM goal g JOIN review_cycle c ON c.id=g.cycle_id "
                      "WHERE g.person_id=?", (org["luca"],))
         assert cyc["name"] == "Review 2026" and cyc["owner_user_id"] == users.by_username("dir2")["id"]
-        bt = db.one("SELECT bt.name FROM benefit_assignment ba JOIN benefit_type bt ON bt.id=ba.benefit_type_id "
-                    "WHERE ba.person_id=?", (org["luca"],))
-        assert bt["name"] == "Auto aziendale"                                    # catalogo ricollegato
         lp = db.one("SELECT lp.code FROM person_assignment pa JOIN listino_profile lp ON lp.id=pa.listino_profile_id "
                     "WHERE pa.person_id=? AND pa.end_date IS NULL", (org["luca"],))
-        assert lp["code"] == "GE040"
+        assert lp["code"] == "GE040"                                             # voce omonima di dir2
     # contenitori economici di chi cede: righe staccate, pendenti annullate, nessuna quota spostata
     prop = db.sys.one("SELECT * FROM ral_proposal WHERE person_id=?", (org["luca"],))
     assert prop["voided"] == 1 and prop["budget_id"] is None
     assert db.sys.one("SELECT pool_id FROM bonus_allocation WHERE person_id=?", (org["luca"],))["pool_id"] is None
     assert db.sys.one("SELECT total_cap FROM ral_budget WHERE id=?", (org["budget"],))["total_cap"] == 10000
-    pos = db.sys.one("SELECT voided, void_reason FROM hiring_position WHERE id=?", (org["pos"],))
-    assert pos["voided"] == 1 and pos["void_reason"] == "team trasferito"
-    assert db.sys.one("SELECT 1 FROM audit_event WHERE event='team_transfer'")
+    assert db.sys.one("SELECT voided FROM hiring_position WHERE id=?", (org["pos"],))["voided"] == 0   # il team resta
+    assert db.sys.one("SELECT 1 FROM audit_event WHERE event='person_transfer'")
 
 
-def test_dopo_il_trasferimento_niente_riferimenti_esterni(org, client2, admin_client):
-    _transfer(admin_client, org["log"])
-    # Logistica per dir2 è una radice: il padre (Direzione, di coo) non compare e non si perde salvando
-    html = client2.get("/org").text
-    assert "Direzione" not in html and "Logistica" in html
-    client2.post(f"/org/team/{org['log']}", data={"name": "Logistica Nord", "parent_team_id": "", "lead_person_id": ""})
-    t = db.sys.one("SELECT name, parent_team_id FROM team WHERE id=?", (org["log"],))
-    assert t["name"] == "Logistica Nord" and t["parent_team_id"] == org["d"]
-    # il riporto di Lea (manager) verso Rita (director di coo) resta, non è un'anomalia, non si vede
-    rita = db.sys.one("SELECT manager_person_id FROM person_assignment WHERE person_id=? AND end_date IS NULL",
-                      (org["lea"],))["manager_person_id"]
-    assert rita == org["rita"]
-    chart = client2.get("/org/chart").text
-    assert "Rita" not in chart and "non attivo" not in chart
-    assert "Rita" not in client2.get(f"/people/{org['lea']}").text
-    r = client2.get("/org/riporti")
-    assert "Lea Logistica" not in r.text
-    # una nuova assegnazione di Lea nel perimetro di dir2 non azzera il riporto che sta sopra
-    client2.post(f"/people/{org['lea']}/assignment", data={"team_id": org["mag"], "role_type": "mgr",
-                                                           "start_date": "2026-03-01"})
-    assert db.sys.one("SELECT manager_person_id FROM person_assignment WHERE person_id=? AND end_date IS NULL",
-                      (org["lea"],))["manager_person_id"] is not None
+def test_da_collocare_avviso_grafico_e_collocazione(org, client, client2, hr_client):
+    _transfer(hr_client, org["lea"])   # responsabile di Logistica
+    # il team resta senza responsabile; Luca e Mario riportavano a Lea: il director lo vede in verifica
+    assert db.sys.one("SELECT lead_person_id FROM team WHERE id=?", (org["log"],))["lead_person_id"] is None
+    assert "Lea Logistica" not in client.get("/org/chart").text
+    # dir2: avviso in dashboard, team «Da collocare» nell'organigramma e nel grafico (ha una persona)
+    html = client2.get("/").text
+    assert "Persone da collocare" in html and "Lea Logistica" in html
+    assert "da collocare" in client2.get("/org").text and "Lea Logistica" in client2.get("/org/chart").text
+    assert "Lea Logistica" not in client.get("/org/riporti").text
+    # dir2 la colloca in un suo team: la dashboard si pulisce e il team tecnico vuoto sparisce dal grafico
+    client2.post("/org/team", data={"name": "Beta", "parent_team_id": "", "lead_person_id": ""})
+    beta = db.sys.one("SELECT id FROM team WHERE name='Beta'")["id"]
+    client2.post(f"/people/{org['lea']}/assignment", data={"team_id": beta, "role_type": "mgr", "start_date": "2026-07-01"})
+    assert "Persone da collocare" not in client2.get("/").text
+    assert "Da collocare" not in client2.get("/org/chart").text and "Da collocare" in client2.get("/org").text
+    # un secondo spostamento riusa lo stesso team tecnico
+    _transfer(hr_client, org["mario"])
+    assert db.sys.one("SELECT COUNT(*) AS n FROM team WHERE holding=1")["n"] == 1
 
 
-def test_eliminare_una_persona_ancora_indicata_altrove(org, client, admin_client):
-    _transfer(admin_client, org["log"])
+def test_eliminare_una_persona_ancora_indicata_altrove(org, client, hr_client):
+    _transfer(hr_client, org["lea"])   # il riporto di Lea verso Rita resta scritto nella sua storia
     r = client.post(f"/people/{org['rita']}/delete", data={"confirm_name": "Rita Direzione"}, follow_redirects=False)
     assert "err=linked" in r.headers["location"]
     assert db.sys.one("SELECT 1 FROM person WHERE id=?", (org["rita"],))
 
 
-def test_trasferimento_rifiutato(org, admin_client):
-    r = admin_client.post(f"/admin/teams/{org['log']}/transfer",
-                          data={"user_id": users.by_username("coo")["id"], "confirm": "TRASFERISCI"})
-    assert "già di quel director" in r.text
-    r = admin_client.post(f"/admin/teams/{org['log']}/transfer",
-                          data={"user_id": users.by_username("dir2")["id"], "confirm": "no"})
-    assert "TRASFERISCI" in r.text
+def test_spostamento_rifiutato(org, client, hr_client, admin_client):
+    coo = users.by_username("coo")["id"]
+    r = hr_client.post(f"/people/{org['luca']}/director", data={"director_id": coo, "on_date": "2026-06-01"}, follow_redirects=False)
+    assert "gi%C3%A0%20di%20quel%20director" in r.headers["location"]
+    r = hr_client.post(f"/people/{org['luca']}/director", data={"director_id": users.by_username("dir2")["id"],
+                                                                "on_date": "2023-01-01"}, follow_redirects=False)
+    assert "successiva" in r.headers["location"]
+    assert client.post(f"/people/{org['luca']}/director", data={"director_id": "1"}).status_code == 403   # non il director
+    assert admin_client.post(f"/people/{org['luca']}/director", data={"director_id": "1"}).status_code == 403
     html = admin_client.get("/admin?tab=teams").text
-    assert "Logistica" in html and "Luca" not in html                          # nomi dei team, mai persone
+    assert "Logistica" in html and "Luca" not in html and "Trasferisci" not in html   # via il trasferimento di team
+    assert db.sys.one("SELECT COUNT(*) AS n FROM team WHERE holding=1")["n"] == 0
 
 
-def test_cli_trasferisce(org, capsys):
+def test_cli_senza_trasferimento(org, capsys):
     from app import admin_cli, session
 
     session.reset()
@@ -207,11 +208,9 @@ def test_cli_trasferisce(org, capsys):
     assert admin_cli.main(["list-teams"]) == 0
     out = capsys.readouterr().out
     assert "Logistica" in out and "coo" in out
-    assert admin_cli.main(["transfer-team", "logistica", "--to", "dir2"]) == 0
-    assert "trasferito a dir2" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        admin_cli.main(["transfer-team", "logistica", "--to", "dir2"])
     db.startup()
-    assert db.sys.one("SELECT owner_user_id FROM team WHERE id=?", (org["mag"],))["owner_user_id"] == \
-        users.by_username("dir2")["id"]
 
 
 PAGES = ["/", "/people", "/org", "/org/chart", "/org/riporti", "/comp/hiring", "/comp/salary", "/comp/plan",
@@ -219,17 +218,21 @@ PAGES = ["/", "/people", "/org", "/org/chart", "/org/riporti", "/comp/hiring", "
          "/reports", "/org/sim", "/settings", "/account"]
 
 
-def test_tutte_le_pagine_si_aprono_per_entrambi_dopo_un_trasferimento(org, client, client2, admin_client):
-    _transfer(admin_client, org["log"])
+def test_tutte_le_pagine_si_aprono_per_entrambi_dopo_uno_spostamento(org, client, client2, hr_client):
+    for pid in (org["lea"], org["luca"], org["mario"]):
+        _transfer(hr_client, pid)
     for c, name in ((client, "coo"), (client2, "dir2")):
         for url in PAGES:
             assert c.get(url).status_code == 200, (name, url)
     for pid in (org["lea"], org["luca"], org["mario"]):
         assert client2.get(f"/people/{pid}").status_code == 200
     assert client.get(f"/people/{org['vera']}").status_code == 200
-    for t in (org["log"], org["mag"]):
-        assert client2.get(f"/org/team/{t}").status_code == 200
-    assert client.get(f"/org/team/{org['ven']}").status_code == 200
+    for t in (org["log"], org["mag"], org["ven"]):
+        assert client.get(f"/org/team/{t}").status_code == 200
+    hold = db.sys.one("SELECT id FROM team WHERE holding=1")["id"]
+    assert client2.get(f"/org/team/{hold}").status_code == 200
+    for url in ("/people", "/org", "/comp/salary", "/ninebox"):
+        assert hr_client.get(url).status_code == 200
 
 
 # ---- authorizer (0.34): niente scorciatoie verso le tabelle vere ----
