@@ -409,20 +409,21 @@ def person_cessation(pid: int, end_date: str = Form(...)):
 
 
 @router.post("/people/{pid}/director")
-def person_transfer(pid: int, director_id: str = Form(""), on_date: str = Form(None)):
-    """HR (0.40) sposta la persona a un altro director: arriva nel suo team «Da collocare»."""
+def person_transfer(pid: int, director_id: str = Form(""), on_date: str = Form(None), correct: str = Form(None)):
+    """HR (0.40) sposta la persona a un altro director: arriva nel suo team «Da collocare».
+    `correct` (0.47.2): corregge uno spostamento sbagliato invece di aggiungerne un altro."""
     if not hrview.is_hr():
         raise HTTPException(403)
     u = users.get(int(director_id)) if director_id.isdigit() else None
     if u is None or u["role"] != "director" or not u["active"]:
         return RedirectResponse("/people?err=director", status_code=302)
     try:
-        n = perimeter.transfer_person(pid, u["id"], on_date or date.today().isoformat())
+        n = perimeter.transfer_person(pid, u["id"], on_date or date.today().isoformat(), correct=bool(correct))
     except (perimeter.TransferError, ValueError) as exc:
         return RedirectResponse(f"/people?err={quote(str(exc))}", status_code=302)
     name = db.one("SELECT full_name FROM person WHERE id=?", (pid,))
     summary = ", ".join(f"{k} {v}" for k, v in n.items() if v)
-    users.audit("person_transfer", f"{name['full_name'] if name else pid} → {u['username']}: {summary or 'nessun dato staccato'}")
+    users.audit("person_transfer", f"{name['full_name'] if name else pid} → {u['username']}{' (correzione)' if correct else ''}: {summary or 'nessun dato staccato'}")
     return RedirectResponse(f"/people?moved={quote(name['full_name'] if name else str(pid))}&to={quote(u['display_name'] or u['username'])}",
                             status_code=302)
 

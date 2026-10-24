@@ -538,7 +538,7 @@ def director_of(c, pid: int):
     return row["uid"] if row else None
 
 
-def transfer_person(pid: int, to_uid: int, on_date: str) -> dict:
+def transfer_person(pid: int, to_uid: int, on_date: str, correct: bool = False) -> dict:
     """HR sposta una persona a un altro director (0.40): l'assegnazione corrente si chiude il giorno
     prima e ne nasce una nuova, storicizzata, nel team «Da collocare» del destinatario (stesso ruolo,
     senza riporto: lo calcola il director quando la colloca). Tutto lo storico segue la persona. A chi
@@ -546,7 +546,12 @@ def transfer_person(pid: int, to_uid: int, on_date: str) -> dict:
     le righe nei suoi cicli passano a un ciclo del nuovo director con lo stesso nome e anno; quelle
     nei suoi budget e montepremi si staccano (le proposte pendenti si annullano); le sue simulazioni
     la dimenticano; se era responsabile di un suo team, il team resta senza responsabile. Nessuna
-    quota o tetto si sposta. I team non si muovono mai."""
+    quota o tetto si sposta. I team non si muovono mai.
+
+    `correct` (0.47.2) è la correzione di uno spostamento sbagliato: l'assegnazione nata da quello
+    spostamento (nel team «Da collocare») si annulla, quella chiusa prima torna aperta e il controllo
+    sulla data salta. Se il director scelto è quello di prima, finisce lì: la persona torna nel suo
+    team com'era (le proposte annullate dallo spostamento restano annullate, sono append-only)."""
     n = {"righe nei cicli": 0, "righe staccate": 0, "annullate": 0}
     with db.sys.transaction() as c:
         p = c.execute("SELECT id, status, full_name FROM person WHERE id=?", (pid,)).fetchone()
@@ -558,10 +563,28 @@ def transfer_person(pid: int, to_uid: int, on_date: str) -> dict:
         if src == to_uid:
             raise TransferError("La persona è già di quel director.")
         cur = c.execute(
-            "SELECT * FROM person_assignment WHERE person_id=? AND voided=0 AND end_date IS NULL "
-            "ORDER BY start_date DESC, id DESC LIMIT 1", (pid,)).fetchone()
+            "SELECT pa.*, t.holding FROM person_assignment pa JOIN team t ON t.id = pa.team_id "
+            "WHERE pa.person_id=? AND pa.voided=0 AND pa.end_date IS NULL "
+            "ORDER BY pa.start_date DESC, pa.id DESC LIMIT 1", (pid,)).fetchone()
+        if correct:
+            if not cur or not cur["holding"]:
+                raise TransferError("Si corregge solo uno spostamento: la persona non è in un team «Da collocare».")
+            prev = c.execute(
+                "SELECT * FROM person_assignment WHERE person_id=? AND voided=0 AND id != ? "
+                "AND end_date = date(?, '-1 day') ORDER BY id DESC LIMIT 1", (pid, cur["id"], str(cur["start_date"])[:10])).fetchone()
+            c.execute("UPDATE person_assignment SET voided=1, void_reason='spostamento corretto' WHERE id=?", (cur["id"],))
+            if prev:
+                c.execute("UPDATE person_assignment SET end_date=NULL WHERE id=?", (prev["id"],))
+                prev_uid = c.execute("SELECT owner_user_id FROM team WHERE id=?", (prev["team_id"],)).fetchone()[0]
+                if prev_uid == to_uid:   # torna da dove era venuta: com'era, senza passare da «Da collocare»
+                    c.execute("UPDATE person SET owner_user_id=? WHERE id=?", (to_uid, pid))
+                    bump()
+                    return n
+            cur = c.execute("SELECT * FROM person_assignment WHERE id=?", (prev["id"],)).fetchone() if prev else None
+            src = director_of(c, pid)
         if cur and str(cur["start_date"]) >= on_date:
-            raise TransferError("La data deve essere successiva all'inizio dell'assegnazione corrente.")
+            raise TransferError("La data deve essere successiva all'inizio dell'assegnazione precedente." if correct else
+                                "La data deve essere successiva all'inizio dell'assegnazione corrente: per rifare uno spostamento sbagliato usa «Correggi».")
         from datetime import date, timedelta
 
         prev_end = (date.fromisoformat(on_date) - timedelta(days=1)).isoformat()
