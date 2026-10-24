@@ -186,13 +186,43 @@ def _cross_origin(request: Request) -> bool:
     return host not in allowed
 
 
+# 0.47.7. Script e handler inline restano ammessi (i template ne sono pieni), ma niente risorse
+# fuori dall'app: nessuno script o invio di dati verso altri host, nessuna pagina altrui in cornice.
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; "
+       "base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+SECURITY_HEADERS = {
+    "Content-Security-Policy": CSP,
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+}
+
+
+def _https(request: Request) -> bool:
+    """HTTPS diretto o dal reverse proxy che termina il TLS. Un X-Forwarded-Proto falso in HTTP
+    rende il cookie Secure e quel browser non lo rimanda: danneggia solo chi lo manda."""
+    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    return request.url.scheme == "https" or proto == "https"
+
+
 @app.middleware("http")
 async def origin_guard(request: Request, call_next):
     """Più esterno di `auth_guard`: copre anche login, sblocco e battito. Si aggiunge al cookie
-    `SameSite=Lax`, che non ferma un altro host dello stesso sito."""
+    `SameSite=Lax`, che non ferma un altro host dello stesso sito. Mette anche gli header di
+    sicurezza su ogni risposta e, in HTTPS, Secure su ogni cookie."""
     if request.method not in SAFE_METHODS and _cross_origin(request):
-        return Response("Richiesta rifiutata: proviene da un'altra origine.", status_code=403)
-    return await call_next(request)
+        response = Response("Richiesta rifiutata: proviene da un'altra origine.", status_code=403)
+    else:
+        response = await call_next(request)
+    for k, v in SECURITY_HEADERS.items():
+        response.headers.setdefault(k, v)
+    if _https(request):
+        raw = response.raw_headers
+        for i, (k, v) in enumerate(raw):
+            if k == b"set-cookie" and b"secure" not in v.lower():
+                raw[i] = (k, v + b"; Secure")
+    return response
 
 
 @app.exception_handler(db.sqlcipher.IntegrityError)

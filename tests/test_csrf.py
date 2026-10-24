@@ -45,3 +45,29 @@ def test_login_e_battito_coperti(fresh_db):
         assert r.status_code == 403
         assert c.post("/heartbeat", headers={"Origin": "null"}).status_code == 403
         assert c.get("/login", headers={"Origin": "http://evil.example"}).status_code == 200   # GET passa
+
+
+def test_header_di_sicurezza(client):
+    """0.47.7: CSP senza risorse esterne, niente cornici, nosniff; anche sugli asset statici."""
+    for path in ("/org", "/static/js/htmx.min.js"):
+        h = client.get(path).headers
+        assert "frame-ancestors 'none'" in h["content-security-policy"]
+        assert "default-src 'self'" in h["content-security-policy"]
+        assert h["x-frame-options"] == "DENY" and h["x-content-type-options"] == "nosniff"
+        assert h["referrer-policy"] == "same-origin"
+
+
+def test_cookie_secure_solo_in_https(fresh_db):
+    from fastapi.testclient import TestClient
+
+    from app import users
+    from app.main import app
+
+    users.create("sec", "director", "password-di-prova")
+    with TestClient(app) as c:
+        r = c.post("/login", data={"username": "sec", "password": "password-di-prova"}, follow_redirects=False)
+        assert "secure" not in r.headers["set-cookie"].lower()
+    with TestClient(app) as c:
+        r = c.post("/login", data={"username": "sec", "password": "password-di-prova"},
+                   headers={"X-Forwarded-Proto": "https"}, follow_redirects=False)
+        assert r.headers["set-cookie"].rstrip().endswith("; Secure")

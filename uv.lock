@@ -537,7 +537,7 @@ wheels = [
 
 [[package]]
 name = "teamer"
-version = "0.47.6"
+version = "0.47.7"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
