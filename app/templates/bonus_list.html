@@ -16,7 +16,12 @@
       <td class="num">{{ p.total_cap | eur }}</td>
       <td class="num">{{ p.allocated | eur }}</td>
       <td class="num">{{ p.n }}</td>
-      <td><a class="btn sm ghost" href="/comp/bonus/{{ p.id }}">Apri</a></td>
+      <td style="white-space:nowrap"><a class="btn sm ghost" href="/comp/bonus/{{ p.id }}">Apri</a>
+        {% if p.status == 'chiuso' and p.deletable %}
+        <form method="post" action="/comp/bonus/{{ p.id }}/delete" class="hr-ok" style="display:inline"
+              onsubmit="return confirm('Eliminare il montepremi {{ p.period }}? È chiuso senza importi assegnati.')">
+          <button class="btn sm ghost danger">✕</button></form>
+        {% endif %}</td>
     </tr>
     {% else %}
     <tr><td colspan="6" class="muted">Nessun montepremi. Creane uno: {% if hr %}si ripartisce sui moltiplicatori di ruolo, poi si aggiusta a mano{% else %}la distribuzione parte dai pesi 9-box e poi si aggiusta a mano{% endif %}.</td></tr>

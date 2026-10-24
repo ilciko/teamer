@@ -551,8 +551,10 @@ def budget_page(request: Request):
             "SELECT pr.*, p.full_name FROM ral_proposal pr JOIN person p ON p.id=pr.person_id "
             "WHERE pr.budget_id=? AND pr.voided=0 AND pr.status IN ('bozza','proposta','approvata') "
             "ORDER BY pr.effective_date", (b["id"],))
+        n_prop = db.one("SELECT COUNT(*) AS n FROM ral_proposal WHERE budget_id=? AND voided=0", (b["id"],))["n"]
         budgets.append({**dict(b), "events": events, "members": members, "monte": monte,
                         "pending": pending, "director": ctx["directors"].get(b["owner_user_id"]),
+                        "deletable": not events and n_prop == 0,   # 0.47: senza movimenti si elimina, anche chiuso
                         **_budget_numbers(b)})
     open_budgets = [b for b in budgets if b["status"] == "aperto"]
     totals = None
@@ -603,6 +605,22 @@ def budget_create(period: str = Form(...), year: int = Form(...),
                 "INSERT INTO ral_budget_member (budget_id, person_id, ral_snapshot, included, auto_reason) "
                 "VALUES (?,?,?,?,?)", (bid, pid, ral, inc, reason))
     return RedirectResponse("/comp/budget", status_code=302)
+
+
+@router.post("/comp/budget/{bid}/delete")
+def budget_delete(bid: int):
+    """Un budget senza movimenti (nessun evento RAL imputato, nessuna proposta) si elimina, anche se
+    chiuso: la platea generata con lui se ne va. Con movimenti resta nello storico (0.47)."""
+    busy = db.one("SELECT (SELECT COUNT(*) FROM ral_event WHERE budget_id=? AND voided=0) + "
+                  "(SELECT COUNT(*) FROM ral_proposal WHERE budget_id=? AND voided=0) AS n", (bid, bid))["n"]
+    if busy == 0 and db.one("SELECT id FROM ral_budget WHERE id=?", (bid,)):
+        with db.transaction() as conn:
+            conn.execute("UPDATE ral_proposal SET budget_id=NULL WHERE budget_id=?", (bid,))   # le annullate
+            conn.execute("UPDATE ral_event SET budget_id=NULL WHERE budget_id=?", (bid,))
+            conn.execute("DELETE FROM ral_budget_member WHERE budget_id=?", (bid,))
+            conn.execute("DELETE FROM ral_budget WHERE id=?", (bid,))
+        return RedirectResponse("/comp/budget?deleted=1", status_code=302)
+    return RedirectResponse("/comp/budget?err=movimenti", status_code=302)
 
 
 @router.post("/comp/budget/{bid}/member/{mid}/toggle")
@@ -693,6 +711,7 @@ def hiring_page(request: Request):
                         "transfers_in": transfers_in,
                         "aperte": [p for p in positions if p["status"] in OPEN_POSITIONS],
                         "director": ctx["directors"].get(hb["owner_user_id"]),
+                        "deletable": not positions and not [t for t in transfers_out if not t["voided"]] and not transfers_in,
                         **_hiring_numbers(hb)})
     open_budgets = [b for b in budgets if b["status"] == "aperto"]
     totals = None
@@ -741,13 +760,18 @@ def hiring_budget_update(bid: int, period: str = Form(...), year: int = Form(...
 
 @router.post("/comp/hiring/{bid}/delete")
 def hiring_budget_delete(bid: int):
-    """Elimina un budget inserito per errore — solo se non ha posizioni."""
-    n = db.one("SELECT COUNT(*) AS n FROM hiring_position WHERE budget_id=? AND voided=0", (bid,))
-    if n["n"] == 0:
+    """Elimina un budget senza movimenti (nessuna posizione viva, nessun riporto), anche chiuso (0.47)."""
+    busy = db.one(
+        "SELECT (SELECT COUNT(*) FROM hiring_position WHERE budget_id=? AND voided=0) + "
+        "(SELECT COUNT(*) FROM hiring_transfer WHERE (from_budget_id=? AND voided=0) OR to_budget_id=?) AS n",
+        (bid, bid, bid))["n"]
+    if busy == 0:
         with db.transaction() as conn:
-            conn.execute("DELETE FROM hiring_position WHERE budget_id=?", (bid,))
+            conn.execute("DELETE FROM hiring_transfer WHERE from_budget_id=?", (bid,))   # solo annullati
+            conn.execute("DELETE FROM hiring_position WHERE budget_id=?", (bid,))        # solo annullate
             conn.execute("DELETE FROM hiring_budget WHERE id=?", (bid,))
-    return RedirectResponse("/comp/hiring", status_code=302)
+        return RedirectResponse("/comp/hiring?deleted=1", status_code=302)
+    return RedirectResponse("/comp/hiring?err=movimenti", status_code=302)
 
 
 # ---- chiusura e riporto ----
@@ -916,7 +940,9 @@ def bonus_list(request: Request):
         allocs = db.query(
             "SELECT COALESCE(SUM(final_amount),0) AS t, COUNT(*) AS n FROM bonus_allocation "
             "WHERE pool_id=? AND voided=0 AND included=1", (p["id"],))[0]
-        row = {**dict(p), "allocated": allocs["t"], "n": allocs["n"]}
+        row = {**dict(p), "allocated": allocs["t"], "n": allocs["n"],
+               "deletable": p["status"] != "chiuso" or not db.one(
+                   "SELECT 1 FROM bonus_allocation WHERE pool_id=? AND voided=0 AND (COALESCE(final_amount,0) > 0 OR COALESCE(proposed_amount,0) > 0)", (p["id"],))}
         if p["kind"] == "ruolo" and not ctx["hr"]:
             row["approved"] = _my_approval(p["id"]) is not None   # il director: la sua parte (vista sulle sue persone)
             hr_pools.append(row)
@@ -1346,11 +1372,14 @@ def bonus_exclude_rule(pool_id: int, rule: str = Form(...)):
 
 @router.post("/comp/bonus/{pool_id}/delete")
 def bonus_delete(pool_id: int):
-    """Elimina pool e allocazioni — solo se non chiuso (un chiuso va prima riaperto)."""
+    """Elimina pool e allocazioni: se non chiuso, oppure chiuso ma senza importi assegnati (0.47)."""
     pool = db.one("SELECT * FROM bonus_pool WHERE id=?", (pool_id,))
-    if pool and pool["status"] != "chiuso":
+    assegnato = db.one("SELECT COALESCE(SUM(final_amount), 0) + COALESCE(SUM(proposed_amount), 0) AS t "
+                       "FROM bonus_allocation WHERE pool_id=? AND voided=0", (pool_id,))["t"] if pool else 0
+    if pool and (pool["status"] != "chiuso" or not assegnato):
         with db.transaction() as conn:
             conn.execute("DELETE FROM bonus_allocation WHERE pool_id=?", (pool_id,))
             conn.execute("DELETE FROM bonus_pool WHERE id=?", (pool_id,))
+        db.sys.execute("DELETE FROM bonus_pool_approval WHERE pool_id=?", (pool_id,))
         return RedirectResponse("/comp/bonus", status_code=302)
     return RedirectResponse(f"/comp/bonus/{pool_id}", status_code=302)

@@ -18,6 +18,12 @@
     <span class="badge green">applicato {{ b.applicato | eur }}</span>
     <span class="badge amber">impegnato {{ b.impegnato | eur }}</span>
     <span class="badge {{ 'red' if b.residuo < 0 else 'blue' }}">residuo {{ b.residuo | eur }}</span>
+    {% if not ro_hr and b.deletable %}
+    <form method="post" action="/comp/budget/{{ b.id }}/delete" class="hr-ok"
+          onsubmit="return confirm('Eliminare il budget {{ b.period }}? Non ha movimenti: sparisce con la sua platea.')">
+      <button class="btn sm ghost danger" title="Nessun aumento imputato né proposte: si può eliminare">✕ Elimina</button>
+    </form>
+    {% endif %}
     {% if ro_hr %}
     {% elif not compact %}
     <form method="post" action="/comp/budget/{{ b.id }}/close"
@@ -113,6 +119,8 @@
 </div>
 {% endif %}
 
+{% if request.query_params.get('deleted') %}<div class="flash">Budget eliminato.</div>
+{% elif request.query_params.get('err') == 'movimenti' %}<div class="flash error">Il budget ha aumenti imputati o proposte: resta nello storico (si chiude, non si elimina).</div>{% endif %}
 {% for b in open_budgets %}{{ budget_card(b) }}{% else %}
 <div class="card"><p class="muted">Nessun budget aperto. I budget mettono un tetto agli aumenti di un periodo; gli eventi RAL vi si agganciano dall'analisi salary.</p></div>
 {% endfor %}

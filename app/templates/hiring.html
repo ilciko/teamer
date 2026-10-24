@@ -17,6 +17,12 @@
     <span class="badge green">applicato {{ b.applicato | eur }}</span>
     <span class="badge amber">impegnato {{ b.impegnato | eur }}</span>
     <span class="badge {{ 'red' if b.residuo < 0 else 'blue' }}">residuo {{ b.residuo | eur }}</span>
+    {% if not ro_hr and compact and b.deletable %}
+    <form method="post" action="/comp/hiring/{{ b.id }}/delete" class="hr-ok"
+          onsubmit="return confirm('Eliminare il budget {{ b.period }}? Non ha posizioni né riporti.')">
+      <button class="btn sm ghost danger">✕ Elimina</button>
+    </form>
+    {% endif %}
     {% if ro_hr %}
     {% elif compact %}
     <form method="post" action="/comp/hiring/{{ b.id }}/reopen" class="hr-ok">
@@ -295,6 +301,8 @@
 </div>
 {% endif %}
 
+{% if request.query_params.get('deleted') %}<div class="flash">Budget eliminato.</div>
+{% elif request.query_params.get('err') == 'movimenti' %}<div class="flash error">Il budget ha posizioni o riporti: resta nello storico.</div>{% endif %}
 {% for b in open_budgets %}{{ hiring_card(b) }}{% else %}
 <div class="card"><p class="muted">
   Nessun budget assunzioni aperto. Il budget mette un tetto alle RAL delle nuove assunzioni dell'anno;
