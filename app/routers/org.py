@@ -10,7 +10,7 @@ from app import db, perimeter, session, users
 from app.routers import hrview
 from app.services import budget as budget_svc
 from app.services import org_tree as org_svc
-from app.services import cost
+from app.services import cost, importer
 
 router = APIRouter()
 
@@ -193,13 +193,16 @@ def person_create(full_name: str = Form(...), hire_date: str = Form(None), email
                   team_id: str = Form(None), role_type: str = Form("ic"),
                   livello: str = Form(None), tipo_contratto: str = Form(None),
                   ral: str = Form(None), ref_date: str = Form(None),
-                  listino_profile_id: str = Form(None), director_id: str = Form(None)):
+                  listino_profile_id: str = Form(None), director_id: str = Form(None),
+                  birth_date: str = Form(None), notes: str = Form(None), ccnl: str = Form(None),
+                  smartwork: str = Form(None), timbratura_scheme: str = Form(None),
+                  part_time_pct: str = Form(None), weekly_hours: str = Form(None)):
     """Censimento: crea la persona e, se forniti, lo stato attuale (team, contratto, RAL).
 
-    Dalla 0.39 la parte contrattuale (livello, contratto, RAL) la gestisce HR: il form del director
-    non la mostra (il censimento iniziale, come l'import da Excel, la accetta comunque) e HR la
-    completa dalla scheda. HR sceglie il director titolare: la persona nasce intestata a lui
-    (`owner_user_id`) e, se c'è, in un suo team."""
+    Dalla 0.44 le persone nuove le censisce HR (form completo: anagrafica, director titolare, team
+    facoltativo fra i suoi, codice di listino, contratto, RAL), anche in blocco da Excel
+    (`/people/import`). Il director non ha più il form; la route accetta ancora il POST come
+    carico iniziale. La persona nasce intestata al director (`owner_user_id`)."""
     hr = hrview.is_hr()
     owner = None
     if hr:
@@ -211,20 +214,24 @@ def person_create(full_name: str = Form(...), hire_date: str = Form(None), email
     start = ref_date or hire_date or date.today().isoformat()
     with db.transaction() as conn:
         cur = conn.execute(
-            "INSERT INTO person (full_name, hire_date, email, owner_user_id) "
-            "VALUES (?,?,?, COALESCE(?, teamer_owner()))",
-            (full_name.strip(), hire_date or None, email or None, owner))
+            "INSERT INTO person (full_name, hire_date, email, birth_date, notes, owner_user_id) "
+            "VALUES (?,?,?,?,?, COALESCE(?, teamer_owner()))",
+            (full_name.strip(), hire_date or None, email or None, birth_date or None,
+             (notes or "").strip() or None, owner))
         pid = cur.lastrowid
         if team_id:
             conn.execute(
                 "INSERT INTO person_assignment (person_id, team_id, role_type, start_date, listino_profile_id) "
                 "VALUES (?,?,?,?,?)", (pid, int(team_id), role_type, start, _lp(listino_profile_id)))
-        if livello or tipo_contratto:
+        if livello or tipo_contratto or ccnl or smartwork or timbratura_scheme or part_time_pct or weekly_hours:
             conn.execute(
-                "INSERT INTO employment (person_id, livello, tipo_contratto, ccnl, start_date) "
-                "VALUES (?,?,?,?,?)",
+                "INSERT INTO employment (person_id, livello, tipo_contratto, ccnl, smartwork, timbratura_scheme, "
+                "part_time_pct, weekly_hours, start_date) VALUES (?,?,?,?,?,?,?,?,?)",
                 (pid, livello or None, tipo_contratto or None,
-                 db.get_meta("default_ccnl") or None, start))
+                 (ccnl or "").strip() or db.get_meta("default_ccnl") or None,
+                 smartwork or None, timbratura_scheme or None,
+                 float(part_time_pct) if part_time_pct else 100.0,
+                 float(weekly_hours) if weekly_hours else None, start))
         if ral:
             # chi è assunto dopo il censimento parte dalla sua assunzione
             ral_start = max(start, hire_date) if hire_date else start
@@ -238,6 +245,42 @@ def person_create(full_name: str = Form(...), hire_date: str = Form(None), email
     elif team_id:
         return _verify_reports(f"/people/{pid}", "cambiamento", start)
     return RedirectResponse(f"/people/{pid}", status_code=302)
+
+
+# ---- import da Excel (HR, 0.44) ----
+
+@router.get("/people/import")
+def import_page(request: Request):
+    if not hrview.is_hr():
+        raise HTTPException(403)
+    return _templates().TemplateResponse(request, "people_import.html", {})
+
+
+@router.get("/people/import/template")
+def import_template():
+    if not hrview.is_hr():
+        raise HTTPException(403)
+    return Response(
+        content=importer.build_template(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="teamer-import.xlsx"'})
+
+
+@router.post("/people/import")
+async def import_run(request: Request, file: UploadFile, ref_date: str = Form(...)):
+    """Censimento in blocco: dopo l'import i riporti si derivano e i director ricaricano il perimetro."""
+    if not hrview.is_hr():
+        raise HTTPException(403)
+    content = await file.read()
+    try:
+        result = importer.import_workbook(content, ref_date)
+    except Exception as exc:  # file non leggibile
+        result = {"created": [], "skipped": [], "errors": [(0, f"file non leggibile: {exc}")], "with_team": []}
+    for pid in result.get("with_team", []):
+        _derive_manager(pid)
+    if result["created"]:
+        perimeter.bump()
+    return _templates().TemplateResponse(request, "_import_result.html", {"r": result})
 
 
 @router.get("/people/{pid}")

@@ -39,7 +39,7 @@ HR_WRITE_OK = ("/lock", "/account", "/public-mode", "/notes", "/actions", "/hr/a
 # ...ma non elimina persone né decide la sostituzione di chi cessa (è del director)
 HR_WRITE_DENIED = re.compile(r"^/people/\d+/(delete|replacement)(/|$)")
 # la parte contrattuale la scrive solo HR (0.39): il director la legge
-CONTRACT_POST = re.compile(r"^/people/\d+/(ral|benefit|incentive|employment|cessation|director)(/|$)")
+CONTRACT_POST = re.compile(r"^/people/(\d+/(ral|benefit|incentive|employment|cessation|director)(/|$)|import(/|$))")
 
 
 def client_ip(request: Request) -> str | None:

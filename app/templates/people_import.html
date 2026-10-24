@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Import persone{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Import persone da Excel</h1><span class="badge">censimento</span><div class="spacer"></div><a class="btn ghost sm" href="/people">← Persone</a></div>
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">Come funziona</div>
+    <p class="muted small" style="margin-bottom:10px;line-height:1.6">
+      Scarica il template, compilalo (una riga per persona: <strong>nome</strong> e <strong>director</strong> obbligatori, il resto facoltativo) e caricalo qui.
+      L'import crea lo <strong>stato attuale</strong> con tutti i campi della persona: anagrafica, director titolare, team (fra i suoi, creato se manca) con ruolo e codice di listino,
+      situazione contrattuale completa (livello, CCNL, contratto e scadenza, smart working, timbratura, part-time, ore) e RAL con tipo <em>censimento</em>.
+      Senza team la persona è del director ma non è in organigramma: la assegna lui dalla scheda. Il riporto diretto si calcola da team e ruolo.
+      Le persone già presenti vengono saltate, quindi puoi ricaricare lo stesso file per aggiungere solo le righe nuove.
+    </p>
+    <div class="actions" style="margin-bottom:14px">
+      <a class="btn ghost sm" href="/people/import/template">↓ Scarica template</a>
+    </div>
+    <form hx-post="/people/import" hx-target="#import-result" enctype="multipart/form-data" class="hr-ok">
+      <div class="frow">
+        <div><label class="fld">File compilato</label><input type="file" name="file" accept=".xlsx" required></div>
+        <div><label class="fld">Data di riferimento censimento</label><input type="date" name="ref_date" value="{{ today() }}" required></div>
+      </div>
+      <div class="actions"><button class="btn">Importa →</button></div>
+    </form>
+  </div>
+  <div id="import-result"></div>
+</div>
+{% endblock %}

@@ -1,15 +1,15 @@
 """Configurazione del director: soglie, 9-box (questionario, aggiustamenti, pesi premio),
-moltiplicatori premio, import.
+moltiplicatori premio.
 
 Liste valori, catalogo benefit, CCNL e listino (0.41) sono aziendali (`app/routers/company.py`,
 di HR); sicurezza, backup e aggiornamenti sono del site admin (`app/routers/admin.py`)."""
 import json
 
-from fastapi import APIRouter, Form, Request, UploadFile
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
 
 from app import db
-from app.services import cost, importer, ninebox_calc
+from app.services import cost, ninebox_calc
 
 router = APIRouter()
 
@@ -194,25 +194,3 @@ async def ninebox_model_save(request: Request):
                                              _context("ninebox", draft=model, errors=errors))
     db.execute("UPDATE evaluation_model SET config=? WHERE id=?", (json.dumps(model, ensure_ascii=False), mid))
     return RedirectResponse("/settings?tab=ninebox&saved=1", status_code=302)
-
-
-# ---- import excel ----
-
-@router.get("/settings/import/template")
-def import_template():
-    return Response(
-        content=importer.build_template(),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="teamer-import.xlsx"'})
-
-
-@router.post("/settings/import")
-async def import_run(request: Request, file: UploadFile, ref_date: str = Form(...)):
-    from app.main import templates
-
-    content = await file.read()
-    try:
-        result = importer.import_workbook(content, ref_date)
-    except Exception as exc:
-        result = {"created": [], "skipped": [], "errors": [(0, f"file non leggibile: {exc}")]}
-    return templates.TemplateResponse(request, "_import_result.html", {"r": result})

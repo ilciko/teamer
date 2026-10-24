@@ -1,4 +1,10 @@
-"""Import persone da Excel: censimento dello stato attuale (team, contratto, RAL)."""
+"""Import persone da Excel (HR, 0.44): censimento dello stato attuale, con tutti i campi della persona.
+
+Ogni riga nasce intestata al **director** indicato (`person.owner_user_id`); il team è facoltativo e,
+se c'è, è un team di quel director (creato se manca). Contratto, RAL e codice di listino sono i campi
+che HR registra dalla scheda; qui arrivano in blocco. Il riporto diretto non si importa: si calcola da
+team e ruolo (lo fa la route dopo l'import).
+"""
 import io
 from datetime import date, datetime
 
@@ -8,19 +14,21 @@ from app import db
 
 COLUMNS = [
     ("nome", "Nome e cognome (obbligatorio)"),
+    ("director", "Director titolare: nome utente o nome visualizzato (obbligatorio)"),
     ("email", "Email"),
     ("data_assunzione", "Data assunzione (GG/MM/AAAA)"),
     ("data_nascita", "Data nascita (GG/MM/AAAA)"),
-    ("team", "Team (creato se non esiste)"),
-    ("ruolo", "Ruolo: ic / tl / mgr / sr"),
-    ("manager", "Manager (nome e cognome)"),
-    ("livello", "Livello (numero)"),
-    ("ccnl", "CCNL"),
+    ("team", "Team del director (facoltativo; creato se non esiste)"),
+    ("ruolo", "Ruolo: ic / tl / mgr / sr (con il team)"),
+    ("codice_listino", "Codice di listino (Azienda → Listino)"),
+    ("livello", "Livello (codice della lista aziendale; uno nuovo viene aggiunto)"),
+    ("ccnl", "CCNL (vuoto = predefinito aziendale)"),
     ("contratto", "Contratto: indeterminato / determinato / apprendistato / collaborazione"),
     ("scadenza_contratto", "Scadenza contratto se a termine (GG/MM/AAAA)"),
     ("smartwork", "Smart working: no / parziale / full"),
     ("timbratura", "Timbratura: esente / 4_timbrate / solo_presenza"),
     ("part_time_pct", "Part-time % (100 = full time)"),
+    ("ore_settimanali", "Ore settimanali"),
     ("ral", "RAL attuale €"),
     ("note", "Note"),
 ]
@@ -41,9 +49,10 @@ def build_template() -> bytes:
     for key, desc in COLUMNS:
         info.append([key, desc])
     info.append([])
-    info.append(["Note", "Una riga per persona. Solo 'nome' è obbligatorio; le altre colonne possono restare vuote."])
+    info.append(["Note", "Una riga per persona. Obbligatori 'nome' e 'director'; le altre colonne possono restare vuote."])
     info.append(["", "Le date valgono sia come data Excel sia come testo GG/MM/AAAA o AAAA-MM-GG."])
-    info.append(["", "L'import è un censimento: crea lo stato attuale (assegnazione, contratto, RAL con tipo 'censimento')."])
+    info.append(["", "L'import è un censimento: crea lo stato attuale (assegnazione se c'è il team, contratto, RAL con tipo 'censimento')."])
+    info.append(["", "Senza team la persona è del director ma non è ancora in organigramma: il director la assegna dalla scheda."])
     info.append(["", "Persone già presenti con lo stesso nome vengono saltate."])
     buf = io.BytesIO()
     wb.save(buf)
@@ -71,6 +80,12 @@ def _norm(v) -> str | None:
     return s or None
 
 
+def _num(v) -> float | None:
+    if v in (None, ""):
+        return None
+    return float(str(v).strip().replace(",", "."))
+
+
 def _ensure_lookup(category: str, code: str) -> None:
     """Un livello nuovo dal foglio entra nella lista aziendale (scritta dalla connessione di sistema)."""
     if not db.one("SELECT 1 FROM lookup WHERE category=? AND code=?", (category, code)):
@@ -79,11 +94,22 @@ def _ensure_lookup(category: str, code: str) -> None:
             (category, code, code))
 
 
+def directors() -> dict[str, int]:
+    """{nome utente o nome visualizzato (minuscolo): id} dei director attivi."""
+    out = {}
+    for u in db.sys.query("SELECT id, username, display_name FROM app_user WHERE role='director' AND active=1"):
+        out[u["username"].lower()] = u["id"]
+        if u["display_name"]:
+            out[u["display_name"].strip().lower()] = u["id"]
+    return out
+
+
 def import_workbook(content: bytes, ref_date: str) -> dict:
-    """Importa il foglio 'Persone'. Ritorna {created, skipped, errors: [(riga, msg)]}."""
+    """Importa il foglio 'Persone'. Ritorna {created, skipped, errors: [(riga, msg)], with_team: [id]}."""
     wb = load_workbook(io.BytesIO(content), data_only=True)
     ws = wb["Persone"] if "Persone" in wb.sheetnames else wb.active
     headers = [(_norm(c.value) or "").lower() for c in ws[1]]
+    dirs = directors()
 
     def col(row, key):
         try:
@@ -91,9 +117,7 @@ def import_workbook(content: bytes, ref_date: str) -> dict:
         except ValueError:
             return None
 
-    created, skipped, errors = [], [], []
-    pending_managers = []  # (person_id, manager_name)
-
+    created, skipped, errors, with_team = [], [], [], []
     for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         name = _norm(col(row, "nome"))
         if not name:
@@ -102,65 +126,65 @@ def import_workbook(content: bytes, ref_date: str) -> dict:
             if db.one("SELECT id FROM person WHERE lower(full_name)=lower(?)", (name,)):
                 skipped.append(name)
                 continue
+            d = (_norm(col(row, "director")) or "").lower()
+            if d not in dirs:
+                raise ValueError(f"director {d!r} inesistente o non attivo" if d else "director mancante")
+            owner = dirs[d]
             hire = _parse_date(col(row, "data_assunzione"))
             birth = _parse_date(col(row, "data_nascita"))
-            pid = db.execute(
-                "INSERT INTO person (full_name, email, hire_date, birth_date, notes) VALUES (?,?,?,?,?)",
-                (name, _norm(col(row, "email")), hire, birth, _norm(col(row, "note"))))
-
             start = hire or ref_date
             team_name = _norm(col(row, "team"))
-            if team_name:
-                # mai in un team archiviato: se c'è solo quello, se ne crea uno nuovo
-                t = db.one("SELECT id FROM team WHERE lower(name)=lower(?) AND archived_at IS NULL",
-                           (team_name,))
-                team_id = t["id"] if t else db.execute(
-                    "INSERT INTO team (name) VALUES (?)", (team_name,))
-                role = (_norm(col(row, "ruolo")) or "ic").lower()
-                db.execute(
-                    "INSERT INTO person_assignment (person_id, team_id, role_type, start_date) "
-                    "VALUES (?,?,?,?)", (pid, team_id, role, start))
-                mgr = _norm(col(row, "manager"))
-                if mgr:
-                    pending_managers.append((pid, mgr))
-
+            lp = None
+            code = _norm(col(row, "codice_listino"))
+            if team_name and code:
+                row_lp = db.one("SELECT id FROM listino_profile WHERE upper(code)=upper(?)", (code,))
+                if not row_lp:
+                    raise ValueError(f"codice di listino {code!r} inesistente (Azienda → Listino)")
+                lp = row_lp["id"]
             livello = _norm(col(row, "livello"))
-            if livello:
-                if livello.endswith(".0"):
-                    livello = livello[:-2]
-                _ensure_lookup("livello", livello)
+            if livello and livello.endswith(".0"):
+                livello = livello[:-2]
             contratto = (_norm(col(row, "contratto")) or "").lower() or None
-            if any([livello, contratto, _norm(col(row, "ccnl")), _norm(col(row, "smartwork"))]):
-                pt = col(row, "part_time_pct")
-                ccnl = _norm(col(row, "ccnl")) or db.get_meta("default_ccnl") or None
-                db.execute(
-                    "INSERT INTO employment (person_id, livello, ccnl, tipo_contratto, smartwork, "
-                    "timbratura_scheme, part_time_pct, start_date, end_date) VALUES (?,?,?,?,?,?,?,?,?)",
-                    (pid, livello, ccnl, contratto,
-                     (_norm(col(row, "smartwork")) or "").lower() or None,
-                     (_norm(col(row, "timbratura")) or "").lower() or None,
-                     float(pt) if pt not in (None, "") else 100.0,
-                     start, _parse_date(col(row, "scadenza_contratto"))))
-
-            ral = col(row, "ral")
-            if ral not in (None, ""):
-                # chi è assunto dopo il censimento parte dalla sua assunzione,
-                # non dalla data di riferimento dell'import
-                db.execute(
-                    "INSERT INTO ral_event (person_id, effective_date, amount, delta, change_type, reason) "
-                    "VALUES (?,?,?,0,'censimento','import Excel')",
-                    (pid, max(hire, ref_date) if hire else ref_date, float(ral)))
+            pt = _num(col(row, "part_time_pct"))
+            ore = _num(col(row, "ore_settimanali"))
+            scadenza = _parse_date(col(row, "scadenza_contratto"))
+            ral = _num(col(row, "ral"))
+            team_id = None
+            if team_name:
+                # un team del director (mai archiviato); se manca si crea, suo
+                t = db.one("SELECT id FROM team WHERE lower(name)=lower(?) AND archived_at IS NULL AND owner_user_id=?",
+                           (team_name, owner))
+                team_id = t["id"] if t else db.sys.execute(
+                    "INSERT INTO team (name, owner_user_id) VALUES (?,?)", (team_name, owner))
+            if livello:
+                _ensure_lookup("livello", livello)
+            # la riga è tutta o niente: una riga sbagliata non lascia una persona a metà
+            with db.transaction() as conn:
+                pid = conn.execute(
+                    "INSERT INTO person (full_name, email, hire_date, birth_date, notes, owner_user_id) VALUES (?,?,?,?,?,?)",
+                    (name, _norm(col(row, "email")), hire, birth, _norm(col(row, "note")), owner)).lastrowid
+                if team_id:
+                    conn.execute(
+                        "INSERT INTO person_assignment (person_id, team_id, role_type, start_date, listino_profile_id) "
+                        "VALUES (?,?,?,?,?)", (pid, team_id, (_norm(col(row, "ruolo")) or "ic").lower(), start, lp))
+                if any([livello, contratto, _norm(col(row, "ccnl")), _norm(col(row, "smartwork")),
+                        _norm(col(row, "timbratura")), pt, ore]):
+                    conn.execute(
+                        "INSERT INTO employment (person_id, livello, ccnl, tipo_contratto, smartwork, "
+                        "timbratura_scheme, part_time_pct, weekly_hours, start_date, end_date) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        (pid, livello, _norm(col(row, "ccnl")) or db.get_meta("default_ccnl") or None, contratto,
+                         (_norm(col(row, "smartwork")) or "").lower() or None,
+                         (_norm(col(row, "timbratura")) or "").lower() or None,
+                         pt if pt is not None else 100.0, ore, start, scadenza))
+                if ral is not None:
+                    # chi è assunto dopo il censimento parte dalla sua assunzione, non dalla data dell'import
+                    conn.execute(
+                        "INSERT INTO ral_event (person_id, effective_date, amount, delta, change_type, reason) "
+                        "VALUES (?,?,?,0,'censimento','import Excel')",
+                        (pid, max(hire, ref_date) if hire else ref_date, ral))
+            if team_id:
+                with_team.append(pid)
             created.append(name)
         except Exception as exc:  # riga malformata: si salta, le altre proseguono
             errors.append((i, f"{name}: {exc}"))
-
-    for pid, mgr_name in pending_managers:
-        m = db.one("SELECT id FROM person WHERE lower(full_name)=lower(?)", (mgr_name,))
-        if m:
-            db.execute(
-                "UPDATE person_assignment SET manager_person_id=? "
-                "WHERE person_id=? AND end_date IS NULL AND voided=0", (m["id"], pid))
-        else:
-            errors.append((0, f"manager '{mgr_name}' non trovato (persona id {pid}): riporto non impostato"))
-
-    return {"created": created, "skipped": skipped, "errors": errors}
+    return {"created": created, "skipped": skipped, "errors": errors, "with_team": with_team}

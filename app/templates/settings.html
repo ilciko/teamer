@@ -8,7 +8,6 @@
     <a class="btn sm {{ 'ghost' if tab != 'general' }}" href="/settings?tab=general">Generale</a>
     <a class="btn sm {{ 'ghost' if tab != 'ninebox' }}" href="/settings?tab=ninebox">9-box</a>
     <a class="btn sm {{ 'ghost' if tab != 'premi' }}" href="/settings?tab=premi">Premi</a>
-    <a class="btn sm {{ 'ghost' if tab != 'import' }}" href="/settings?tab=import">Import</a>
   </div>
 </div>
 
@@ -164,30 +163,6 @@
     </div>
     <div class="actions"><button class="btn sm">Salva moltiplicatori</button></div>
   </form>
-</div>
-
-{% elif tab == 'import' %}
-<div class="grid2">
-  <div class="card">
-    <div class="card-title">Import persone da Excel (censimento)</div>
-    <p class="muted small" style="margin-bottom:10px;line-height:1.6">
-      Scarica il template, compilalo (una riga per persona, solo <strong>nome</strong> obbligatorio) e caricalo qui.
-      L'import crea lo <strong>stato attuale</strong>: anagrafica, team (creati se mancanti), assegnazione con manager,
-      situazione contrattuale e RAL con tipo <em>censimento</em>. Le persone già presenti vengono saltate,
-      quindi puoi ricaricare lo stesso file per aggiungere solo le righe nuove.
-    </p>
-    <div class="actions" style="margin-bottom:14px">
-      <a class="btn ghost sm" href="/settings/import/template">↓ Scarica template</a>
-    </div>
-    <form hx-post="/settings/import" hx-target="#import-result" enctype="multipart/form-data">
-      <div class="frow">
-        <div><label class="fld">File compilato</label><input type="file" name="file" accept=".xlsx" required></div>
-        <div><label class="fld">Data di riferimento censimento</label><input type="date" name="ref_date" value="{{ today() }}" required></div>
-      </div>
-      <div class="actions"><button class="btn">Importa →</button></div>
-    </form>
-  </div>
-  <div id="import-result"></div>
 </div>
 
 {% endif %}

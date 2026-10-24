@@ -50,7 +50,7 @@ def test_censimento_director_senza_contratto_e_hr_con_director(client, client2, 
     t1, t2, ids, coo, dir2 = _seed(client, client2)
     html = client.get("/people").text
     assert 'name="ral"' not in html and 'name="livello"' not in html and 'name="director_id"' not in html
-    assert "li registra HR" in html
+    assert "le censisce HR" in html
     # HR: senza director → 403; con director e team di un altro director → 403; giusto → persona sua
     assert hr_client.post("/people", data={"full_name": "X"}).status_code == 403
     assert hr_client.post("/people", data={"full_name": "X", "director_id": dir2, "team_id": t1}).status_code == 403

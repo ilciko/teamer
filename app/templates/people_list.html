@@ -60,37 +60,39 @@
   </table>
 </div>
 
-<div class="card" style="max-width:680px">
-  <div class="card-title">Nuova persona — censimento dello stato attuale</div>
+{% if hr %}
+<div class="card" style="max-width:860px">
+  <div class="page-head" style="margin-bottom:8px"><div class="card-title" style="margin:0">Nuova persona — censimento dello stato attuale</div><div class="spacer"></div><a class="btn ghost sm" href="/people/import">Import da Excel →</a></div>
   <form method="post" action="/people" class="hr-ok" id="newperson">
     <div class="frow">
       <div><label class="fld">Nome e cognome</label><input type="text" name="full_name" required></div>
-      <div><label class="fld">Data assunzione</label><input type="date" name="hire_date"></div>
+      <div><label class="fld">Email</label><input type="email" name="email"></div>
     </div>
-    <label class="fld">Email</label><input type="email" name="email">
     <div class="frow">
-      {% if hr %}
-      {# HR (0.39) sceglie il director titolare: la persona nasce sua, e il team fra i suoi #}
+      <div><label class="fld">Data assunzione</label><input type="date" name="hire_date"></div>
+      <div><label class="fld">Data di nascita</label><input type="date" name="birth_date"></div>
+      <div><label class="fld">Data di riferimento censimento</label><input type="date" name="ref_date" value="{{ today() }}"></div>
+    </div>
+    <div class="muted3 small" style="margin:10px 0 2px">Organizzazione</div>
+    <div class="frow">
+      {# HR sceglie il director titolare: la persona nasce sua, e il team fra i suoi (facoltativo) #}
       <div><label class="fld">Director</label>
         <select name="director_id" id="np-director" required>
           <option value="">— scegli —</option>
           {% for o in dir_opts %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}
         </select></div>
-      {% endif %}
-      <div><label class="fld">Team</label>
-        <select name="team_id" id="np-team"><option value="">— dopo —</option>
+      <div><label class="fld">Team (facoltativo)</label>
+        <select name="team_id" id="np-team"><option value="">— lo assegna il director —</option>
           {% for t in teams %}<option value="{{ t.id }}" data-director="{{ t.owner_user_id or '' }}">{{ t.name }}</option>{% endfor %}
         </select></div>
       <div><label class="fld">Ruolo</label>
         <select name="role_type">{% for l in lookups('role_type') %}<option value="{{ l.code }}">{{ l.label }}</option>{% endfor %}</select></div>
-      {% if not hr %}
       <div><label class="fld">Codice listino</label>
         <select name="listino_profile_id"><option value="">— nessuno —</option>
           {% for lp in listino_profiles %}<option value="{{ lp.id }}">{{ lp.code }} · {{ lp.description }}</option>{% endfor %}
         </select></div>
-      {% endif %}
     </div>
-    {% if hr %}
+    <div class="muted3 small" style="margin:10px 0 2px">Contratto</div>
     <div class="frow">
       <div><label class="fld">Livello</label>
         <select name="livello"><option value="">—</option>
@@ -100,18 +102,25 @@
         <select name="tipo_contratto"><option value="">—</option>
           {% for l in lookups('tipo_contratto') %}<option value="{{ l.code }}">{{ l.label }}</option>{% endfor %}
         </select></div>
+      <div><label class="fld">CCNL</label><input type="text" name="ccnl" value="{{ meta('default_ccnl','') }}"></div>
+    </div>
+    <div class="frow">
+      <div><label class="fld">Smart working</label>
+        <select name="smartwork"><option value="">—</option>{% for l in lookups('smartwork') %}<option value="{{ l.code }}">{{ l.label }}</option>{% endfor %}</select></div>
+      <div><label class="fld">Timbratura</label>
+        <select name="timbratura_scheme"><option value="">—</option>{% for l in lookups('timbratura') %}<option value="{{ l.code }}">{{ l.label }}</option>{% endfor %}</select></div>
+      <div><label class="fld">Part-time %</label><input type="number" name="part_time_pct" value="100" step="5" min="0" max="100"></div>
+      <div><label class="fld">Ore settimanali</label><input type="number" name="weekly_hours" step="0.5" min="0"></div>
       {% if not public() %}<div><label class="fld">RAL attuale €</label><input type="number" name="ral" step="0.01" min="0"></div>{% endif %}
     </div>
-    {% endif %}
-    <label class="fld">Data di riferimento censimento</label>
-    <input type="date" name="ref_date" value="{{ today() }}">
-    <p class="muted3 small" style="margin-top:6px">
-      {% if hr %}I campi oltre a nome e director sono opzionali: quello che compili diventa lo stato attuale (RAL registrata come «censimento iniziale»).
-      {% else %}I campi oltre al nome sono opzionali. Contratto e RAL li registra HR dalla scheda. Per molte persone in un colpo solo: <a href="/settings?tab=import">Import da Excel</a>.{% endif %}
-    </p>
+    <label class="fld">Note</label><textarea name="notes" rows="2"></textarea>
+    <p class="muted3 small" style="margin-top:6px">Obbligatori nome e director; il resto diventa lo stato attuale (RAL registrata come «censimento iniziale»). Senza team la persona è del director ma non è in organigramma: la assegna lui dalla scheda.</p>
     <div class="actions"><button class="btn">Censisci →</button></div>
   </form>
 </div>
+{% else %}
+<p class="muted small" style="margin-top:4px">Le persone nuove le censisce HR (anche in blocco da Excel); tu le trovi qui e le assegni ai tuoi team dalla scheda.</p>
+{% endif %}
 {% if hr %}
 <dialog id="mv-dialog" style="border:0.5px solid var(--border);border-radius:var(--radius);padding:18px 20px;max-width:440px">
   <form method="post" action="" class="hr-ok" id="mv-form">

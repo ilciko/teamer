@@ -50,7 +50,7 @@ Ogni feature viene rilasciata subito: bump `version` in `pyproject.toml` → `uv
 
 **Layout applicativo**:
 - `app/routers/*` — route + query SQL inline; ogni router recupera i template via `from app.main import templates` (import tardivo per evitare cicli).
-- `app/services/*` — logica di calcolo pura e testabile (ninebox_calc, goal_score, budget, cost, trends, importer, hr_report): i test unitari vivono qui, i router restano sottili.
+- `app/services/*` — logica di calcolo pura e testabile (ninebox_calc, goal_score, budget, cost, trends, importer, hr_report): i test unitari vivono qui, i router restano sottili. L'import da Excel (`importer`, `/people/import`) è di HR (0.44): censisce con tutti i campi della persona e il director titolare; il director non censisce più (form e tab Import rimossi, la POST `/people` resta accettata come carico iniziale).
 - `app/templates/*` — Jinja2; i frammenti htmx hanno prefisso `_` (es. `_salary_sim.html`). Filtri custom: `|eur`, `|dt` (formato it-IT), globals `lookups()`, `lookup_label()`, `meta()`, `today()`.
 - Pattern htmx: il server ricalcola e restituisce un frammento (`hx-post` + `hx-target`). **Trappola nota**: mai mettere pulsanti di submit dentro un frammento rigenerato da htmx — lo swap può distruggere il bottone prima che il click arrivi (già successo: il submit va statico, fuori dal target).
 - `tokens.css` stila solo gli input con `type` esplicito (`input[type=text]`, …): un `<input>` senza `type` esce con lo stile del browser.

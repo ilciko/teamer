@@ -65,7 +65,7 @@ def test_dashboard_porta_all_organigramma_e_post_bloccati(client):
     r = client.get("/", follow_redirects=False)
     assert r.status_code == 302 and r.headers["location"] == "/org"
     for path in [f"/people/{pid}/ral", f"/people/{pid}/benefit", f"/people/{pid}/incentive",
-                 f"/people/{pid}/attachment", "/settings/import", "/notes", "/comp/salary/simulate"]:
+                 f"/people/{pid}/attachment", "/people/import", "/notes", "/comp/salary/simulate"]:
         assert client.post(path, data={}).status_code == 403, path
     assert client.get(f"/people/{pid}/replacement", follow_redirects=False).status_code == 403
     assert client.get("/comp/salary", headers={"HX-Request": "true"}).status_code == 403
